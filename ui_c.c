@@ -122,11 +122,15 @@ CAMLprim value ui_end(value unit) {
 
 
 
-static int check_size() {
+CAMLprim value ui_checksize(value toosmall, value rows, value cols) {
+  CAMLparam3(toosmall, rows, cols);
   getmaxyx(stdscr, winrows, wincols);
+  Store_field(rows, 0, Val_int(winrows));
+  Store_field(cols, 0, Val_int(wincols));
   // TODO: check for minimum size and display warning
-  return 0;
+  CAMLreturn(Val_unit);
 }
+
 
 
 CAMLprim value ui_global(value title, value tabs) {
@@ -135,9 +139,6 @@ CAMLprim value ui_global(value title, value tabs) {
   int i = 0;
 
   erase();
-  if(check_size())
-    CAMLreturn(Val_true);
-
   // first line
   attron(A_REVERSE);
   mvhline(0, 0, ' ', wincols);
@@ -166,16 +167,16 @@ CAMLprim value ui_global(value title, value tabs) {
 
 
 
-CAMLprim value ui_tab_main(value log, value last, value scrup) {
-  CAMLparam3(log, last, scrup);
+CAMLprim value ui_tab_main(value log, value lastvisible) {
+  CAMLparam2(log, lastvisible);
 
   int backlog = Wosize_val(log)-1;
-  int top = winrows - 4 + Long_val(scrup);;
-  int cur = Long_val(last);
+  int top = winrows - 4;
+  int cur = Long_val(lastvisible);
   short lines[51]; // assumes we can't have more than 50 lines per log item
   lines[0] = 0;
   while(top > 0) {
-    char *str = String_val(Field(log, cur));
+    char *str = String_val(Field(log, cur & backlog));
     int curline = 1, curlinecols = 0, i = -1,
         len = strlen(str);
     wchar_t *buffer = malloc(sizeof(wchar_t)*len);

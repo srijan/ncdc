@@ -7,27 +7,109 @@
 #include <locale.h>
 #include <caml/mlvalues.h>
 #include <caml/memory.h>
+#include <caml/alloc.h>
 #include <caml/fail.h>
 
 // acually the wchar_t variant, but the name and location of this one seems to
 // vary a lot among systems. On Arch linux, curses.h includes everything.
 #include <curses.h>
 
+// ui.ml:type input_t
+#define INPT_KEY  0
+#define INPT_CTRL 1
+#define INPT_ESC  2
+#define INPT_CHAR 3
 
 int wincols, winrows;
+
+
+CAMLprim value ui_getinput(value unit) {
+  CAMLparam1(unit);
+  CAMLlocal4(head, k, b, tail);
+
+  head = Val_emptylist;
+#define PUSHLIST(t, v) do {\
+    b = caml_alloc(1, (t));\
+    Store_field(b, 0, (v));\
+    k = caml_alloc(2, 0);\
+    Store_field(k, 0, b);\
+    Store_field(k, 1, Val_emptylist);\
+    if(head == Val_emptylist) head = k;\
+    else Store_field(tail, 1, k);\
+    tail = k;\
+  } while(0)
+
+  /* Mapping from get_wch() to input_t:
+   *  KEY_CODE_YES -> Key char_encoded
+   *  KEY_CODE_NO:
+   *    char <= 31 || char == 127 -> Ctrl char
+   *    !'^['                     -> Char char_encoded
+   *    ('^[', !)                 -> Esc ""
+   *    ('^[', !Char)             -> ignore both characters (1)
+   *    ('^[', Char && '[')       -> ignore both characters and the character after that (2)
+   *    ('^[', Char && !'[')      -> Esc next_char_encoded
+   *
+   * 1. this is something like ctrl+alt+X, which we won't use
+   * 2. these codes indicate a 'Key' that somehow wasn't captured with
+   *    KEY_CODE_YES. We won't attempt to interpret these ourselves.
+   */
+
+  int r;
+  wint_t c;
+  int lastesc = 0, curignore = 0;
+  char encoded[10]; // should be MB_CUR_MAX+1, but that's not known at compile time
+  doupdate(); // WHY!? http://www.webservertalk.com/archive107-2005-1-896232.html
+  while((r = get_wch(&c)) != ERR) {
+    if(curignore) {
+      curignore = 0;
+      continue;
+    }
+    int type = r == KEY_CODE_YES ? INPT_KEY : c == 27 ? INPT_ESC : c <= 31 || c == 127 ? INPT_CTRL : INPT_CHAR;
+    if(type == INPT_CHAR) {
+      if((r = wctomb(encoded, c)) < 0)
+        failwith("ui_getinput: Cannot encode character");
+      encoded[r] = 0;
+    }
+    if(lastesc) {
+      lastesc = 0;
+      if(type != INPT_CHAR)
+        continue;
+      if(c == '[') {
+        curignore = 0;
+        continue;
+      }
+      PUSHLIST(INPT_ESC, caml_copy_string(encoded));
+      continue;
+    }
+    if(type == INPT_ESC) {
+      lastesc = 1;
+      continue;
+    }
+    if(type == INPT_KEY || type == INPT_CTRL)
+      PUSHLIST(type, Val_int(c));
+    if(type == INPT_CHAR)
+      PUSHLIST(type, caml_copy_string(encoded));
+  }
+  if(lastesc)
+    PUSHLIST(INPT_ESC, caml_copy_string(""));
+
+  CAMLreturn(head);
+}
+
 
 
 CAMLprim value ui_init(value unit) {
   CAMLparam1(unit); 
   setlocale(LC_ALL, "");
   initscr();
-  cbreak();
+  raw();
   noecho();
   curs_set(0);
   keypad(stdscr, 1);
   nodelay(stdscr, 1);
   CAMLreturn(Val_unit);
 }
+
 
 
 CAMLprim value ui_end(value unit) {
@@ -37,6 +119,7 @@ CAMLprim value ui_end(value unit) {
   endwin();
   CAMLreturn(Val_unit);
 }
+
 
 
 static int check_size() {
@@ -80,6 +163,7 @@ CAMLprim value ui_global(value title, value tabs) {
 
   CAMLreturn(Val_unit);
 }
+
 
 
 CAMLprim value ui_tab_main(value log, value last, value scrup) {

@@ -1,5 +1,13 @@
 
+type input_t = Key of int | Ctrl of char | Esc of string | Char of string
 
+
+(* global variables to signal the mainloop to do something *)
+let do_redraw = ref true
+let do_quit = ref false
+
+
+external ui_getinput : unit -> input_t list = "ui_getinput"
 external ui_init : unit -> unit = "ui_init"
 external ui_end : unit -> unit = "ui_end"
 external ui_global : string -> (string * bool) list -> bool = "ui_global"
@@ -45,13 +53,20 @@ class global =
   let maintab = new main in
 object(self)
   val mutable tabs = ([ maintab ] : tab list)
-  val mutable seltab = ref (maintab : tab)
+  val mutable seltab = (maintab : tab)
 
   method draw =
+    do_redraw := false;
     (* convert tab list into something easy to work with in C *)
     let t = List.fold_left (fun p tab ->
-      (tab#getName, tab = !seltab) :: p) [] tabs in
+      (tab#getName, tab = seltab) :: p) [] tabs in
     (* call c function and draw tab if the screen is large enough *)
-    if not (ui_global !seltab#getTitle t) then !seltab#draw
+    if not (ui_global seltab#getTitle t) then seltab#draw
+
+  method handleInput t = match t with
+    | Key 0o632 -> do_redraw := true (* screen resize *)
+    | Ctrl '\x03' -> do_quit := true (* ctrl+c *)
+    | _ -> ()
+
 end
 

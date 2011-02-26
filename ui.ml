@@ -2,8 +2,9 @@
 type input_t = Key of int | Ctrl of char | Esc of string | Char of string
 
 
-(* global variable to signal the mainloop to quit *)
+(* global variable to signal the mainloop to do something *)
 let do_quit = ref false
+let do_redraw = ref false
 
 (* other useful globals *)
 let win_toosmall = ref false
@@ -29,7 +30,7 @@ external ui_textinput_key : input_t -> string ref -> int ref -> bool = "ui_texti
 external ui_textinput_draw : (int * int * int) -> string -> int -> unit = "ui_textinput_draw"
 external ui_checksize : bool ref -> int ref -> int ref -> unit = "ui_checksize"
 external ui_global : tab list -> tab -> unit = "ui_global"
-external ui_tab_main : string array -> int -> unit = "ui_tab_main"
+external ui_tab_main : (float * string) array -> int -> unit = "ui_tab_main"
 
 
 
@@ -49,11 +50,12 @@ end
 
 
 
+(* TODO: scrolling the log should work with screen lines, not log entries *)
 class main =
   let backlog = 1023 in (* must be 2^x-1 *)
 object(self)
   inherit tab
-  val log = Array.make (backlog+1) "" (* circular buffer *)
+  val log = Array.make (backlog+1) (0.0, "") (* circular buffer *)
   val cmd = new textInput;
   val mutable lastlog = 0
   val mutable lastvisible = 0
@@ -64,14 +66,13 @@ object(self)
   method private addline str =
     if lastlog = lastvisible then lastvisible <- lastlog + 1;
     lastlog <- lastlog + 1;
-    log.(lastlog land backlog) <- str
+    log.(lastlog land backlog) <- (Unix.time (), str)
 
   method private drawCmd =
-    cmd#draw (!win_rows-3) 0 !win_cols
+    cmd#draw (!win_rows-3) 9 (!win_cols-9)
 
   method draw =
     ui_tab_main log lastvisible;
-    cmd#setText "YOYOチラル盛!";
     self#drawCmd (* must be last to have the cursor at the correct position *)
 
   method handleInput = function
@@ -81,6 +82,10 @@ object(self)
     | Key 0o523 -> (* page up *)
         lastvisible <- min lastlog (max (lastvisible - !win_rows/2)
           (max (!win_rows - 4) (lastlog - backlog + !win_rows - 4)));
+        true
+    | Ctrl '\n' -> (* return *)
+        self#addline (cmd#getText);
+        cmd#setText "";
         true
     | k ->
         if cmd#handleInput k then self#drawCmd;

@@ -3,7 +3,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <wchar.h>
+#include <wctype.h>
 #include <locale.h>
 #include <caml/mlvalues.h>
 #include <caml/memory.h>
@@ -313,7 +315,7 @@ CAMLprim value ui_tab_main(value log, value lastvisible) {
   short lines[51]; // assumes we can't have more than 50 lines per log item
   lines[0] = 0;
   while(top > 0) {
-    char *str = String_val(Field(log, cur & backlog));
+    char *str = String_val(Field(Field(log, cur & backlog), 1));
     int curline = 1, curlinecols = 0, i = -1,
         len = strlen(str);
     wchar_t *buffer = malloc(sizeof(wchar_t)*len);
@@ -327,22 +329,34 @@ CAMLprim value ui_tab_main(value log, value lastvisible) {
       str += r;
       // decide on which line to put it
       int width = wcwidth(buffer[i]);
-      if(curlinecols+width > wincols) {
+      if(curlinecols+width >= wincols-9) {
         if(++curline > 50)
           caml_failwith("ui_tab_main: Too many lines for log entry");
         curlinecols = 0;
       }
-      lines[curline] = i;
+      lines[curline] = i+1;
       curlinecols += width;
     }
     // print the lines
-    for(i=curline-1; top>0 && i>=0; i--, top--)
-      if(top <= winrows-4)
-        mvaddnwstr(top, 0, buffer+lines[i], lines[i+1]-lines[i]+1);
+    for(i=curline-1; top>0 && i>=0; i--, top--) {
+      if(top > winrows-4)
+        continue;
+      if(i == 0) {
+        char ts[10];
+        time_t tm = (time_t) Double_val(Field(Field(log, cur & backlog), 0));
+        if(tm) {
+          strftime(ts, 9, "%H:%M:%S", localtime(&tm));
+          mvaddstr(top, 0, ts);
+        }
+      }
+      mvaddnwstr(top, 9, buffer+lines[i], lines[i+1]-lines[i]);
+    }
 
     free(buffer);
     cur = (cur-1) & backlog;
   }
+
+  mvaddstr(winrows-3, 0, "console> ");
 
   CAMLreturn(Val_unit);
 }

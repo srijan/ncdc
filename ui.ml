@@ -13,6 +13,7 @@ let win_cols = ref 0
 
 
 class virtual tab = object
+  method virtual init : unit
   method virtual getTitle : string
   method virtual getName : string
   method virtual draw : unit (* must draw between 0 < y < wincols-2 *)
@@ -56,6 +57,7 @@ class main =
 object(self)
   inherit tab
   val log = Array.make (backlog+1) (0.0, "") (* circular buffer *)
+  val logf = new Global.logfile "main"
   val cmd = new textInput;
   val mutable lastlog = 0
   val mutable lastvisible = 0
@@ -66,10 +68,15 @@ object(self)
   method private addline str =
     if lastlog = lastvisible then lastvisible <- lastlog + 1;
     lastlog <- lastlog + 1;
-    log.(lastlog land backlog) <- (Unix.time (), str)
+    log.(lastlog land backlog) <- (Unix.time (), str);
+    logf#write str
 
   method private drawCmd =
     cmd#draw (!win_rows-3) 9 (!win_cols-9)
+
+  method init =
+    self#addline "NCDC 0.1-alpha starting up...";
+    self#addline ("Using working directory: " ^ Global.workdir)
 
   method draw =
     ui_tab_main log lastvisible;
@@ -96,10 +103,11 @@ end
 
 
 class global =
-  let maintab = new main in
+  let maintab = (new main :> tab) in
+  let _ = maintab#init in
 object(self)
-  val mutable tabs = ([ maintab ] : tab list)
-  val mutable seltab = (maintab : tab)
+  val mutable tabs = [ maintab ]
+  val mutable seltab = maintab
 
   method draw =
     ui_checksize win_toosmall win_rows win_cols;

@@ -1,6 +1,14 @@
+
+(* global variable to signal the mainloop to do something *)
+let do_quit = ref false
+let do_redraw = ref false
+
+
+
 (* This initialization code is executed before anything else has been
  * initialized, so if we let things fail here the program will refuse to run.
  * (which is what we want if the working directory is not sane) *)
+
 
 (* Figure out our working directory. *)
 let workdir =

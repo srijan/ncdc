@@ -2,11 +2,7 @@
 type input_t = Key of int | Ctrl of char | Esc of string | Char of string
 
 
-(* global variable to signal the mainloop to do something *)
-let do_quit = ref false
-let do_redraw = ref false
-
-(* other useful globals *)
+(* useful globals *)
 let win_toosmall = ref false
 let win_rows = ref 0
 let win_cols = ref 0
@@ -91,7 +87,9 @@ object(self)
           (max (!win_rows - 4) (lastlog - backlog + !win_rows - 4)));
         true
     | Ctrl '\n' -> (* return *)
-        self#addline (cmd#getText);
+        let str = cmd#getText in
+        if str <> "" then
+          List.iter self#addline (Commands.handle cmd#getText);
         cmd#setText "";
         true
     | k ->
@@ -121,7 +119,7 @@ object(self)
     | Key 0o632   -> (* screen resize *)
         true
     | Ctrl '\x03' -> (* ctrl+c *)
-        do_quit := true; false
+        Global.do_quit := true; false
     | x           -> (* not a global key, let tab handle it *)
         seltab#handleInput x
 

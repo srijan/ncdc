@@ -10,7 +10,7 @@ let _ =
   ui#draw;
 
   (* mainloop *)
-  while not !Ui.do_quit do
+  while not !Global.do_quit do
     (* select *)
     let _ =
       try
@@ -18,16 +18,16 @@ let _ =
       with Unix.Unix_error (Unix.EINTR,_,_) -> ([],[],[])
     in
     (* process input from terminal *)
-    Ui.do_redraw := max !Ui.do_redraw (List.exists (fun b->b)
+    Global.do_redraw := max !Global.do_redraw (List.exists (fun b->b)
       (List.map ui#handleInput (Ui.ui_getinput ()))
     );
     (* make sure to redraw the screen every second *)
     if !lastredraw < (Unix.time () -. 1.0) then (
-      Ui.do_redraw := true;
+      Global.do_redraw := true;
       lastredraw := Unix.time ()
     );
-    if !Ui.do_redraw then (
-      Ui.do_redraw := false;
+    if !Global.do_redraw then (
+      Global.do_redraw := false;
       ui#draw
     )
   done;

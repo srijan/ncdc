@@ -172,22 +172,47 @@ CAMLprim value ui_textinput_set(value newstr, value str, value curpos) {
 
 CAMLprim value ui_textinput_draw(value loc, value str, value curpos) {
   CAMLparam3(loc, str, curpos);
-  // TODO: handle the case when the string does not fit on the allocated columns
+  //       |              |
+  // "Some random string etc etc"
+  //       f         #    l
+  // f = function(#, strwidth(upto_#), wincols)
+  // if(strwidth(upto_#) < wincols*0.85)
+  //   f = 0
+  // else
+  //   f = strwidth(upto_#) - wincols*0.85
   wchar_t *wstr = (wchar_t *)String_val(str);
   int y = Long_val(Field(loc, 0));
   int x = Long_val(Field(loc, 1));
   int col = Long_val(Field(loc, 2));
+  int cur = Long_val(curpos); // character number
+  int i;
+
+  // calculate f (in number of columns)
+  int width = 0;
+  for(i=0; i<=cur && *wstr; i++)
+    width += wcwidth(wstr[i]);
+  int f = width - (col*85)/100;
+  if(f < 0)
+    f = 0;
+
+  // now print it on the screen, starting from column f in the string and
+  // stopping when we're out of screen columns
   cchar_t t;
   memset(&t, 0, sizeof(cchar_t));
   mvhline(y, x, ' ', col);
   move(y, x);
   int pos = 0;
-  int i = 0;
+  i = 0;
   while(*wstr) {
-    t.chars[0] = *wstr;
-    add_wch(&t);
-    if(i < Long_val(curpos))
-      pos += wcwidth(*wstr);
+    f -= wcwidth(*wstr);
+    if(f < -col)
+      break;
+    if(f < 0) {
+      t.chars[0] = *wstr;
+      add_wch(&t);
+      if(i < cur)
+        pos += wcwidth(*wstr);
+    }
     i++;
     wstr++;
   }

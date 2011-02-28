@@ -1,0 +1,48 @@
+NCDC 0.1-alpha
+==============
+
+DESCRIPTION
+
+  NCDC aims to become an awesome Direct Connect client with an NCurses
+  interface, written in OCaml and C. It is currently in a very early alpha
+  stage and nothing useful has been implemented yet.
+
+
+REQUIREMENTS
+
+  Run-time:
+    ncurses
+
+  Compile-time:
+    OCaml
+    Most likely: A recent GCC
+
+
+QUICK Q&A
+
+  Q: Why another DC client?
+  A: Because the current DC clients either require a full graphical setup, or are
+     extremely buggy and have not been updated for years. While I *could* fork or
+     take over development for nanodc or microdc2, I don't really enjoy playing
+     around with other people's code. Nor do I really enjoy the readline interface
+     of microdc2 or the C++ bloat that comes with nanodc.
+
+  Q: Why OCaml and C?
+  A: Most current DC clients are written in C++, which isn't a language I like.
+     I do enjoy C, but it's too much work to write larger applications using it.
+     I tend to avoid writing applications like this in higher level languages
+     like Perl or Python due to the memory and CPU overhead and all the
+     extra dependencies it would require.
+     Ocaml is a nice mid-level language which offers many nice features for
+     keeping the code organized, and is also the only language I know of that
+     makes it incredibly easy to interface with C code.
+     Taking all that into account: I decided to use OCaml for everything that
+     can be done in OCaml, and C for everything that requires external
+     libraries or performance.
+
+
+CONTACT
+
+  projects@yorhel.nl
+  http://dev.yorhel.nl/
+

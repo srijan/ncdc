@@ -78,20 +78,22 @@ let conf_setint l v = conf_setstr l (string_of_int v)
 
 (* Writing log files *)
 
-let curdatetime () =
-  let tm = Unix.localtime (Unix.time ()) in
-  Printf.sprintf "%04d-%02d-%02d %02d:%02d:%02d"
-    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) (tm.Unix.tm_mday)
-    (tm.Unix.tm_hour) (tm.Unix.tm_min) (tm.Unix.tm_sec)
-
 class logfile fn =
   let chan = open_out_gen [Open_creat; Open_append; Open_text] 0o600
     (Filename.concat logdir (fn ^ ".log")) in
-  let _ = output_string chan ("-------- Log starting on " ^ (curdatetime ()) ^ "\n") in
 object(self)
+  method datestr =
+    let tm = Unix.localtime (Unix.time ()) in
+    Printf.sprintf "%04d-%02d-%02d %02d:%02d:%02d"
+      (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) (tm.Unix.tm_mday)
+      (tm.Unix.tm_hour) (tm.Unix.tm_min) (tm.Unix.tm_sec)
+
   method write str =
-    output_string chan ((curdatetime ()) ^ " " ^ str ^ "\n");
+    output_string chan (self#datestr ^ " " ^ str ^ "\n");
     flush chan
+
+  initializer
+    output_string chan ("-------- Log starting on " ^ self#datestr ^ "\n")
 end
 
 

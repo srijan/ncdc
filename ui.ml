@@ -9,11 +9,11 @@ let win_cols = ref 0
 
 
 class virtual tab = object
-  method virtual init : unit
   method virtual getTitle : string
   method virtual getName : string
   method virtual draw : unit (* must draw between 0 < y < wincols-2 *)
   method virtual handleInput : input_t -> bool
+  method setGlobal (gl : Commands.global) = ()
 end
 
 
@@ -52,9 +52,12 @@ class main =
   let backlog = 1023 in (* must be 2^x-1 *)
 object(self)
   inherit tab
+  inherit Commands.main
+
   val log = Array.make (backlog+1) (0.0, "") (* circular buffer *)
   val logf = new Global.logfile "main"
-  val cmd = new textInput;
+  val cmd = new Commands.commands
+  val input = new textInput;
   val mutable lastlog = 0
   val mutable lastvisible = 0
 
@@ -68,11 +71,10 @@ object(self)
     logf#write str
 
   method private drawCmd =
-    cmd#draw (!win_rows-3) 9 (!win_cols-9)
+    input#draw (!win_rows-3) 9 (!win_cols-9)
 
-  method init =
-    self#addline "NCDC 0.1-alpha starting up...";
-    self#addline ("Using working directory: " ^ Global.workdir)
+  method cmdReply str =
+    self#addline str
 
   method draw =
     ui_tab_main log lastvisible;
@@ -87,14 +89,20 @@ object(self)
           (max (!win_rows - 4) (lastlog - backlog + !win_rows - 4)));
         true
     | Ctrl '\n' -> (* return *)
-        let str = cmd#getText in
-        if str <> "" then
-          List.iter self#addline (Commands.handle cmd#getText);
-        cmd#setText "";
+        let str = input#getText in
+        if str <> "" then cmd#handle input#getText;
+        input#setText "";
         true
     | k ->
-        if cmd#handleInput k then self#drawCmd;
+        if input#handleInput k then self#drawCmd;
         false
+
+  method setGlobal gl =
+    cmd#setOrigin gl (Commands.Main (self :> Commands.main))
+
+  initializer
+    self#addline "NCDC 0.1-alpha starting up...";
+    self#addline ("Using working directory: " ^ Global.workdir);
 
 end
 
@@ -102,7 +110,6 @@ end
 
 class global =
   let maintab = (new main :> tab) in
-  let _ = maintab#init in
 object(self)
   val mutable tabs = [ maintab ]
   val mutable seltab = maintab
@@ -122,6 +129,9 @@ object(self)
         Global.do_quit := true; false
     | x           -> (* not a global key, let tab handle it *)
         seltab#handleInput x
+
+  initializer
+    maintab#setGlobal (self :> Commands.global)
 
 end
 

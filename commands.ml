@@ -1,58 +1,107 @@
 
+(* Class interfaces required to communicate back to the ui* modules.  The
+ * respective ui* modules that use the commands class should inherit these
+ * classes. The reason that they are not virtual is to provide "dummy"
+ * implementations to make sure the "commands" class can have initialized
+ * values... *)
 
-(* Commandlist.
- *  ($commandname, $usage, $fun), ..
- *  $fun: (arguments : string list) -> (return : string)
- *  return = "" -> "/$commandname $usage"
- *)
+class global = object
+  (*method virtual cmdHubOpen : string -> unit*)
+end
 
-let rec cmdlist = [
-  ("quit", [""; "  Quit NCDC. Equivalent to hitting Ctrl+C."], (fun args ->
-    if List.length args > 0 then [] else (
+class subject = object
+  method cmdReply (_:string) = ()
+end
+
+class main = object
+  inherit subject
+end
+
+
+type from_t = Main of main
+
+
+
+class commands = object(self)
+  (* initialize with dummy objects *)
+  val mutable global = new global
+  val mutable from = Main (new main)
+  val mutable subject = new main
+  val mutable dummy = true
+
+
+  (* list of commands *)
+
+  val mutable cmds = []
+  initializer cmds <- [
+    ("quit", [""; "Quit NCDC. Equivalent to hitting Ctrl+C."], self#cmdQuit);
+
+    ("say", ["<message>";
+      "Say something to the current hub or user. You normally don't have to use"
+      ^" this command, you can just type your message without starting it with"
+      ^" a slash."], self#cmdSay);
+
+    ("help", ["[<command>]";
+      "Without argument, displays a list of all available commands.";
+      "With arguments, displays usage information for the given command."],
+      self#cmdHelp)
+  ]
+
+
+  (* implementation of the commands *)
+
+  method private cmdQuit args =
+    if List.length args > 0 then raise Exit else (
       Global.do_quit := true;
-      ["Quitting..."]
+      subject#cmdReply "Quitting..."
     )
-  ));
 
-  ("say", ["<text>"; "  Say something to the current hub or user."], (fun args ->
-    ["Not implemented yet."]
-  ));
+  method private cmdSay args =
+    match from with
+    | Main _ -> subject#cmdReply "This is not a hub nor a user."
 
-  ("help", ["[<command>]";
-    "  Without argument, displays a list of all available commands.";
-    "  With arguments, displays usage information for the given command."],
-    (fun args ->
+  method private cmdHelp args =
     match args with
-    | [] -> (* list all commands *)
-      List.fold_left (fun p (c, u, _) ->
-        p @ (("/"^c^" "^(List.hd u)) :: List.tl u)
-      ) [] cmdlist
-    | [c] -> (* help for a single command (can't use the cmd_hash here T.T) *)
-      (try
-        let (_,u,_) = List.find (fun (n,_,_) -> n = c) cmdlist in
-        ("Usage: /"^c^" "^(List.hd u)) :: List.tl u
-      with Not_found -> ["No such command."])
-    | _ -> []
-  ));
-]
+    | []  -> List.iter (fun (n,_,_) -> self#replyHelp false n) cmds
+    | [c] -> self#replyHelp true c
+    | _   -> raise Exit
 
 
-and docmd cmd args =
-  let (_, u, f) =
-    try List.find (fun (n,_,_) -> n = cmd) cmdlist
-    with Not_found -> ("", [""], (fun _ -> ["No such command."]))
-  in
-  let r = f args in
-  if List.length r < 1 then docmd "help" [cmd] else r
+  (* Helper methods *)
+  method private replyHelp usage cmd =
+    try
+      let _,u,_ = List.find (fun (n,_,_) -> n = cmd) cmds in
+      subject#cmdReply (
+        (if usage then "Usage: " else "")^
+        "/"^cmd^" "^(List.hd u));
+      List.iter (fun s -> subject#cmdReply ("  "^s)) (List.tl u)
+    with Not_found ->
+      subject#cmdReply "No such command."
+
+  method private doCmd cmd args =
+    try
+      let _,_,f = List.find (fun (n,_,_) -> n = cmd) cmds in
+      f args
+    with Not_found|Exit ->
+      self#replyHelp true cmd
 
 
-let handle str =
-  let lst = Str.split (Str.regexp " +") str in
-  let (cmd, args) = match lst with
-  | h :: t -> (h, t)
-  | _      -> ("/'", [])
-  in
-  if cmd.[0] <> '/' then docmd "say" lst
-  else docmd (String.sub cmd 1 (String.length cmd - 1)) args
+  (* does nothing if str consists only of whitespace *)
+  method handle str =
+    if dummy then failwith "No origin set";
+    let lst = Str.split (Str.regexp " +") str in
+    try
+      let cmd = List.hd lst in
+      if cmd.[0] <> '/' then self#doCmd "say" lst
+      else self#doCmd (String.sub cmd 1 (String.length cmd - 1)) (List.tl lst)
+    with Failure "hd" -> ()
 
+  method setOrigin gl fr =
+    global <- gl;
+    from <- fr;
+    dummy <- false;
+    subject <- match fr with
+      | Main x -> x
+
+end
 

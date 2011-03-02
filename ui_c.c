@@ -280,6 +280,68 @@ CAMLprim value ui_textinput_key(value key, value str, value curpos) {
 
 
 
+CAMLprim value ui_logwindow_draw(value loc, value log, value lastvisible) {
+  CAMLparam3(loc, log, lastvisible);
+
+  int y = Int_val(Field(loc, 0)),
+      x = Int_val(Field(loc, 1)),
+      rows = Int_val(Field(loc, 2)),
+      cols = Int_val(Field(loc, 3)),
+      backlog = Wosize_val(log)-1;
+
+  int top = rows + y - 1;
+  int cur = Long_val(lastvisible);
+
+  // assumes we can't have more than 100 lines per log item, and that each log
+  // item does not exceed 64k characters
+  unsigned short lines[101];
+  lines[0] = 0;
+
+  while(top >= y) {
+    char *str = String_val(Field(Field(log, cur & backlog), 1));
+    int curline = 1, curlinecols = 0, i = -1,
+        len = strlen(str);
+    wchar_t *buffer = malloc(sizeof(wchar_t)*len);
+    lines[1] = 0;
+    while(*str) {
+      // decode character
+      int r = mbtowc(buffer+(++i), str, len);
+      if(r < 0)
+        caml_failwith("ui_logwindow_draw: Invalid character encoding");
+      len -= r;
+      str += r;
+      // decide on which line to put it
+      int width = wcwidth(buffer[i]);
+      if(curlinecols+width >= cols-9) {
+        if(++curline > 100)
+          caml_failwith("ui_logwindow_draw: Too many lines for log entry");
+        curlinecols = 0;
+      }
+      lines[curline] = i+1;
+      curlinecols += width;
+    }
+    // print the lines
+    for(i=curline-1; top>=y && i>=0; i--, top--) {
+      if(i == 0) {
+        char ts[10];
+        time_t tm = (time_t) Double_val(Field(Field(log, cur & backlog), 0));
+        if(tm) {
+          strftime(ts, 9, "%H:%M:%S", localtime(&tm));
+          mvaddstr(top, x, ts);
+        }
+      }
+      mvaddnwstr(top, x+9, buffer+lines[i], lines[i+1]-lines[i]);
+    }
+
+    free(buffer);
+    cur = (cur-1) & backlog;
+  }
+
+  CAMLreturn(Val_unit);
+}
+
+
+
 CAMLprim value ui_checksize(value toosmall, value rows, value cols) {
   CAMLparam3(toosmall, rows, cols);
   getmaxyx(stdscr, winrows, wincols);
@@ -335,58 +397,9 @@ CAMLprim value ui_global(value tabs, value seltab) {
 
 
 
-CAMLprim value ui_tab_main(value log, value lastvisible) {
-  CAMLparam2(log, lastvisible);
-
-  int backlog = Wosize_val(log)-1;
-  int top = winrows - 4;
-  int cur = Long_val(lastvisible);
-  short lines[51]; // assumes we can't have more than 50 lines per log item
-  lines[0] = 0;
-  while(top > 0) {
-    char *str = String_val(Field(Field(log, cur & backlog), 1));
-    int curline = 1, curlinecols = 0, i = -1,
-        len = strlen(str);
-    wchar_t *buffer = malloc(sizeof(wchar_t)*len);
-    lines[1] = 0;
-    while(*str) {
-      // decode character
-      int r = mbtowc(buffer+(++i), str, len);
-      if(r < 0)
-        caml_failwith("ui_tab_main: Invalid character encoding");
-      len -= r;
-      str += r;
-      // decide on which line to put it
-      int width = wcwidth(buffer[i]);
-      if(curlinecols+width >= wincols-9) {
-        if(++curline > 50)
-          caml_failwith("ui_tab_main: Too many lines for log entry");
-        curlinecols = 0;
-      }
-      lines[curline] = i+1;
-      curlinecols += width;
-    }
-    // print the lines
-    for(i=curline-1; top>0 && i>=0; i--, top--) {
-      if(top > winrows-4)
-        continue;
-      if(i == 0) {
-        char ts[10];
-        time_t tm = (time_t) Double_val(Field(Field(log, cur & backlog), 0));
-        if(tm) {
-          strftime(ts, 9, "%H:%M:%S", localtime(&tm));
-          mvaddstr(top, 0, ts);
-        }
-      }
-      mvaddnwstr(top, 9, buffer+lines[i], lines[i+1]-lines[i]);
-    }
-
-    free(buffer);
-    cur = (cur-1) & backlog;
-  }
-
+CAMLprim value ui_tab_main(value unit) {
+  CAMLparam1(unit);
   mvaddstr(winrows-3, 0, "console> ");
-
   CAMLreturn(Val_unit);
 }
 

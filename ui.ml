@@ -26,9 +26,10 @@ external ui_textinput_get : string -> string = "ui_textinput_get"
 external ui_textinput_set : string -> string ref -> int ref -> unit = "ui_textinput_set"
 external ui_textinput_key : input_t -> string ref -> int ref -> bool = "ui_textinput_key"
 external ui_textinput_draw : (int * int * int) -> string -> int -> unit = "ui_textinput_draw"
+external ui_logwindow_draw : (int * int * int * int) -> (float * string) array -> int -> unit = "ui_logwindow_draw"
 external ui_checksize : bool ref -> int ref -> int ref -> unit = "ui_checksize"
 external ui_global : tab list -> tab -> unit = "ui_global"
-external ui_tab_main : (float * string) array -> int -> unit = "ui_tab_main"
+external ui_tab_main : unit -> unit = "ui_tab_main"
 
 
 
@@ -48,26 +49,64 @@ end
 
 
 
+(* Scrolled logging "widget". Logs and displays a string with a timestamp. *)
+class logWindow logfile =
+  let reserved = 250 in (* number of empty buffer items, should be larger than win_cols *)
+  let backlog = 2047 in (* must be 2^x-1 and larger than reserved+win_cols *)
+object(self)
+  val log = Array.make (backlog+1) (0.0, "") (* circular buffer *)
+  val lf =
+    if String.length logfile > 0 then Some (new Global.logfile logfile) else None
+  val mutable lastlog = 0
+  val mutable lastvisible = 0
+
+  method write str =
+    if lastlog = lastvisible then lastvisible <- lastlog + 1;
+    lastlog <- lastlog + 1;
+    log.(lastlog land backlog) <- (Unix.time (), str);
+    log.((lastlog + reserved) land backlog) <- (0.0, "");
+    match lf with None -> () | Some l -> l#write str
+
+  method draw y x r c = ui_logwindow_draw (y,x,r,c) log lastvisible
+
+  method scroll i =
+    lastvisible <- min (lastvisible + i) lastlog;
+    lastvisible <- max (lastlog - backlog + reserved) (max 1 lastvisible)
+end
+
+
+
 class hub name = object(self)
   inherit tab
   inherit Commands.hub
+  val log = new logWindow ""
   val input = new textInput
   val cmd = new Commands.commands
 
   method getTitle = name^": Not connected"
   method getName = "#"^name
 
+  method private drawCmd = input#draw (!win_rows-3) 0 !win_cols
+  method cmdReply str = log#write str
+
   (* TODO *)
-  method draw = input#draw (!win_rows-3) 0 !win_cols
+  method draw =
+    log#draw 1 0 (!win_rows-4) !win_cols;
+    self#drawCmd
 
   method handleInput = function
-    | Ctrl '\n' -> (* return *)
+      (* page down / up *)
+    | Key 0o522 -> log#scroll (!win_rows / 2); true
+    | Key 0o523 -> log#scroll (!win_rows / -2); true
+      (* return *)
+    | Ctrl '\n' ->
         let str = input#getText in
         if str <> "" then cmd#handle input#getText;
         input#setText "";
         true
+      (* text input *)
     | k ->
-        if input#handleInput k then self#draw;
+        if input#handleInput k then self#drawCmd;
         false
 
   method setGlobal gl =
@@ -76,52 +115,36 @@ end
 
 
 
-(* TODO: scrolling the log should work with screen lines, not log entries *)
-class main =
-  let backlog = 1023 in (* must be 2^x-1 *)
-object(self)
+class main = object(self)
   inherit tab
   inherit Commands.main
 
-  val log = Array.make (backlog+1) (0.0, "") (* circular buffer *)
-  val logf = new Global.logfile "main"
+  val log = new logWindow "main"
   val cmd = new Commands.commands
   val input = new textInput;
-  val mutable lastlog = 0
-  val mutable lastvisible = 0
 
   method getTitle = "Welcome to NCDC 0.1-alpha!"
   method getName = "main"
 
-  method private addline str =
-    if lastlog = lastvisible then lastvisible <- lastlog + 1;
-    lastlog <- lastlog + 1;
-    log.(lastlog land backlog) <- (Unix.time (), str);
-    logf#write str
-
-  method private drawCmd =
-    input#draw (!win_rows-3) 9 (!win_cols-9)
-
-  method cmdReply str =
-    self#addline str
+  method private drawCmd = input#draw (!win_rows-3) 9 (!win_cols-9)
+  method cmdReply str = log#write str
 
   method draw =
-    ui_tab_main log lastvisible;
+    ui_tab_main ();
+    log#draw 1 0 (!win_rows-4) !win_cols;
     self#drawCmd (* must be last to have the cursor at the correct position *)
 
   method handleInput = function
-    | Key 0o522 -> (* page down *)
-        lastvisible <- min (lastvisible + !win_rows/2) lastlog;
-        true
-    | Key 0o523 -> (* page up *)
-        lastvisible <- min lastlog (max (lastvisible - !win_rows/2)
-          (max (!win_rows - 4) (lastlog - backlog + !win_rows - 4)));
-        true
-    | Ctrl '\n' -> (* return *)
+      (* page down / up *)
+    | Key 0o522 -> log#scroll (!win_rows / 2); true
+    | Key 0o523 -> log#scroll (!win_rows / -2); true
+      (* return *)
+    | Ctrl '\n' ->
         let str = input#getText in
         if str <> "" then cmd#handle input#getText;
         input#setText "";
         true
+      (* text input *)
     | k ->
         if input#handleInput k then self#drawCmd;
         false
@@ -133,8 +156,8 @@ object(self)
   method close = false
 
   initializer
-    self#addline "NCDC 0.1-alpha starting up...";
-    self#addline ("Using working directory: " ^ Global.workdir);
+    log#write "NCDC 0.1-alpha starting up...";
+    log#write ("Using working directory: " ^ Global.workdir);
 
 end
 

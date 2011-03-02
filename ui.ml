@@ -14,6 +14,7 @@ class virtual tab = object
   method virtual draw : unit (* must draw between 0 < y < wincols-2 *)
   method virtual handleInput : input_t -> bool
   method setGlobal (gl : Commands.global) = ()
+  method close = true
 end
 
 
@@ -128,6 +129,9 @@ object(self)
   method setGlobal gl =
     cmd#setOrigin gl (Commands.Main (self :> Commands.main))
 
+  (* don't allow this tab to be closed *)
+  method close = false
+
   initializer
     self#addline "NCDC 0.1-alpha starting up...";
     self#addline ("Using working directory: " ^ Global.workdir);
@@ -187,11 +191,13 @@ object(self)
           | a -> a
         in tabs <- n tabs; true
       (* move tab left *)
-    | Esc "h"   ->
+    | Esc "h"     ->
         let rec p = function
           | a :: (b :: c) -> if b == seltab then b :: (a :: c) else a :: p (b :: c)
           | a -> a
         in tabs <- p tabs; true
+      (* close current tab *)
+    | Esc "c"     -> self#cmdClose (Oo.id seltab); true
       (* not a global key, let tab handle it *)
     | x           -> seltab#handleInput x
 
@@ -202,6 +208,15 @@ object(self)
       seltab <- (new hub n :> tab);
       seltab#setGlobal (self :> Commands.global);
       tabs <- tabs @ [seltab]
+
+  (* Accepts the Oo.id of the tab to close. The reason for this is that tabs can
+   * be closed both from a command handler and from a keyboard shortcut. These
+   * two locations have different views (types) on the tab objects, and we
+   * cannot cast between them. *)
+  method cmdClose t =
+    tabs <- List.filter (fun n ->
+      if Oo.id n = t then not n#close else true) tabs;
+    if Oo.id seltab = t then seltab <- List.hd tabs
 
   initializer
     maintab#setGlobal (self :> Commands.global)

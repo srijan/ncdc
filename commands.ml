@@ -7,6 +7,7 @@
 
 class global = object
   method cmdHubOpen (_:string) = ()
+  method cmdClose (_:int) = ()
 end
 
 class subject = object
@@ -47,6 +48,9 @@ class commands = object(self)
 
     ("open", ["<name>"; "Open a new tab with the given name."], self#cmdOpen);
 
+    ("close", [""; "Close the current tab. When closing a hub tab, the hub will"
+      ^" be disconnected."], self#cmdClose);
+
     ("help", ["[<command>]";
       "Without argument, displays a list of all available commands.";
       "With arguments, displays usage information for the given command."],
@@ -70,6 +74,11 @@ class commands = object(self)
   method private cmdOpen = function
     | [n] -> global#cmdHubOpen n
     | _   -> raise Exit
+
+  method private cmdClose args =
+    if List.length args > 0 then raise Exit else match from with
+    | Main _ -> subject#cmdReply "Cannot close the main tab."
+    | _ -> global#cmdClose (Oo.id subject)
 
   method private cmdHelp = function
     | []  -> List.iter (fun (n,_,_) -> self#replyHelp false n) cmds

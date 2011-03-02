@@ -304,7 +304,7 @@ CAMLprim value ui_global(value tabs, value seltab) {
   // first line
   attron(A_REVERSE);
   mvhline(0, 0, ' ', wincols);
-  val = caml_callback(caml_get_public_method(seltab, hash_variant("getTitle")), Val_unit);
+  val = caml_callback(caml_get_public_method(seltab, hash_variant("getTitle")), seltab);
   mvaddstr(0, 0, String_val(val));
   attroff(A_REVERSE);
 
@@ -314,11 +314,15 @@ CAMLprim value ui_global(value tabs, value seltab) {
   move(winrows-2, 0);
   // TODO:
   // - handle the case when there are too many tabs
-  // - Indicate which tab is selected
   while(tabs != Val_emptylist) {
+    if(Field(tabs, 0) == seltab)
+      attron(A_BOLD);
     printw("%d:", ++i);
-    val = caml_callback(caml_get_public_method(Field(tabs, 0), getName), Val_unit);
+    val = caml_callback(caml_get_public_method(Field(tabs, 0), getName), Field(tabs, 0));
     addstr(String_val(val));
+    if(Field(tabs, 0) == seltab)
+      attroff(A_BOLD);
+    addch(' ');
     tabs = Field(tabs, 1);
   }
   attroff(A_REVERSE);

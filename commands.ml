@@ -6,7 +6,7 @@
  * values... *)
 
 class global = object
-  (*method virtual cmdHubOpen : string -> unit*)
+  method cmdHubOpen (_:string) = ()
 end
 
 class subject = object
@@ -17,8 +17,12 @@ class main = object
   inherit subject
 end
 
+class hub = object
+  inherit subject
+end
 
-type from_t = Main of main
+
+type from_t = Main of main | Hub of hub
 
 
 
@@ -26,7 +30,7 @@ class commands = object(self)
   (* initialize with dummy objects *)
   val mutable global = new global
   val mutable from = Main (new main)
-  val mutable subject = new main
+  val mutable subject = (new main :> subject)
   val mutable dummy = true
 
 
@@ -40,6 +44,8 @@ class commands = object(self)
       "Say something to the current hub or user. You normally don't have to use"
       ^" this command, you can just type your message without starting it with"
       ^" a slash."], self#cmdSay);
+
+    ("open", ["<name>"; "Open a new tab with the given name."], self#cmdOpen);
 
     ("help", ["[<command>]";
       "Without argument, displays a list of all available commands.";
@@ -59,9 +65,13 @@ class commands = object(self)
   method private cmdSay args =
     match from with
     | Main _ -> subject#cmdReply "This is not a hub nor a user."
+    | Hub _ -> subject#cmdReply "Not implemented yet."
 
-  method private cmdHelp args =
-    match args with
+  method private cmdOpen = function
+    | [n] -> global#cmdHubOpen n
+    | _   -> raise Exit
+
+  method private cmdHelp = function
     | []  -> List.iter (fun (n,_,_) -> self#replyHelp false n) cmds
     | [c] -> self#replyHelp true c
     | _   -> raise Exit
@@ -102,6 +112,7 @@ class commands = object(self)
     dummy <- false;
     subject <- match fr with
       | Main x -> x
+      | Hub x -> x
 
 end
 

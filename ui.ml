@@ -47,6 +47,34 @@ end
 
 
 
+class hub name = object(self)
+  inherit tab
+  inherit Commands.hub
+  val input = new textInput
+  val cmd = new Commands.commands
+
+  method getTitle = name^": Not connected"
+  method getName = "#"^name
+
+  (* TODO *)
+  method draw = input#draw (!win_rows-3) 0 !win_cols
+
+  method handleInput = function
+    | Ctrl '\n' -> (* return *)
+        let str = input#getText in
+        if str <> "" then cmd#handle input#getText;
+        input#setText "";
+        true
+    | k ->
+        if input#handleInput k then self#draw;
+        false
+
+  method setGlobal gl =
+    cmd#setOrigin gl (Commands.Hub  (self :> Commands.hub))
+end
+
+
+
 (* TODO: scrolling the log should work with screen lines, not log entries *)
 class main =
   let backlog = 1023 in (* must be 2^x-1 *)
@@ -111,6 +139,8 @@ end
 class global =
   let maintab = (new main :> tab) in
 object(self)
+  inherit Commands.global
+
   val mutable tabs = [ maintab ]
   val mutable seltab = maintab
 
@@ -123,12 +153,31 @@ object(self)
     ui_refresh ()
 
   method handleInput = function
-    | Key 0o632   -> (* screen resize *)
-        true
-    | Ctrl '\x03' -> (* ctrl+c *)
-        Global.do_quit := true; false
-    | x           -> (* not a global key, let tab handle it *)
-        seltab#handleInput x
+      (* screen resize *)
+    | Key 0o632   -> true
+      (* ctrl+c *)
+    | Ctrl '\x03' -> Global.do_quit := true; false
+      (* Alt+[1-9]  (a bit ugly...)  TODO: support more tabs *)
+    | Esc "1"     -> seltab <- List.nth tabs 0; true
+    | Esc "2"     -> if List.length tabs > 1 then seltab <- List.nth tabs 1; true
+    | Esc "3"     -> if List.length tabs > 2 then seltab <- List.nth tabs 2; true
+    | Esc "4"     -> if List.length tabs > 3 then seltab <- List.nth tabs 3; true
+    | Esc "5"     -> if List.length tabs > 4 then seltab <- List.nth tabs 4; true
+    | Esc "6"     -> if List.length tabs > 5 then seltab <- List.nth tabs 5; true
+    | Esc "7"     -> if List.length tabs > 6 then seltab <- List.nth tabs 6; true
+    | Esc "8"     -> if List.length tabs > 7 then seltab <- List.nth tabs 7; true
+    | Esc "9"     -> if List.length tabs > 8 then seltab <- List.nth tabs 8; true
+    | Esc "0"     -> if List.length tabs > 9 then seltab <- List.nth tabs 9; true
+      (* not a global key, let tab handle it *)
+    | x           -> seltab#handleInput x
+
+  method cmdHubOpen n =
+    try
+      seltab <- List.find (fun t -> t#getName = "#"^n) tabs
+    with Not_found ->
+      seltab <- (new hub n :> tab);
+      seltab#setGlobal (self :> Commands.global);
+      tabs <- tabs @ [seltab]
 
   initializer
     maintab#setGlobal (self :> Commands.global)

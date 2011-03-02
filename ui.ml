@@ -157,7 +157,7 @@ object(self)
     | Key 0o632   -> true
       (* ctrl+c *)
     | Ctrl '\x03' -> Global.do_quit := true; false
-      (* Alt+[1-9]  (a bit ugly...)  TODO: support more tabs *)
+      (* Alt+[1-9]  (a bit ugly...) *)
     | Esc "1"     -> seltab <- List.nth tabs 0; true
     | Esc "2"     -> if List.length tabs > 1 then seltab <- List.nth tabs 1; true
     | Esc "3"     -> if List.length tabs > 2 then seltab <- List.nth tabs 2; true
@@ -168,6 +168,30 @@ object(self)
     | Esc "8"     -> if List.length tabs > 7 then seltab <- List.nth tabs 7; true
     | Esc "9"     -> if List.length tabs > 8 then seltab <- List.nth tabs 8; true
     | Esc "0"     -> if List.length tabs > 9 then seltab <- List.nth tabs 9; true
+      (* select next tab *)
+    | Esc "k"     ->
+        let rec n = function
+          | [] | _ :: [] -> seltab
+          | hd :: tl -> if hd == seltab then List.nth tl 0 else n tl
+        in seltab <- n tabs; true
+      (* select previous tab *)
+    | Esc "j"     ->
+        let rec p = function
+          | [] | _ :: [] -> seltab
+          | hd :: tl -> if List.nth tl 0 == seltab then hd else p tl
+        in seltab <- p tabs; true
+      (* move tab right *)
+    | Esc "l"     ->
+        let rec n = function
+          | a :: (b :: c) -> if a == seltab then b :: (a :: c) else a :: n (b :: c)
+          | a -> a
+        in tabs <- n tabs; true
+      (* move tab left *)
+    | Esc "h"   ->
+        let rec p = function
+          | a :: (b :: c) -> if b == seltab then b :: (a :: c) else a :: p (b :: c)
+          | a -> a
+        in tabs <- p tabs; true
       (* not a global key, let tab handle it *)
     | x           -> seltab#handleInput x
 

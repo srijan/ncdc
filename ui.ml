@@ -76,11 +76,10 @@ end
 
 
 
-class hub name = object(self)
+class hub input name = object(self)
   inherit tab
   inherit Commands.hub
   val log = new logWindow ""
-  val input = new textInput
   val cmd = new Commands.commands
   val hub = new Nmdc.hub
 
@@ -134,13 +133,12 @@ end
 
 
 
-class main = object(self)
+class main input = object(self)
   inherit tab
   inherit Commands.main
 
   val log = new logWindow "main"
   val cmd = new Commands.commands
-  val input = new textInput;
 
   method getTitle = "Welcome to NCDC 0.1-alpha!"
   method getName = "main"
@@ -183,7 +181,8 @@ end
 
 
 class global =
-  let maintab = (new main :> tab) in
+  let input = new textInput in
+  let maintab = (new main input :> tab) in
 object(self)
   inherit Commands.global
 
@@ -247,7 +246,7 @@ object(self)
     try
       seltab <- List.find (fun t -> t#getName = "#"^n) tabs
     with Not_found ->
-      seltab <- (new hub n :> tab);
+      seltab <- (new hub input n :> tab);
       seltab#setGlobal (self :> Commands.global);
       tabs <- tabs @ [seltab]
 

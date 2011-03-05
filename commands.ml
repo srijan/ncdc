@@ -18,14 +18,20 @@ class main = object
   inherit subject
 end
 
-class hub = object
+class virtual hub = object
   inherit subject
+  method virtual getHubName : string
 end
 
 
 type from_t = Main of main | Hub of hub
 
 
+
+(* TODO:
+ - Allow empty strings as argument to commands (e.g. /email "")
+ - Allow removing hub-specific configuration overrides
+*)
 
 class commands = object(self)
   (* initialize with dummy objects *)
@@ -51,6 +57,14 @@ class commands = object(self)
     ("close", [""; "Close the current tab. When closing a hub tab, the hub will"
       ^" be disconnected."], self#cmdClose);
 
+    ("nick", ["[<name>]"; "Get or set your nick name."], self#cmdNick);
+
+    ("email", ["[<email>]"; "Get or set your public email address."], self#cmdEmail);
+
+    ("description", ["[<description>]"; "Get or set your public description."], self#cmdDescription);
+
+    ("connection", ["[<connection>]"; "Get or set your connection type."], self#cmdConnection);
+
     ("help", ["[<command>]";
       "Without argument, displays a list of all available commands.";
       "With arguments, displays usage information for the given command."],
@@ -72,13 +86,44 @@ class commands = object(self)
     | Hub _ -> subject#cmdReply "Not implemented yet."
 
   method private cmdOpen = function
-    | [n] -> global#cmdHubOpen n
+    | [n] ->
+        if Str.string_match (Str.regexp "[/|]") n 0 then
+          subject#cmdReply "Illegal character in hub name."
+        else
+          global#cmdHubOpen n
     | _   -> raise Exit
 
   method private cmdClose args =
     if List.length args > 0 then raise Exit else match from with
     | Main _ -> subject#cmdReply "Cannot close the main tab."
     | _ -> global#cmdClose (Oo.id subject)
+
+  method private cmdNick = function
+    | []  -> subject#cmdReply ("nick = "^Global.Conf.getnick self#hubConf)
+    | [n] -> (
+        try Global.Conf.setnick self#hubConf n; self#cmdNick []
+        with Invalid_argument s -> subject#cmdReply s)
+    | _   -> raise Exit
+
+  method private cmdEmail = function
+    | []  -> subject#cmdReply ("email = "^Global.Conf.getemail self#hubConf)
+    | [e] -> (
+        try Global.Conf.setemail self#hubConf e; self#cmdEmail []
+        with Invalid_argument s -> subject#cmdReply s)
+    | _   -> raise Exit
+
+  method private cmdDescription = function
+    | []  -> subject#cmdReply ("description = "^Global.Conf.getdescription self#hubConf)
+    | l   -> let d = String.concat " " l in
+        try Global.Conf.setdescription self#hubConf d; self#cmdDescription []
+        with Invalid_argument s -> subject#cmdReply s
+
+  method private cmdConnection = function
+    | []  -> subject#cmdReply ("connection = "^Global.Conf.getconnection self#hubConf)
+    | [c] -> (
+        try Global.Conf.setconnection self#hubConf c; self#cmdConnection []
+        with Invalid_argument s -> subject#cmdReply s)
+    | _   -> raise Exit
 
   method private cmdHelp = function
     | []  -> List.iter (fun (n,_,_) -> self#replyHelp false n) cmds
@@ -104,6 +149,11 @@ class commands = object(self)
     with Not_found|Exit ->
       self#replyHelp true cmd
 
+  method private hubConf =
+    match from with
+    | Main _ -> None
+    | Hub x  -> Some x#getHubName
+
 
   (* does nothing if str consists only of whitespace *)
   method handle str =
@@ -120,8 +170,8 @@ class commands = object(self)
     from <- fr;
     dummy <- false;
     subject <- match fr with
-      | Main x -> x
-      | Hub x -> x
+      | Main x -> (x :> subject)
+      | Hub x -> (x :> subject)
 
 end
 

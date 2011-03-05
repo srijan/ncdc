@@ -9,7 +9,7 @@ SOURCES=ui_c.c global.ml commands.ml ui.ml main.ml
 CLEAN=*.o *.cmi *.cmx
 
 all:
-	ocamlopt -cclib -lncursesw -ccopt -Wall unix.cmxa str.cmxa ${SOURCES} -o main
+	ocamlopt -cclib -lncursesw -ccopt -Wall unix.cmxa str.cmxa dbm.cmxa ${SOURCES} -o main
 	rm -f ${CLEAN}
 
 clean:

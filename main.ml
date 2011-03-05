@@ -32,5 +32,6 @@ let _ =
     )
   done;
 
-  Ui.ui_end ()
+  Ui.ui_end ();
+  Global.Conf.close ()
 

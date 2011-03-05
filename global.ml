@@ -36,43 +36,62 @@ let _ =
 
 
 
-(* Configuration handling.
- * Yes, the configuration is stored in marshalled hashtables. Yes, there is a
- * chance that you will lose your configuration in an OCaml update. *)
+(* Configuration handling. *)
 
-let conf_file = Filename.concat workdir "config.bin"
+module Conf = struct
+  let file = Filename.concat workdir "config"
+  let db = Dbm.opendbm file [Dbm.Dbm_rdwr; Dbm.Dbm_create] 0o600
+  let close () = Dbm.close db
 
-let conf_hash =
-  try
-    if Sys.file_exists conf_file then (
-      let ch = open_in_bin conf_file in
-      let h = (input_value ch : (string, string) Hashtbl.t) in
-      close_in ch;
-      h
-    )
-    else Hashtbl.create 30
-  with _ ->
-    (* silently ignore error and use empty configuration *)
-    (try Unix.unlink conf_file with _ -> ());
-    Hashtbl.create 30
+  (* print out configuration and exit when NCDC_CONF_DEBUG is set *)
+  let _ = try
+    ignore (Sys.getenv "NCDC_CONF_DEBUG");
+    Dbm.iter (fun k v -> print_endline (k^" "^v)) db;
+    exit 0
+  with _ -> ()
 
-let conf_save () =
-  let ch = open_out_gen [Open_creat; Open_trunc; Open_binary] 0o600 conf_file in
-  output_value ch conf_hash;
-  close_out ch
+  (* low-level functions *)
+  let l2s l = String.concat "/" l
+  let get l = Dbm.find db (l2s l)
+  let set l v = Dbm.replace db (l2s l) v
 
-let conf_l2s l = List.fold_left (fun p n -> p^"/"^n) "" l
-let conf_isset l = Hashtbl.mem conf_hash (conf_l2s l)
-let conf_getstr l = Hashtbl.find conf_hash (conf_l2s l)
-let conf_getbool l = conf_getstr l == "true"
-let conf_getint l = int_of_string (conf_getstr l)
+  let rec gethubopt h o d = match h with
+    | None -> (try get [o] with _ -> d)
+    | Some hub -> try get [hub; o] with _ -> gethubopt None o d
+  let sethubopt h o v = match h with
+    | None -> set [o] v
+    | Some hub -> set [hub; o] v
 
-let conf_setstr l v =
-  Hashtbl.replace conf_hash (conf_l2s l) v;
-  conf_save ()
+  (* high-level functions *)
+  let getnick h   = gethubopt h "nick" ("NCDC_"^(string_of_int (Random.int 10000)))
+  let setnick h n =
+    if Str.string_match (Str.regexp "[$| ]") n 0 then
+      invalid_arg "Invalid character in nick."
+    else if String.length n < 1 || String.length n > 32 then
+      invalid_arg "Nick must be between 1 and 32 characters."
+    else sethubopt h "nick" n
 
-let conf_setbool l v = conf_setstr l (if v then "true" else "false")
-let conf_setint l v = conf_setstr l (string_of_int v)
+  let getemail h   = gethubopt h "email" ""
+  let setemail h e =
+    if Str.string_match (Str.regexp "[$|]") e 0 then
+      invalid_arg "Invalid character in email address."
+    else sethubopt h "email" e
+
+  let getdescription h   = gethubopt h "description" ""
+  let setdescription h d =
+    if Str.string_match (Str.regexp "[$|]") d 0 then
+      invalid_arg "Invalid character in description."
+    else sethubopt h "description" d
+
+  let getconnection h   = gethubopt h "connection" ""
+  let setconnection h c =
+    if Str.string_match (Str.regexp "[$|]") c 0 then
+      invalid_arg "Invalid character in connection."
+    else sethubopt h "connection" c
+
+  (* make sure the generated nick is at least persistent *)
+  let _ = setnick None (getnick None)
+end
 
 
 

@@ -85,6 +85,7 @@ class hub name = object(self)
 
   method getTitle = name^": Not connected"
   method getName = "#"^name
+  method getHubName = name
 
   method private drawCmd = input#draw (!win_rows-3) 0 !win_cols
   method cmdReply str = log#write str

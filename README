@@ -12,6 +12,7 @@ REQUIREMENTS
 
   Run-time:
     ncurses
+    gdbm
 
   Compile-time:
     OCaml

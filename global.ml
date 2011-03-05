@@ -116,3 +116,9 @@ object(self)
 end
 
 
+
+
+(* List of opened hubs *)
+let hubs = (Hashtbl.create 3 : (string, Nmdc.hub) Hashtbl.t)
+
+

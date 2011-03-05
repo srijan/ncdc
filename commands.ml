@@ -21,6 +21,7 @@ end
 class virtual hub = object
   inherit subject
   method virtual getHubName : string
+  method virtual getHub : Nmdc.hub
 end
 
 
@@ -64,6 +65,8 @@ class commands = object(self)
     ("description", ["[<description>]"; "Get or set your public description."], self#cmdDescription);
 
     ("connection", ["[<connection>]"; "Get or set your connection type."], self#cmdConnection);
+
+    ("connect", ["<host> <port>"; "Connect to the specified hub. Can only be used in a hub tab."], self#cmdConnect);
 
     ("help", ["[<command>]";
       "Without argument, displays a list of all available commands.";
@@ -124,6 +127,20 @@ class commands = object(self)
         try Global.Conf.setconnection self#hubConf c; self#cmdConnection []
         with Invalid_argument s -> subject#cmdReply s)
     | _   -> raise Exit
+
+  (* TODO:
+     - Allow dchub://-style URLs
+     - Save address and port to config  *)
+  method private cmdConnect args =
+    let host, port =
+      try (List.nth args 0, int_of_string (List.nth args 1))
+      with _ -> raise Exit in
+    let h = match from with Hub h -> h | _ -> raise Exit in
+    try
+      h#getHub#connect host port;
+      subject#cmdReply ("Connecting to "^h#getHub#getAddr^":"^(string_of_int port)^"...")
+    with Not_found ->
+      subject#cmdReply "Unable to resolve hostname."
 
   method private cmdHelp = function
     | []  -> List.iter (fun (n,_,_) -> self#replyHelp false n) cmds

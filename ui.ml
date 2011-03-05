@@ -82,10 +82,12 @@ class hub name = object(self)
   val log = new logWindow ""
   val input = new textInput
   val cmd = new Commands.commands
+  val hub = new Nmdc.hub
 
   method getTitle = name^": Not connected"
   method getName = "#"^name
   method getHubName = name
+  method getHub = hub
 
   method private drawCmd = input#draw (!win_rows-3) 0 !win_cols
   method cmdReply str = log#write str
@@ -112,6 +114,22 @@ class hub name = object(self)
 
   method setGlobal gl =
     cmd#setOrigin gl (Commands.Hub  (self :> Commands.hub))
+
+  method close =
+    Hashtbl.remove Global.hubs name;
+    true
+
+  initializer
+    Hashtbl.add Global.hubs name hub;
+    (* TODO: make sure these are updated when changed *)
+    hub#setNick        (Global.Conf.getnick        (Some name));
+    hub#setDescription (Global.Conf.getdescription (Some name));
+    hub#setEmail       (Global.Conf.getemail       (Some name));
+    hub#setConnection  (Global.Conf.getconnection  (Some name));
+    hub#setDisconnectFunc (fun () -> log#write "Disconnected.");
+    (* debug *)
+    hub#setIOFunc (fun rd cmd -> log#write ((if rd then "< " else "> ")^cmd))
+
 end
 
 

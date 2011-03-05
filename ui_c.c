@@ -306,8 +306,12 @@ CAMLprim value ui_logwindow_draw(value loc, value log, value lastvisible) {
     while(*str) {
       // decode character
       int r = mbtowc(buffer+(++i), str, len);
-      if(r < 0)
-        caml_failwith("ui_logwindow_draw: Invalid character encoding");
+      if(r < 0) {
+        //caml_failwith("ui_logwindow_draw: Invalid character encoding");
+        // Temporary solution. TODO: make sure all incoming text can be decoded
+        buffer[i] = '?';
+        r = 1;
+      }
       len -= r;
       str += r;
       // decide on which line to put it

@@ -280,6 +280,7 @@ CAMLprim value ui_textinput_key(value key, value str, value curpos) {
 
 
 
+// TODO: this function isn't very fast. Can be optimized using some form of caching?
 CAMLprim value ui_logwindow_draw(value loc, value log, value lastvisible) {
   CAMLparam3(loc, log, lastvisible);
 
@@ -407,4 +408,31 @@ CAMLprim value ui_tab_main(value unit) {
   CAMLreturn(Val_unit);
 }
 
+
+
+CAMLprim value ui_tab_hub(value name, value hub) {
+  CAMLparam2(name, hub);
+  attron(A_REVERSE);
+  mvhline(winrows-4, 0, ' ', wincols);
+
+  // time and username
+  char buf[10];
+  time_t tm = time(NULL);
+  strftime(buf, 9, "%H:%M:%S", localtime(&tm));
+  mvprintw(winrows-4, 0, "%s [%s]", buf,
+    String_val(caml_callback(caml_get_public_method(hub, hash_variant("getNick")), hub)));
+
+  // connection status or user count and share size
+  int count = Int_val(caml_callback(caml_get_public_method(hub, hash_variant("getUserCount")), hub));
+  if(count)
+    mvprintw(winrows-4, wincols-26, "%6d users  %8.2f TB", count, 123.45);
+  else if(Int_val(caml_callback(caml_get_public_method(hub, hash_variant("isConnecting")), hub)))
+    mvaddstr(winrows-4, wincols-14, "connecting...");
+  else
+    mvaddstr(winrows-4, wincols-14, "not connected");
+
+  attroff(A_REVERSE);
+  mvprintw(winrows-3, 0, "#%s> ", String_val(name));
+  CAMLreturn(Val_unit);
+}
 

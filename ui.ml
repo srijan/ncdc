@@ -30,6 +30,7 @@ external ui_logwindow_draw : (int * int * int * int) -> (float * string) array -
 external ui_checksize : bool ref -> int ref -> int ref -> unit = "ui_checksize"
 external ui_global : tab list -> tab -> unit = "ui_global"
 external ui_tab_main : unit -> unit = "ui_tab_main"
+external ui_tab_hub : string -> Nmdc.hub -> unit = "ui_tab_hub"
 
 
 
@@ -121,17 +122,21 @@ class hub input name = object(self)
   val cmd = new Commands.commands
   val hub = new Nmdc.hub
 
-  method getTitle = name^": Not connected"
   method getName = "#"^name
   method getHubName = name
   method getHub = hub
+  method getTitle = "#"^name^": "^(
+    if not hub#isConnected then "Not connected."
+    else if 0 = hub#getUserCount then "Connecting..."
+    else if "" = hub#getHubName then "Connected to "^hub#getAddr^":"^(string_of_int hub#getPort)
+    else hub#getHubName)
 
-  method private drawCmd = input#draw (!win_rows-3) 0 !win_cols
+  method private drawCmd = input#draw (!win_rows-3) (String.length name + 3) !win_cols
   method cmdReply str = log#write str
 
-  (* TODO *)
   method draw =
-    log#draw 1 0 (!win_rows-4) !win_cols;
+    ui_tab_hub name hub;
+    log#draw 1 0 (!win_rows-5) !win_cols;
     self#drawCmd
 
   method handleInput = function

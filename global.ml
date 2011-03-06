@@ -140,7 +140,7 @@ module Hist = struct
     )
 
   (* Searches the history for lines starting with 'q'.
-   * The line 'start' is also counted. Returns the line number, or -1.
+   * The line 'start' is also counted. Returns the line number or None.
    * Not tail-recursive. :( *)
   let rec search backwards q start =
     let ql = String.length q in

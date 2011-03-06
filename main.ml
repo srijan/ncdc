@@ -34,10 +34,10 @@ let _ =
     (* process I/O *)
     List.iter (fun s -> (Hashtbl.find rd s) ()) canrd;
     List.iter (fun s -> (Hashtbl.find wr s) ()) canwr;
-    (* make sure to redraw the screen every second *)
-    if !lastredraw < (Unix.time () -. 1.0) then (
+    (* make sure to redraw the screen at least twice every second *)
+    if !lastredraw < (Unix.gettimeofday () -. 1.0) then (
       Global.do_redraw := true;
-      lastredraw := Unix.time ()
+      lastredraw := Unix.gettimeofday ()
     );
     (* redraw screen when required *)
     if !Global.do_redraw then (

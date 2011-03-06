@@ -40,6 +40,8 @@ class hub = object(self)
   val mutable mymail = ""
   val mutable myconn = ""
   val mutable addr = inet_addr_any
+  val mutable port = 411
+  val mutable hubname = ""
 
   (* these read and write buffers are quite time-inefficient *)
   val mutable readbuf = ""
@@ -55,7 +57,13 @@ class hub = object(self)
   method setConnection c  = myconn <- c
 
   method getAddr = string_of_inet_addr addr
+  method getPort = port
+  method getNick = mynick
   method getUserList = userlist
+  method getUserCount = Hashtbl.length userlist
+  method isConnected = connected
+  method isConnecting = not connected && sock <> None
+  method getHubName = hubname
 
 
   method setSelectMasks rd wr =
@@ -105,7 +113,7 @@ class hub = object(self)
     ) with _ -> ());
     (* $HubName *)
     (try Scanf.sscanf cmd "$HubName %[^|]" (fun name ->
-      ()
+      hubname <- name
     ) with _ -> ());
     (* $Hello *)
     (try Scanf.sscanf cmd "$Hello %[^ ]" (fun nick ->
@@ -129,10 +137,11 @@ class hub = object(self)
     ) with _ -> ())
     (* TODO: MyINFO Search ConnectToMe To (...and more) *)
 
-  method connect host port =
+  method connect host p =
     if sock <> None then failwith "Already connected/connecting.";
     (* blocking gethostbyname :-( *)
     addr <- (gethostbyname host).h_addr_list.(0);
+    port <- p;
     let s = socket PF_INET SOCK_STREAM 0 in
     sock <- Some s;
     (* assumes we're on a system that supports non-blocking connect *)
@@ -152,6 +161,8 @@ class hub = object(self)
     close self#getSock;
     connected <- false;
     sock <- None;
+    Hashtbl.clear userlist;
+    hubname <- "";
     disconnectfunc ()
 
 end

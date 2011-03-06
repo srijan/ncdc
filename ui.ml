@@ -34,17 +34,55 @@ external ui_tab_main : unit -> unit = "ui_tab_main"
 
 
 (* minimal text input "widget".
- * Has to be written entirely in C to get unicode support working.
- * TODO: history and tab completion support *)
+ * Has to be written almost entirely in C to get unicode support working.
+ * TODO: tab completion support *)
 class textInput = object(self)
   (* these are used for storage in C, may be garbage in OCaml *)
   val curpos = ref 0 (* character count, not bytes nor columns *)
   val str = ref (String.make 32 '\x00') (* wchar_t* in C *)
 
+  val mutable searchp = (None : int option)
+  val mutable searchq = ""
+  val mutable searcht = false
+
+  method private search backwards =
+    let start = match searchp with
+      None ->
+        searchq <- self#getText;
+        !Global.Hist.last+(if backwards then 0 else 1)
+    | Some i -> i+(if backwards then (if searcht then 0 else -1) else 1) in
+    match Global.Hist.search backwards searchq start with
+      None ->
+        if backwards then (
+          searchp <- Some start;
+          searcht <- true;
+          self#setText "<end>"
+        ) else (
+          searchp <- None;
+          self#setText searchq
+        )
+    | Some i ->
+        searchp <- Some i;
+        searcht <- false;
+        self#setText (Global.Hist.get i)
+
   method getText = ui_textinput_get !str
   method setText a = ui_textinput_set a str curpos
   method draw y x cols = ui_textinput_draw (y, x, cols) !str !curpos
-  method handleInput t = ui_textinput_key t str curpos
+
+  method return =
+    let s = self#getText in
+    self#setText "";
+    if s <> "" then Global.Hist.insert s;
+    searchp <- None;
+    s
+
+  method handleInput = function
+      (* key up / down *)
+    | Key 0o403 -> self#search true; true
+    | Key 0o402 -> self#search false; true
+      (* other *)
+    | t -> ui_textinput_key t str curpos
 end
 
 
@@ -102,9 +140,7 @@ class hub input name = object(self)
     | Key 0o523 -> log#scroll (!win_rows / -2); true
       (* return *)
     | Ctrl '\n' ->
-        let str = input#getText in
-        if str <> "" then cmd#handle input#getText;
-        input#setText "";
+        cmd#handle input#return;
         true
       (* text input *)
     | k ->
@@ -157,9 +193,7 @@ class main input = object(self)
     | Key 0o523 -> log#scroll (!win_rows / -2); true
       (* return *)
     | Ctrl '\n' ->
-        let str = input#getText in
-        if str <> "" then cmd#handle input#getText;
-        input#setText "";
+        cmd#handle input#return;
         true
       (* text input *)
     | k ->

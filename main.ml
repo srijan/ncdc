@@ -47,5 +47,6 @@ let _ =
   done;
 
   Ui.ui_end ();
-  Global.Conf.close ()
+  Global.Conf.close ();
+  Global.Hist.close ()
 

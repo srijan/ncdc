@@ -117,6 +117,44 @@ end
 
 
 
+(* Command history *)
+
+module Hist = struct
+  let file = Filename.concat workdir "history"
+  let db = Dbm.opendbm file [Dbm.Dbm_rdwr; Dbm.Dbm_create] 0o600
+  let close () = Dbm.close db
+  let backlog = 255 (* must be 2^x-1 *)
+  let last = ref (try int_of_string (Dbm.find db "last") with _ -> 0)
+
+  let get i =
+    if i < 0 then raise Exit else
+    Dbm.find db (string_of_int (i land backlog))
+
+  let insert str =
+    let skip = try (get !last) = str with _ -> false in
+    if not skip then (
+      incr last;
+      (try Dbm.remove db (string_of_int ((!last+1) land backlog)) with _ -> ());
+      Dbm.replace db (string_of_int !last) str;
+      Dbm.replace db "last" (string_of_int !last)
+    )
+
+  (* Searches the history for lines starting with 'q'.
+   * The line 'start' is also counted. Returns the line number, or -1.
+   * Not tail-recursive. :( *)
+  let rec search backwards q start =
+    let ql = String.length q in
+    let rec s i =
+      let c = get i in
+      if String.length c > ql && String.sub c 0 ql = q then
+        Some i
+      else
+        s (i+(if backwards then -1 else 1))
+    in
+    try s start with _ -> None
+end
+
+
 
 (* List of opened hubs *)
 let hubs = (Hashtbl.create 3 : (string, Nmdc.hub) Hashtbl.t)

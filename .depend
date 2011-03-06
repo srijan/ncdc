@@ -1,0 +1,5 @@
+_build/nmdc.cmx:
+_build/global.cmx: _build/nmdc.cmx
+_build/commands.cmx: _build/nmdc.cmx _build/global.cmx
+_build/ui.cmx: _build/nmdc.cmx _build/global.cmx _build/commands.cmx
+_build/main.cmx: _build/ui.cmx _build/global.cmx

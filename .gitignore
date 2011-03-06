@@ -1,4 +1,5 @@
-main
+ncdc
+_build/
 *.o
 *.cli
 *.cmx

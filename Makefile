@@ -1,17 +1,43 @@
-# this isn't really a good build system...
+# this isn't the best build system, but it works and keeps our main directory clean
 
-# ocamlbuild is faster... but since the project is still quite small it's
-# easier to just do everything in a single ocamlopt run
 
-# order matters
+# Order of ${SOURCES} is important; we don't have dependency tracking yet
 SOURCES=ui_c.c nmdc.ml global.ml commands.ml ui.ml main.ml
+LIBS=unix.cmxa str.cmxa dbm.cmxa -cclib -lncursesw
 
-CLEAN=*.o *.cmi *.cmx
+CAMLOPT=ocamlopt.opt
 
-all:
-	ocamlopt -cclib -lncursesw -ccopt -Wall unix.cmxa str.cmxa dbm.cmxa ${SOURCES} -o main
-	rm -f ${CLEAN}
 
+MLSRC_=$(filter %.ml,$(SOURCES))
+CSRC_ =$(filter %.c,$(SOURCES))
+MLOBJ =$(MLSRC_:%.ml=%.cmx)
+COBJ  =$(CSRC_:%.c=%.o)
+MLOBJB=$(MLOBJ:%=_build/%)
+COBJB =$(COBJ:%=_build/%)
+
+all: ncdc
+
+ncdc: _build ${COBJB} ${MLOBJB}
+	cd _build && ${CAMLOPT} ${LIBS} ${COBJ} ${MLOBJ} -o ../ncdc
+
+# Prevent make from removing our links in _build/
+.SECONDARY:
+
+_build:
+	mkdir _build
+	
 clean:
-	rm -f ${CLEAN}
+	rm -rf _build ncdc
+
+_build/%.ml: %.ml
+	ln $< $@
+
+_build/%.c: %.c
+	ln $< $@
+
+_build/%.cmx: _build/%.ml
+	cd _build && $(CAMLOPT) -c $*.ml
+
+_build/%.o: _build/%.c
+	cd _build && $(CAMLOPT) -c -ccopt -Wall $*.c
 

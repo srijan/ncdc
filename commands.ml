@@ -22,6 +22,7 @@ class virtual hub = object
   inherit subject
   method virtual getHubName : string
   method virtual getHub : Nmdc.hub
+  method virtual cmdConnect : string -> int -> unit
 end
 
 
@@ -53,7 +54,9 @@ class commands = object(self)
       ^" this command, you can just type your message without starting it with"
       ^" a slash."], self#cmdSay);
 
-    ("open", ["<name>"; "Open a new tab with the given name."], self#cmdOpen);
+    ("open", ["<name>"; "Open a new hub tab with the given name.";
+      "If a tab with the same name has been used previously to connect to a hub,"
+      ^" /open will automatically connect to the same hub again."], self#cmdOpen);
 
     ("close", [""; "Close the current tab. When closing a hub tab, the hub will"
       ^" be disconnected."], self#cmdClose);
@@ -66,7 +69,10 @@ class commands = object(self)
 
     ("connection", ["[<connection>]"; "Get or set your connection type."], self#cmdConnection);
 
-    ("connect", ["<host> <port>"; "Connect to the specified hub. Can only be used in a hub tab."], self#cmdConnect);
+    ("connect", ["[<host> [<port>]]";
+      "Connect to the specified hub. Can only be used in a hub tab.";
+      "When no host is specified, will connect to the hub most recently used on the current tab."],
+      self#cmdConnect);
 
     ("disconnect", [""; "Disconnect the current hub."], self#cmdDisconnect);
 
@@ -140,12 +146,7 @@ class commands = object(self)
       | _         -> raise Exit
     in
     if port = 0 then failwith "No hub address configured.";
-    try
-      h#getHub#connect host port;
-      Global.Conf.sethubaddr self#hubConf host port;
-      subject#cmdReply ("Connecting to "^h#getHub#getAddr^":"^(string_of_int port)^"...")
-    with Not_found ->
-      subject#cmdReply "Unable to resolve hostname."
+    h#cmdConnect host port
 
   method private cmdDisconnect args =
     let h = match from with Hub h -> h | _ -> failwith "This command can be used only in hub tabs." in

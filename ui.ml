@@ -159,8 +159,18 @@ class hub input name = object(self)
     Hashtbl.remove Global.hubs name;
     true
 
+  method cmdConnect host port =
+    try
+      hub#connect host port;
+      Global.Conf.sethubaddr (Some name) host port;
+      log#write ("Connecting to "^hub#getAddr^":"^(string_of_int port)^"...")
+    with Not_found ->
+      log#write "Unable to resolve hostname."
+
   initializer
     Hashtbl.add Global.hubs name hub;
+    let host, port = Global.Conf.gethubaddr (Some name) in
+    if port <> 0 then self#cmdConnect host port;
     (* TODO: make sure these are updated when changed *)
     hub#setNick        (Global.Conf.getnick        (Some name));
     hub#setDescription (Global.Conf.getdescription (Some name));

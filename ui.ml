@@ -99,12 +99,15 @@ object(self)
   val mutable lastlog = 0
   val mutable lastvisible = 0
 
-  method write str =
+  method private writeline str =
     if lastlog = lastvisible then lastvisible <- lastlog + 1;
     lastlog <- lastlog + 1;
     log.(lastlog land backlog) <- (Unix.time (), str);
     log.((lastlog + reserved) land backlog) <- (0.0, "");
     match lf with None -> () | Some l -> l#write str
+
+  method write str =
+    List.iter self#writeline (Str.split (Str.regexp "\r?\n") str)
 
   method draw y x r c = ui_logwindow_draw (y,x,r,c) log lastvisible
 
@@ -118,7 +121,7 @@ end
 class hub input name = object(self)
   inherit tab
   inherit Commands.hub
-  val log = new logWindow ""
+  val log = new logWindow name
   val cmd = new Commands.commands
   val hub = new Nmdc.hub
 
@@ -177,6 +180,10 @@ class hub input name = object(self)
     hub#setEmail       (Global.Conf.getemail       (Some name));
     hub#setConnection  (Global.Conf.getconnection  (Some name));
     hub#setDisconnectFunc (fun () -> log#write "Disconnected.");
+    (* TODO: allow enabling/disabling of join/quit messages *)
+    hub#setJoinFunc (fun n -> log#write (n^" has joined."));
+    hub#setQuitFunc (fun n -> log#write (n^" has quit."));
+    hub#setChatFunc (fun n -> log#write n);
     (* debug *)
     hub#setIOFunc (fun rd cmd -> log#write ((if rd then "< " else "> ")^cmd))
 

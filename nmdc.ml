@@ -28,13 +28,23 @@ let lock2key lock =
  sock && connected   -> Connected
 *)
 
+(* TODO:
+ - escape/unescape special characters in hub name and chat
+ - configurable character encodings
+*)
+
 
 class hub = object(self)
   val userlist = (Hashtbl.create 100 : (string, bool) Hashtbl.t)
   val mutable sock = (None : file_descr option)
   val mutable connected = false
+
   val mutable disconnectfunc = (fun () -> ())
   val mutable iofunc = ((fun _ _ -> ()) : bool -> string -> unit)
+  val mutable joinfunc = ((fun _ -> ()) : string -> unit)
+  val mutable quitfunc = ((fun _ -> ()) : string -> unit)
+  val mutable chatfunc = ((fun _ -> ()) : string -> unit)
+
   val mutable mynick = ""
   val mutable mydesc = ""
   val mutable mymail = ""
@@ -49,7 +59,10 @@ class hub = object(self)
 
   (* TODO: More callbacks? Or just an object reference? (as with the commands) *)
   method setDisconnectFunc f = disconnectfunc <- f
-  method setIOFunc f = iofunc <- f
+  method setIOFunc f      = iofunc <- f
+  method setJoinFunc f    = joinfunc <- f
+  method setQuitFunc f    = quitfunc <- f
+  method setChatFunc f    = chatfunc <- f
   method setNick n        = mynick <- n
   (* TODO: re-send $MyINFO on change *)
   method setDescription d = mydesc <- d
@@ -122,19 +135,25 @@ class hub = object(self)
         self#queueWrite ("$MyINFO $ALL "^mynick^" "^mydesc^
           "<NCDC V:0.1,M:P,H:1/0/0,S:1>$ $"^myconn^"\001$"^mymail^"$0$");
         self#queueWrite "$GetNickList"
-      ) else
-        Hashtbl.add userlist nick false
+      ) else (
+        Hashtbl.add userlist nick false;
+        joinfunc nick
+      )
     ) with _ -> ());
     (* $Quit *)
     (try Scanf.sscanf cmd "$Quit %[^ ]" (fun nick ->
-      Hashtbl.remove userlist nick
+      Hashtbl.remove userlist nick;
+      quitfunc nick
     ) with _ -> ());
     (* $NickList *)
     (try Scanf.sscanf cmd "$NickList %[^ ]" (fun lst ->
       List.iter
         (fun nick -> Hashtbl.add userlist nick false)
         (Str.split (Str.regexp "\\$\\$") lst)
-    ) with _ -> ())
+    ) with _ -> ());
+    (* Main chat (everything that doesn't start with $) *)
+    if String.length cmd > 0 && cmd.[0] <> '$' then
+      chatfunc cmd;
     (* TODO: MyINFO Search ConnectToMe To (...and more) *)
 
   method connect host p =

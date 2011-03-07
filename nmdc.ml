@@ -21,6 +21,18 @@ let lock2key lock =
   ) "" key
 
 
+(* not the most efficient methods, but oh well *)
+let escape str =
+  let s1 = Str.global_replace (Str.regexp "&(amp|36|124);") "&amp;\\1;" str in
+  let s2 = Str.global_replace (Str.regexp "$") "&36;" s1 in
+  Str.global_replace (Str.regexp "|") "&124;" s2
+
+let unescape str =
+  let s1 = Str.global_replace (Str.regexp "&36;") "$" str in
+  let s2 = Str.global_replace (Str.regexp "&124;") "|" s1 in
+  Str.global_replace (Str.regexp "&amp;") "&" s2
+
+
 
 (* Hub connection states:
  !sock               -> Idle. Not connected, not connecting
@@ -28,10 +40,7 @@ let lock2key lock =
  sock && connected   -> Connected
 *)
 
-(* TODO:
- - escape/unescape special characters in hub name and chat
- - configurable character encodings
-*)
+(* TODO: configurable character encodings *)
 
 
 class hub = object(self)
@@ -57,7 +66,6 @@ class hub = object(self)
   val mutable readbuf = ""
   val mutable writebuf = ""
 
-  (* TODO: More callbacks? Or just an object reference? (as with the commands) *)
   method setDisconnectFunc f = disconnectfunc <- f
   method setIOFunc f      = iofunc <- f
   method setJoinFunc f    = joinfunc <- f
@@ -77,7 +85,6 @@ class hub = object(self)
   method isConnected = connected
   method isConnecting = not connected && sock <> None
   method getHubName = hubname
-
 
   method setSelectMasks rd wr =
     try
@@ -126,7 +133,7 @@ class hub = object(self)
     ) with _ -> ());
     (* $HubName *)
     (try Scanf.sscanf cmd "$HubName %[^|]" (fun name ->
-      hubname <- name
+      hubname <- unescape name
     ) with _ -> ());
     (* $Hello *)
     (try Scanf.sscanf cmd "$Hello %[^ ]" (fun nick ->
@@ -153,7 +160,7 @@ class hub = object(self)
     ) with _ -> ());
     (* Main chat (everything that doesn't start with $) *)
     if String.length cmd > 0 && cmd.[0] <> '$' then
-      chatfunc cmd;
+      chatfunc (unescape cmd);
     (* TODO: MyINFO Search ConnectToMe To (...and more) *)
 
   method connect host p =
@@ -183,6 +190,10 @@ class hub = object(self)
     Hashtbl.clear userlist;
     hubname <- "";
     disconnectfunc ()
+
+  method say str =
+    if not connected then failwith "Not connected.";
+    self#queueWrite ("<"^mynick^"> "^(escape str))
 
 end
 

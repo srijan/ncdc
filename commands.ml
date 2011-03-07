@@ -92,9 +92,10 @@ class commands = object(self)
     )
 
   method private cmdSay args =
+    let msg = String.concat " " args in
     match from with
     | Main _ -> subject#cmdReply "This is not a hub nor a user."
-    | Hub _ -> subject#cmdReply "Not implemented yet."
+    | Hub h -> h#getHub#say msg
 
   method private cmdOpen = function
     | [n] ->

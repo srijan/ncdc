@@ -65,7 +65,7 @@ module Conf = struct
   (* high-level functions *)
   let getnick h   = gethubopt h "nick" ("NCDC_"^(string_of_int (Random.int 10000)))
   let setnick h n =
-    if Str.string_match (Str.regexp "[$| ]") n 0 then
+    if Str.string_match (Str.regexp "[$| <>]") n 0 then
       invalid_arg "Invalid character in nick."
     else if String.length n < 1 || String.length n > 32 then
       invalid_arg "Nick must be between 1 and 32 characters."

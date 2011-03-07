@@ -89,6 +89,11 @@ module Conf = struct
       invalid_arg "Invalid character in connection."
     else sethubopt h "connection" c
 
+  let gethubaddr h = (gethubopt h "host" "", int_of_string (gethubopt h "port" "0"))
+  let sethubaddr h host port =
+    sethubopt h "host" host;
+    sethubopt h "port" (string_of_int port)
+
   (* make sure the generated nick is at least persistent *)
   let _ = setnick None (getnick None)
 end
@@ -140,8 +145,7 @@ module Hist = struct
     )
 
   (* Searches the history for lines starting with 'q'.
-   * The line 'start' is also counted. Returns the line number or None.
-   * Not tail-recursive. :( *)
+   * The line 'start' is also counted. Returns the line number or None. *)
   let rec search backwards q start =
     let ql = String.length q in
     let rec s i =

@@ -68,6 +68,8 @@ class commands = object(self)
 
     ("connect", ["<host> <port>"; "Connect to the specified hub. Can only be used in a hub tab."], self#cmdConnect);
 
+    ("disconnect", [""; "Disconnect the current hub."], self#cmdDisconnect);
+
     ("help", ["[<command>]";
       "Without argument, displays a list of all available commands.";
       "With arguments, displays usage information for the given command."],
@@ -128,19 +130,30 @@ class commands = object(self)
         with Invalid_argument s -> subject#cmdReply s)
     | _   -> raise Exit
 
-  (* TODO:
-     - Allow dchub://-style URLs
-     - Save address and port to config  *)
+  (* TODO: Allow dchub://-style URLs *)
   method private cmdConnect args =
-    let host, port =
-      try (List.nth args 0, int_of_string (List.nth args 1))
-      with _ -> raise Exit in
-    let h = match from with Hub h -> h | _ -> raise Exit in
+    let h = match from with Hub h -> h | _ -> failwith "This command can be used only in hub tabs." in
+    let host, port = match args with
+      | []        -> Global.Conf.gethubaddr self#hubConf
+      | [host]    -> (host, 411)
+      | [host; p] -> (host, try int_of_string p with _ -> raise Exit)
+      | _         -> raise Exit
+    in
+    if port = 0 then failwith "No hub address configured.";
     try
       h#getHub#connect host port;
+      Global.Conf.sethubaddr self#hubConf host port;
       subject#cmdReply ("Connecting to "^h#getHub#getAddr^":"^(string_of_int port)^"...")
     with Not_found ->
       subject#cmdReply "Unable to resolve hostname."
+
+  method private cmdDisconnect args =
+    let h = match from with Hub h -> h | _ -> failwith "This command can be used only in hub tabs." in
+    if List.length args > 0 then raise Exit;
+    if not h#getHub#isConnected then
+      subject#cmdReply "Not connected."
+    else
+      h#getHub#disconnect
 
   method private cmdHelp = function
     | []  -> List.iter (fun (n,_,_) -> self#replyHelp false n) cmds
@@ -165,6 +178,8 @@ class commands = object(self)
       f args
     with Not_found|Exit ->
       self#replyHelp true cmd
+    | Failure s ->
+      subject#cmdReply ("Error: "^s)
 
   method private hubConf =
     match from with

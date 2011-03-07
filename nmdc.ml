@@ -2,6 +2,24 @@
 open Unix
 
 
+class user name = object(self)
+  val mutable isop = false
+  val mutable descr = ""
+  val mutable tag = ""
+  val mutable connection = ""
+  val mutable flags = 0
+  val mutable email = ""
+  val mutable share = (None : Int64.t option)
+
+  method setOp = isop <- true
+  method setMyINFO d c f m s =
+    descr <- d; connection <- c; flags <- Char.code f; email <- m; share <- Some s;
+    prerr_endline (Int64.to_string s)
+
+  method getShare = share
+end
+
+
 
 (* http://www.teamfair.info/wiki/index.php?title=Lock_to_key
  * No, I didn't steal it, I was the one who contributed this function. ^-^ *)
@@ -40,11 +58,13 @@ let unescape str =
  sock && connected   -> Connected
 *)
 
-(* TODO: configurable character encodings *)
+(* TODO:
+ - configurable character encodings
+ - fetch $MyINFO's on connect *)
 
 
 class hub = object(self)
-  val userlist = (Hashtbl.create 100 : (string, bool) Hashtbl.t)
+  val userlist = (Hashtbl.create 100 : (string, user) Hashtbl.t)
   val mutable sock = (None : file_descr option)
   val mutable connected = false
 
@@ -85,6 +105,14 @@ class hub = object(self)
   method isConnected = connected
   method isConnecting = not connected && sock <> None
   method getHubName = hubname
+
+  (* TODO: This value should really be cached *)
+  method getShareSize =
+    Hashtbl.fold (fun _ v (s, c) ->
+      match v#getShare with
+      | None -> (s,false)
+      | Some i -> (Int64.add s i,c)
+    ) userlist (Int64.zero, true)
 
   method setSelectMasks rd wr =
     try
@@ -143,7 +171,7 @@ class hub = object(self)
           "<NCDC V:0.1,M:P,H:1/0/0,S:1>$ $"^myconn^"\001$"^mymail^"$0$");
         self#queueWrite "$GetNickList"
       ) else (
-        Hashtbl.add userlist nick false;
+        Hashtbl.add userlist nick (new user nick);
         joinfunc nick
       )
     ) with _ -> ());
@@ -154,14 +182,31 @@ class hub = object(self)
     ) with _ -> ());
     (* $NickList *)
     (try Scanf.sscanf cmd "$NickList %[^ ]" (fun lst ->
-      List.iter
-        (fun nick -> Hashtbl.add userlist nick false)
-        (Str.split (Str.regexp "\\$\\$") lst)
+      List.iter (fun nick ->
+        if not (Hashtbl.mem userlist nick) then
+          Hashtbl.add userlist nick (new user nick)
+      ) (Str.split (Str.regexp "\\$\\$") lst)
+    ) with _ -> ());
+    (* $OpList *)
+    (try Scanf.sscanf cmd "$OpList %[^ ]" (fun lst ->
+      List.iter (fun nick ->
+        if not (Hashtbl.mem userlist nick) then
+          Hashtbl.add userlist nick (new user nick);
+        (Hashtbl.find userlist nick)#setOp
+      ) (Str.split (Str.regexp "\\$\\$") lst)
+    ) with _ -> ());
+    (* $MyINFO *)
+    (try Scanf.sscanf cmd "$MyINFO $ALL %[^ ] %[^$]$ $%[^$]$%[^$]$%Lu$" (fun nick d c m s ->
+      try
+        let f = c.[String.length c - 1] in
+        let c = String.sub c 0 (String.length c - 1) in
+        (Hashtbl.find userlist nick)#setMyINFO d c f m s
+      with _ -> ()
     ) with _ -> ());
     (* Main chat (everything that doesn't start with $) *)
     if String.length cmd > 0 && cmd.[0] <> '$' then
       chatfunc (unescape cmd);
-    (* TODO: MyINFO Search ConnectToMe To (...and more) *)
+    (* TODO: Search ConnectToMe To (...and more) *)
 
   method connect host p =
     if sock <> None then failwith "Already connected/connecting.";

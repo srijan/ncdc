@@ -410,8 +410,26 @@ CAMLprim value ui_tab_main(value unit) {
 
 
 
+// stolen from ncdu (with small modifications)
+char *formatsize(const int64 from) {
+  static char dat[10]; /* "xxx.xxMiB" */
+  float r = from;
+  char c = ' ';
+  if(r < 1000.0f)      { }
+  else if(r < 1023e3f) { c = 'k'; r/=1024.0f; }
+  else if(r < 1023e6f) { c = 'M'; r/=1048576.0f; }
+  else if(r < 1023e9f) { c = 'G'; r/=1073741824.0f; }
+  else if(r < 1023e12f){ c = 'T'; r/=1099511627776.0f; }
+  else                 { c = 'P'; r/=1125899906842624.0f; }
+  sprintf(dat, "%6.2f%c%cB", r, c, c == ' ' ? ' ' : 'i');
+  return dat;
+}
+
+
+
 CAMLprim value ui_tab_hub(value name, value hub) {
   CAMLparam2(name, hub);
+  CAMLlocal1(tmp);
   attron(A_REVERSE);
   mvhline(winrows-4, 0, ' ', wincols);
 
@@ -424,9 +442,11 @@ CAMLprim value ui_tab_hub(value name, value hub) {
 
   // connection status or user count and share size
   int count = Int_val(caml_callback(caml_get_public_method(hub, hash_variant("getUserCount")), hub));
-  if(count)
-    mvprintw(winrows-4, wincols-26, "%6d users  %8.2f TB", count, 123.45);
-  else if(Int_val(caml_callback(caml_get_public_method(hub, hash_variant("isConnecting")), hub)))
+  if(count) {
+    tmp = caml_callback(caml_get_public_method(hub, hash_variant("getShareSize")), hub);
+    mvprintw(winrows-4, wincols-26, "%6d users   %9s%c", count,
+      formatsize(Int64_val(Field(tmp, 0))), Int_val(Field(tmp, 1))?' ':'+');
+  } else if(Int_val(caml_callback(caml_get_public_method(hub, hash_variant("isConnecting")), hub)))
     mvaddstr(winrows-4, wincols-14, "connecting...");
   else
     mvaddstr(winrows-4, wincols-14, "not connected");

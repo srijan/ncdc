@@ -42,7 +42,7 @@ let lock2key lock =
 (* not the most efficient methods, but oh well *)
 let escape str =
   let s1 = Str.global_replace (Str.regexp "&(amp|36|124);") "&amp;\\1;" str in
-  let s2 = Str.global_replace (Str.regexp "$") "&36;" s1 in
+  let s2 = Str.global_replace (Str.regexp "\\$") "&36;" s1 in
   Str.global_replace (Str.regexp "|") "&124;" s2
 
 let unescape str =
@@ -200,15 +200,13 @@ class hub = object(self)
     ) with _ -> ());
     (* $MyINFO *)
     (try Scanf.sscanf cmd "$MyINFO $ALL %[^ ] %[^$]$ $%[^$]$%[^$]$%Lu$" (fun nick d c m s ->
-      try
-        let f = c.[String.length c - 1] in
-        let c = String.sub c 0 (String.length c - 1) in
-        let u = Hashtbl.find userlist nick in
-        if u#needInfo then sharecount <- sharecount + 1
-        else sharesize <- Int64.sub sharesize u#getShare;
-        u#setMyINFO (unescape d) c f (unescape m) s;
-        sharesize <- Int64.add sharesize s;
-      with _ -> ()
+      let f = c.[String.length c - 1] in
+      let c = String.sub c 0 (String.length c - 1) in
+      let u = Hashtbl.find userlist nick in
+      if u#needInfo then sharecount <- sharecount + 1
+      else sharesize <- Int64.sub sharesize u#getShare;
+      u#setMyINFO (unescape d) c f (unescape m) s;
+      sharesize <- Int64.add sharesize s;
     ) with _ -> ());
     (* Main chat (everything that doesn't start with $) *)
     if String.length cmd > 0 && cmd.[0] <> '$' then

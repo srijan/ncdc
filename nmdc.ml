@@ -16,7 +16,7 @@ class user name = object(self)
     descr <- d; connection <- c; flags <- Char.code f; email <- m; share <- Some s
 
   method needInfo = share = None
-  method getShare = share
+  method getShare = match share with None -> Int64.zero | Some i -> i
 end
 
 
@@ -79,6 +79,8 @@ class hub = object(self)
   val mutable addr = inet_addr_any
   val mutable port = 411
   val mutable hubname = ""
+  val mutable sharesize = Int64.zero
+  val mutable sharecount = 0
 
   (* these read and write buffers are quite time-inefficient *)
   val mutable readbuf = ""
@@ -103,14 +105,8 @@ class hub = object(self)
   method isConnected = connected
   method isConnecting = not connected && sock <> None
   method getHubName = hubname
+  method getShareSize = (sharesize, sharecount = self#getUserCount)
 
-  (* TODO: This value should really be cached *)
-  method getShareSize =
-    Hashtbl.fold (fun _ v (s, c) ->
-      match v#getShare with
-      | None -> (s,false)
-      | Some i -> (Int64.add s i,c)
-    ) userlist (Int64.zero, true)
 
   method setSelectMasks rd wr =
     try
@@ -175,6 +171,11 @@ class hub = object(self)
     ) with _ -> ());
     (* $Quit *)
     (try Scanf.sscanf cmd "$Quit %[^ ]" (fun nick ->
+      let u = Hashtbl.find userlist nick in
+      if not u#needInfo then (
+        sharecount <- sharecount - 1;
+        sharesize <- Int64.sub sharesize u#getShare
+      );
       Hashtbl.remove userlist nick;
       quitfunc nick
     ) with _ -> ());
@@ -202,7 +203,11 @@ class hub = object(self)
       try
         let f = c.[String.length c - 1] in
         let c = String.sub c 0 (String.length c - 1) in
-        (Hashtbl.find userlist nick)#setMyINFO d c f m s
+        let u = Hashtbl.find userlist nick in
+        if u#needInfo then sharecount <- sharecount + 1
+        else sharesize <- Int64.sub sharesize u#getShare;
+        u#setMyINFO d c f m s;
+        sharesize <- Int64.add sharesize s;
       with _ -> ()
     ) with _ -> ());
     (* Main chat (everything that doesn't start with $) *)

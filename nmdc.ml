@@ -161,8 +161,8 @@ class hub = object(self)
     (try Scanf.sscanf cmd "$Hello %[^ ]" (fun nick ->
       if nick = mynick then (
         self#queueWrite "$Version 1,0091";
-        self#queueWrite ("$MyINFO $ALL "^mynick^" "^mydesc^
-          "<NCDC V:0.1,M:P,H:1/0/0,S:1>$ $"^myconn^"\001$"^mymail^"$0$");
+        self#queueWrite ("$MyINFO $ALL "^mynick^" "^(escape mydesc)^
+          "<NCDC V:0.1,M:P,H:1/0/0,S:1>$ $"^myconn^"\001$"^(escape mymail)^"$0$");
         self#queueWrite "$GetNickList"
       ) else (
         Hashtbl.add userlist nick (new user nick);
@@ -206,7 +206,7 @@ class hub = object(self)
         let u = Hashtbl.find userlist nick in
         if u#needInfo then sharecount <- sharecount + 1
         else sharesize <- Int64.sub sharesize u#getShare;
-        u#setMyINFO d c f m s;
+        u#setMyINFO (unescape d) c f (unescape m) s;
         sharesize <- Int64.add sharesize s;
       with _ -> ()
     ) with _ -> ());

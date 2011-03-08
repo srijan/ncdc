@@ -13,9 +13,9 @@ class user name = object(self)
 
   method setOp = isop <- true
   method setMyINFO d c f m s =
-    descr <- d; connection <- c; flags <- Char.code f; email <- m; share <- Some s;
-    prerr_endline (Int64.to_string s)
+    descr <- d; connection <- c; flags <- Char.code f; email <- m; share <- Some s
 
+  method needInfo = share = None
   method getShare = share
 end
 
@@ -58,9 +58,7 @@ let unescape str =
  sock && connected   -> Connected
 *)
 
-(* TODO:
- - configurable character encodings
- - fetch $MyINFO's on connect *)
+(* TODO: configurable character encodings *)
 
 
 class hub = object(self)
@@ -180,11 +178,15 @@ class hub = object(self)
       Hashtbl.remove userlist nick;
       quitfunc nick
     ) with _ -> ());
-    (* $NickList *)
+    (* $NickList - TODO: recognise and support the NoGetINFO extension *)
     (try Scanf.sscanf cmd "$NickList %[^ ]" (fun lst ->
       List.iter (fun nick ->
-        if not (Hashtbl.mem userlist nick) then
-          Hashtbl.add userlist nick (new user nick)
+        let u = try Hashtbl.find userlist nick with Not_found ->
+          let n = new user nick in
+          Hashtbl.add userlist nick n;
+          n
+        in
+        if u#needInfo then self#queueWrite ("$GetINFO "^nick^" "^mynick)
       ) (Str.split (Str.regexp "\\$\\$") lst)
     ) with _ -> ());
     (* $OpList *)

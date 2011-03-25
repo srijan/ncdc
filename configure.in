@@ -1,0 +1,47 @@
+
+AC_INIT([ncdc], [git], [projects@yorhel.nl])
+AM_INIT_AUTOMAKE([foreign])
+
+# Check for programs.
+AC_PROG_CC
+AC_PROG_INSTALL
+AC_PROG_RANLIB
+
+# Check for header files.
+AC_CHECK_HEADERS(
+  [curses.h locale.h],[],
+  AC_MSG_ERROR([required header file not found]))
+
+
+# Check for library functions.
+AC_CHECK_FUNCS(
+  [setlocale],[],
+  AC_MSG_ERROR([required function missing]))
+
+
+# Look for ncurses library to link to
+ncurses=auto
+AC_ARG_WITH([ncurses],
+            AC_HELP_STRING([--with-ncurses], [compile/link with ncurses library] ),
+            [ncurses=ncurses])
+AC_ARG_WITH([ncursesw],
+            AC_HELP_STRING([--with-ncursesw], [compile/link with wide-char ncurses library @<:@default@:>@]),
+            [ncurses=ncursesw])
+if test "$ncurses" = "auto"; then
+  AC_CHECK_LIB([ncursesw],
+               [initscr],
+               [ncurses=ncursesw],
+               [ncurses=ncurses])
+fi
+AC_CHECK_LIB([$ncurses],
+             [initscr],
+             [LIBS="$LIBS -l$ncurses"],
+             [AC_MSG_ERROR($ncurses library is required)])
+
+
+# Check for modules
+PKG_CHECK_MODULES([DEPS], [glib-2.0])
+
+
+AC_OUTPUT([Makefile])
+

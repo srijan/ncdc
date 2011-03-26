@@ -13,18 +13,6 @@
 #endif
 
 
-// ui tabs
-
-#define UIT_MAIN 0
-
-struct ui_tab {
-  int type; // UIT_ type
-  char *name;
-  char *title;
-  // more stuff(?)
-};
-
-
 // keyboard input
 
 #define KEY_ESCAPE (KEY_MAX+1)
@@ -40,12 +28,23 @@ struct input_key {
 };
 
 
+// ui tabs
+
+#define UIT_MAIN 0
+
+struct ui_tab {
+  int type; // UIT_ type
+  char *name;
+  char *title;
+};
+
+
 
 // ui.c
 
 void ui_main_create(int);
 void ui_draw();
-void ui_input(GArray*);
+void ui_input(struct input_key *);
 
 
 
@@ -53,6 +52,7 @@ void ui_input(GArray*);
 
 #ifndef NCDC_MAIN
 
+extern const char *conf_dir;
 extern GMainLoop *main_loop;
 extern GArray *ui_tabs;
 extern int ui_tab_cur;
@@ -60,6 +60,7 @@ extern int wincols, winrows;
 
 #else
 
+const char *conf_dir;
 GMainLoop *main_loop;
 GArray *ui_tabs;
 int ui_tab_cur;

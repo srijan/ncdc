@@ -12,7 +12,7 @@ AC_PROG_RANLIB
 
 # Check for header files.
 AC_CHECK_HEADERS(
-  [wchar.h locale.h],[],
+  [wchar.h locale.h signal.h],[],
   AC_MSG_ERROR([Required header file not found]))
 
 have_nch=no
@@ -24,7 +24,7 @@ fi
 
 # Check for library functions.
 AC_CHECK_FUNCS(
-  [setlocale],[],
+  [setlocale sigaction],[],
   AC_MSG_ERROR([Required function missing]))
 
 

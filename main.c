@@ -8,6 +8,8 @@
 #include <locale.h>
 #include <signal.h>
 #include <glib.h>
+#include <glib/gstdio.h>
+#include <stdio.h>
 
 
 static void handle_input() {
@@ -42,7 +44,7 @@ static void handle_input() {
   struct input_key key;
   int r;
   int lastesc = 0, curignore = 0;
-  while((r = get_wch(&(key.code))) != ERR) {
+  while((r = get_wch((wint_t *)&(key.code))) != ERR) {
     if(curignore) {
       curignore = 0;
       continue;

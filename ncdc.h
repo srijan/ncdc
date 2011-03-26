@@ -6,6 +6,7 @@
 #include <wchar.h>
 #include <glib.h>
 
+#define _XOPEN_SOURCE_EXTENDED
 #ifdef HAVE_NCURSESW_NCURSES_H
 #include <ncursesw/ncurses.h>
 #else
@@ -34,6 +35,43 @@ struct input_key {
 };
 
 
+
+// ui_util.c -> ui_textinput
+
+struct ui_textinput {
+  int pos;
+  int len; // number of characters in *str
+  gunichar *str; // 0-terminated string
+};
+
+struct ui_textinput *ui_textinput_create();
+void ui_textinput_free(struct ui_textinput *);
+void ui_textinput_set(struct ui_textinput *, char *);
+void ui_textinput_draw(struct ui_textinput *, int, int, int);
+gboolean ui_textinput_key(struct ui_textinput *, struct input_key *);
+#define ui_textinput_get(ti) g_ucs4_to_utf8((ti)->str, -1, NULL, NULL, NULL)
+
+
+
+// ui_util.c -> ui_logwindow
+
+#define LOGWIN_BUF 2047 // must be 2^x-1
+
+struct ui_logwindow {
+  int lastlog;
+  int lastvis;
+  int file;
+  char *buf[LOGWIN_BUF+1];
+};
+
+struct ui_logwindow *ui_logwindow_create(const char *);
+void ui_logwindow_free(struct ui_logwindow *);
+void ui_logwindow_add(struct ui_logwindow *, const char *);
+void ui_logwindow_scroll(struct ui_logwindow *, int);
+void ui_logwindow_draw(struct ui_logwindow *, int, int, int, int);
+
+
+
 // ui tabs
 
 #define UIT_MAIN 0
@@ -42,6 +80,7 @@ struct ui_tab {
   int type; // UIT_ type
   char *name;
   char *title;
+  struct ui_logwindow *log;
 };
 
 

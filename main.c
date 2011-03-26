@@ -4,7 +4,6 @@
 #include "ncdc.h"
 
 #include <unistd.h>
-#include <curses.h> // should be the wide character variant
 #include <locale.h>
 #include <glib.h>
 

@@ -4,11 +4,14 @@ aclocal.m4
 autom4te.cache/
 config.log
 config.status
+config.h
+config.h.in
 configure
 depcomp
 .deps/
 install-sh
 missing
+stamp-h1
 *.o
 ncdc
 INSTALL

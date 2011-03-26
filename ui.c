@@ -1,6 +1,5 @@
 
 #include <glib.h>
-#include <curses.h>
 
 #include "ncdc.h"
 

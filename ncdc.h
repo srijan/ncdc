@@ -2,8 +2,15 @@
 #ifndef NCDC_H
 #define NCDC_H
 
+#include "config.h"
 #include <wchar.h>
 #include <glib.h>
+
+#ifdef HAVE_NCURSESW_NCURSES_H
+#include <ncursesw/ncurses.h>
+#else
+#include <ncurses.h>
+#endif
 
 
 // ui tabs

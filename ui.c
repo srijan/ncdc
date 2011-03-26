@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <assert.h>
 
+#define g_unichar_width(x) (g_unichar_iswide(x) ? 2 : g_unichar_iszerowidth(x) ? 0 : 1)
 
 
 // Log window "widget"
@@ -108,7 +109,7 @@ static void logwindow_draw(struct logwindow *lw, int y, int x, int rows, int col
 
     // loop through the characters and determine on which line to put them
     while(str[i]) {
-      int width = g_unichar_iswide(str[i]) ? 2 : g_unichar_iszerowidth(str[i]) ? 0 : 1;
+      int width = g_unichar_width(str[i]);
       if(curlinecols+width >= (curline > 1 ? cols-LOGWIN_PAD : cols)) {
         assert(++curline <= 100);
         curlinecols = 0;
@@ -128,6 +129,127 @@ static void logwindow_draw(struct logwindow *lw, int y, int x, int rows, int col
     g_free(str);
     cur = (cur-1) & LOGWIN_BUF;
   }
+}
+
+
+
+
+// Text input "widget"
+
+// TODO: history and tab completion
+struct textinput {
+  int pos;
+  int len; // number of characters in *str
+  gunichar *str; // 0-terminated string
+};
+
+#define textinput_get(ti) g_ucs4_to_utf8((ti)->str, -1, NULL, NULL, NULL)
+
+
+static struct textinput *textinput_create() {
+  struct textinput *ti = g_new0(struct textinput, 1);
+  ti->str = g_new0(gunichar, 1);
+  ti->len = 0;
+  return ti;
+}
+
+
+static void textinput_free(struct textinput *ti) {
+  g_free(ti->str);
+  g_free(ti);
+}
+
+
+static void textinput_set(struct textinput *ti, char *str) {
+  g_free(ti->str);
+  glong written;
+  ti->str = g_utf8_to_ucs4(str, -1, NULL, &written, NULL);
+  assert(ti->str != NULL);
+  ti->pos = ti->len = written;
+}
+
+
+// must be drawn last, to keep the cursor position correct
+// also not the most efficient function ever, but probably fast enough.
+static void textinput_draw(struct textinput *ti, int y, int x, int col) {
+  //       |              |
+  // "Some random string etc etc"
+  //       f         #    l
+  // f = function(#, strwidth(upto_#), wincols)
+  // if(strwidth(upto_#) < wincols*0.85)
+  //   f = 0
+  // else
+  //   f = strwidth(upto_#) - wincols*0.85
+  int i;
+
+  // calculate f (in number of columns)
+  int width = 0;
+  gunichar *str = ti->str;
+  for(i=0; i<=ti->pos && str[i]; i++)
+    width += g_unichar_width(str[i]);
+  int f = width - (col*85)/100;
+  if(f < 0)
+    f = 0;
+
+  // now print it on the screen, starting from column f in the string and
+  // stopping when we're out of screen columns
+  mvhline(y, x, ' ', col);
+  move(y, x);
+  int pos = 0;
+  char enc[7];
+  i = 0;
+  while(*str) {
+    f -= g_unichar_width(*str);
+    if(f < -col)
+      break;
+    if(f < 0) {
+      enc[g_unichar_to_utf8(*str, enc)] = 0;
+      addstr(enc);
+      if(i < ti->pos)
+        pos += g_unichar_width(*str);
+    }
+    i++;
+    str++;
+  }
+  move(y, x+pos);
+  curs_set(1);
+}
+
+
+static gboolean textinput_key(struct textinput *ti, struct input_key *key) {
+  if(key->type == INPT_KEY) {
+    switch(key->code) {
+      case KEY_LEFT:  if(ti->pos > 0) ti->pos--; break;
+      case KEY_RIGHT: if(ti->pos < ti->len) ti->pos++; break;
+      case KEY_END:   ti->pos = ti->len; break;
+      case KEY_HOME:  ti->pos = 0; break;
+      case KEY_BACKSPACE:
+        if(ti->pos > 0) {
+          memmove(ti->str + ti->pos - 1, ti->str + ti->pos, (ti->len - ti->pos + 1) * sizeof(gunichar));
+          ti->pos--;
+          ti->len--;
+        }
+        break;
+      case KEY_DC:
+        if(ti->pos < ti->len) {
+          memmove(ti->str + ti->pos, ti->str + ti->pos + 1, (ti->len - ti->pos) * sizeof(gunichar));
+          ti->len--;
+        }
+        break;
+      default:
+        return FALSE;
+    }
+  } else if(key->type == INPT_CHAR) {
+    // increase string size by one (not *very* efficient...)
+    ti->len++;
+    ti->str = g_renew(gunichar, ti->str, ti->len+1);
+    // insert character
+    memmove(ti->str + ti->pos + 1, ti->str + ti->pos, (ti->len - ti->pos) * sizeof(gunichar));
+    ti->str[ti->pos] = key->code;
+    ti->pos++;
+  } else
+    return FALSE;
+  return TRUE;
 }
 
 
@@ -174,6 +296,31 @@ static void ui_main_key(struct input_key *key) {
 // Global stuff
 
 
+struct textinput *global_textinput;
+
+
+void ui_init() {
+  // first tab = main tab
+  ui_tabs = g_array_new(FALSE, FALSE, sizeof(struct ui_tab));
+  ui_main_create(0);
+  ui_tab_cur = 0;
+
+  // global textinput field
+  global_textinput = textinput_create();
+
+  // init curses
+  initscr();
+  raw();
+  noecho();
+  curs_set(0);
+  keypad(stdscr, 1);
+  nodelay(stdscr, 1);
+
+  // draw
+  ui_draw();
+}
+
+
 void ui_draw() {
   struct ui_tab *curtab = &g_array_index(ui_tabs, struct ui_tab, ui_tab_cur);
 
@@ -194,13 +341,15 @@ void ui_draw() {
   // TODO: status info
   attroff(A_REVERSE);
 
-  // last line - text input
-  mvaddstr(winrows-1, 0, curtab->name);
-  addstr("> ");
-  // TODO: text input
-
+  // tab contents
   if(curtab->type == UIT_MAIN)
     ui_main_draw();
+
+  // last line - text input
+  mvaddstr(winrows-1, 0, curtab->name);
+  addch('>');
+  int pos = strlen(curtab->name)+2;
+  textinput_draw(global_textinput, winrows-1, pos, wincols-pos);
 
   refresh();
 }
@@ -212,6 +361,9 @@ void ui_input(struct input_key *key) {
   // ctrl+c
   if(key->type == INPT_CTRL && key->code == 3)
     g_main_loop_quit(main_loop);
+  // main text input (TODO: in some cases the focus shouldn't be on the text input.)
+  else if(textinput_key(global_textinput, key))
+    1; // don't do anything
   // let tab handle it
   else {
     if(curtab->type == UIT_MAIN)

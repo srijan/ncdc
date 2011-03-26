@@ -150,19 +150,7 @@ int main(int argc, char **argv) {
 
   // init stuff
   init_config();
-
-  ui_tabs = g_array_new(FALSE, FALSE, sizeof(struct ui_tab));
-  ui_main_create(0);
-  ui_tab_cur = 0;
-
-  // init curses
-  initscr();
-  raw();
-  noecho();
-  curs_set(0);
-  keypad(stdscr, 1);
-  nodelay(stdscr, 1);
-  ui_draw();
+  ui_init();
 
   // setup SIGWINCH
   struct sigaction act;

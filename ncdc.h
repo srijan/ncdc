@@ -12,6 +12,12 @@
 #include <ncurses.h>
 #endif
 
+// Make sure that wchar_t and gunichar are equivalent
+// TODO: this should be checked at ./configure time
+#ifndef __STDC_ISO_10646__
+#error Your wchar_t type is not guaranteed to be UCS-4!
+#endif
+
 
 // keyboard input
 
@@ -43,6 +49,7 @@ struct ui_tab {
 // ui.c
 
 void ui_main_create(int);
+void ui_init();
 void ui_draw();
 void ui_input(struct input_key *);
 

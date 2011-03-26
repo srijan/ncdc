@@ -9,7 +9,7 @@ AC_PROG_RANLIB
 
 # Check for header files.
 AC_CHECK_HEADERS(
-  [curses.h locale.h],[],
+  [curses.h wchar.h locale.h],[],
   AC_MSG_ERROR([required header file not found]))
 
 

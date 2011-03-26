@@ -2,8 +2,11 @@
 #ifndef NCDC_H
 #define NCDC_H
 
+#include <wchar.h>
 #include <glib.h>
 
+
+// ui tabs
 
 #define UIT_MAIN 0
 
@@ -14,6 +17,32 @@ struct ui_tab {
   // more stuff(?)
 };
 
+
+// keyboard input
+
+#define KEY_ESCAPE (KEY_MAX+1)
+#define INPT_KEY  0
+#define INPT_CHAR 1
+#define INPT_CTRL 2
+#define INPT_ALT  4
+
+struct input_key {
+  wchar_t code;    // character code (as given by get_wch())
+  char type;       // INPT_ type
+  char encoded[7]; // UTF-8 encoded character string (if type != key)
+};
+
+
+
+// ui.c
+
+void ui_main_create(int);
+void ui_draw();
+void ui_input(GArray*);
+
+
+
+// global variables
 
 #ifndef NCDC_MAIN
 

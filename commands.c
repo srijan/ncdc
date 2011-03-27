@@ -34,7 +34,23 @@ static struct ui_tab *tab;
 struct cmd {
   char name[16];
   void (*f)(char *);
+  char *args;
+  char *sum;
+  char *desc;
 };
+// alias to cmd_list, needed to handle the recursive dependency for c_help()
+static struct cmd *cmds;
+
+
+// get a command by name. performs a linear search. can be rewritten to use a
+// binary search, but I doubt the performance difference really matters.
+static struct cmd *getcmd(char *name) {
+  struct cmd *c = cmds;
+  for(c=cmds; c->f; c++)
+    if(strcmp(c->name, name) == 0)
+      break;
+  return c->f ? c : NULL;
+}
 
 
 static void c_quit(char *args) {
@@ -47,15 +63,52 @@ static void c_say(char *args) {
 }
 
 
-// the command list
-static struct cmd cmds[] = {
-  { "quit", c_quit },
-  { "say",  c_say  },
+static void c_help(char *args) {
+  struct cmd *c;
+  // list available commands
+  if(!args[0]) {
+    ui_logwindow_add(tab->log, "");
+    ui_logwindow_add(tab->log, "Available commands:");
+    for(c=cmds; c->f; c++)
+      ui_logwindow_printf(tab->log, " /%s - %s", c->name, c->sum);
+    ui_logwindow_add(tab->log, "");
+
+  // list information on a particular command
+  } else {
+    c = getcmd(args);
+    ui_logwindow_add(tab->log, "");
+    if(!c)
+      ui_logwindow_printf(tab->log, "Unknown command '%s'.", args);
+    else {
+      ui_logwindow_printf(tab->log, "Usage: /%s %s", c->name, c->args ? c->args : "");
+      ui_logwindow_printf(tab->log, "  %s", c->sum);
+      ui_logwindow_add(tab->log, "");
+      ui_logwindow_add(tab->log, c->desc);
+    }
+    ui_logwindow_add(tab->log, "");
+  }
+}
+
+
+// the actual command list (cmds is an alias to this, set by cmd_handle())
+static struct cmd cmds_list[] = {
+  { "quit", c_quit,
+    NULL, "Quit ncdc.",
+    "You can also just hit ctrl+c, which is equivalent."
+  },
+  { "say",  c_say,
+    "<message>", "Send a chat message.",
+    "Not implemented yet."
+  },
+  { "help", c_help,
+    "[<command>]", "Request information on commands.",
+    "Use /help without arguments to list all the available commands.\n"
+    "Use /help <command> to get information about a particular command."
+  },
   { "", NULL }
 };
 
 
-// NOT thread-safe
 void cmd_handle(char *ostr) {
   char *str = g_strdup(ostr);
   g_strstrip(str);
@@ -69,6 +122,7 @@ void cmd_handle(char *ostr) {
   // "replies" should be sent back to. (This tab is assumed to have a logwindow
   // object - though this assumption can be relaxed in the future)
   tab = ui_tab_cur->data;
+  cmds = cmds_list;
 
   // extract the command from the string
   char *cmd, *args;
@@ -85,14 +139,9 @@ void cmd_handle(char *ostr) {
     args = sep ? sep+1 : "";
   }
 
-  // look up the command in the command list (linear search)
-  struct cmd *c;
-  for(c=cmds; c->f; c++)
-    if(strcmp(c->name, cmd) == 0)
-      break;
-  
-  // execute command if found, generate an error otherwise
-  if(c->f)
+  // execute command when found, generate an error otherwise
+  struct cmd *c = getcmd(cmd);
+  if(c)
     c->f(args);
   else
     ui_logwindow_printf(tab->log, "Unknown command '%s'.", cmd);

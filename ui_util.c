@@ -80,7 +80,7 @@ void ui_logwindow_free(struct ui_logwindow *lw) {
 }
 
 
-void ui_logwindow_add(struct ui_logwindow *lw, const char *msg) {
+static void ui_logwindow_addline(struct ui_logwindow *lw, const char *msg) {
   if(lw->lastlog == lw->lastvis)
     lw->lastvis = lw->lastlog + 1;
   lw->lastlog++;
@@ -112,7 +112,20 @@ void ui_logwindow_add(struct ui_logwindow *lw, const char *msg) {
 }
 
 
-void ui_logwindow_printf(struct ui_logwindow *lw, char *fmt, ...) {
+void ui_logwindow_add(struct ui_logwindow *lw, const char *msg) {
+  if(!msg[0]) {
+    ui_logwindow_addline(lw, "");
+    return;
+  }
+  char **lines = g_strsplit(msg, "\n", 0);
+  char **line;
+  for(line=lines; *line; line++)
+    ui_logwindow_addline(lw, *line);
+  g_strfreev(lines);
+}
+
+
+void ui_logwindow_printf(struct ui_logwindow *lw, const char *fmt, ...) {
   va_list va;
   va_start(va, fmt);
   char *str = g_strdup_vprintf(fmt, va);

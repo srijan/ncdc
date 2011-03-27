@@ -25,11 +25,13 @@
 
 #include "ncdc.h"
 #include <string.h>
+#include <stdarg.h>
 #include <errno.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <assert.h>
 #include <glib/gstdio.h>
+#include <glib/gprintf.h>
 
 #define g_unichar_width(x) (g_unichar_iswide(x) ? 2 : g_unichar_iszerowidth(x) ? 0 : 1)
 
@@ -107,6 +109,16 @@ void ui_logwindow_add(struct ui_logwindow *lw, const char *msg) {
     g_free(lw->buf[next]);
     lw->buf[next] = NULL;
   }
+}
+
+
+void ui_logwindow_printf(struct ui_logwindow *lw, char *fmt, ...) {
+  va_list va;
+  va_start(va, fmt);
+  char *str = g_strdup_vprintf(fmt, va);
+  va_end(va);
+  ui_logwindow_add(lw, str);
+  g_free(str);
 }
 
 

@@ -14,6 +14,7 @@ missing
 stamp-h1
 *.o
 main.h
+commands.h
 ui.h
 ui_util.h
 ncdc

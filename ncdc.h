@@ -42,6 +42,7 @@
 
 // include the auto-generated header files
 #include "main.h"
+#include "commands.h"
 #include "ui.h"
 #include "ui_util.h"
 

@@ -41,8 +41,8 @@ struct ui_tab {
 
 #endif
 
-GArray *ui_tabs;
-int ui_tab_cur;
+GList *ui_tabs = NULL;
+GList *ui_tab_cur = NULL;
 
 // screen dimensions
 int wincols;
@@ -53,34 +53,33 @@ int winrows;
 // Main tab
 
 
-// these is only one main tab, so these can be static
-struct ui_tab main_tab;
+// these is only one main tab, so this can be static
+struct ui_tab *ui_main;
 
-void ui_main_create(int idx) {
+static struct ui_tab *ui_main_create() {
+  ui_main = g_new0(struct ui_tab, 1);
+  ui_main->name = "main";
+  ui_main->title = "Welcome to ncdc 0.1-alpha!";
+  ui_main->log = ui_logwindow_create("main.log");
 
-  main_tab.name = "main";
-  main_tab.title = "Welcome to ncdc 0.1-alpha!";
-  main_tab.log = ui_logwindow_create("main.log");
-  g_array_insert_val(ui_tabs, idx, main_tab);
+  ui_logwindow_add(ui_main->log, "Welcome to ncdc 0.1-alpha!");
+  ui_logwindow_printf(ui_main->log, "Using working directory: %s", conf_dir);
 
-  ui_logwindow_add(main_tab.log, "Welcome to ncdc 0.1-alpha!");
-  char *tmp = g_strconcat("Using working directory: ", conf_dir, NULL);
-  ui_logwindow_add(main_tab.log, tmp);
-  g_free(tmp);
+  return ui_main;
 }
 
 
 static void ui_main_draw() {
-  ui_logwindow_draw(main_tab.log, 1, 0, winrows-3, wincols);
+  ui_logwindow_draw(ui_main->log, 1, 0, winrows-3, wincols);
 }
 
 
 static void ui_main_key(struct input_key *key) {
   if(key->type == INPT_KEY) {
     if(key->code == KEY_NPAGE)
-      ui_logwindow_scroll(main_tab.log, winrows/2);
+      ui_logwindow_scroll(ui_main->log, winrows/2);
     else if(key->code == KEY_PPAGE)
-      ui_logwindow_scroll(main_tab.log, -winrows/2);
+      ui_logwindow_scroll(ui_main->log, -winrows/2);
   }
 }
 
@@ -95,9 +94,8 @@ static struct ui_textinput *global_textinput;
 
 void ui_init() {
   // first tab = main tab
-  ui_tabs = g_array_new(FALSE, FALSE, sizeof(struct ui_tab));
-  ui_main_create(0);
-  ui_tab_cur = 0;
+  ui_tabs = g_list_append(ui_tabs, ui_main_create());
+  ui_tab_cur = ui_tabs;
 
   // global textinput field
   global_textinput = ui_textinput_create();
@@ -116,7 +114,7 @@ void ui_init() {
 
 
 void ui_draw() {
-  struct ui_tab *curtab = &g_array_index(ui_tabs, struct ui_tab, ui_tab_cur);
+  struct ui_tab *curtab = ui_tab_cur->data;
 
   getmaxyx(stdscr, winrows, wincols);
   curs_set(0); // may be overridden later on by a textinput widget
@@ -150,7 +148,7 @@ void ui_draw() {
 
 
 void ui_input(struct input_key *key) {
-  struct ui_tab *curtab = &g_array_index(ui_tabs, struct ui_tab, ui_tab_cur);
+  struct ui_tab *curtab = ui_tab_cur->data;
 
   // ctrl+c
   if(key->type == INPT_CTRL && key->code == 3)
@@ -162,7 +160,7 @@ void ui_input(struct input_key *key) {
   // enter key is pressed while focused on the textinput
   } else if(key->type == INPT_CTRL && key->code == '\n') {
     char *str = ui_textinput_get(global_textinput);
-    ui_logwindow_add(main_tab.log, str);
+    cmd_handle(str);
     g_free(str);
     ui_textinput_set(global_textinput, "");
 

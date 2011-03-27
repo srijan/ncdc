@@ -1,8 +1,21 @@
 
 
 #include "ncdc.h"
-
 #include <string.h>
+
+
+#if INTERFACE
+
+#define UIT_MAIN 0
+
+struct ui_tab {
+  int type; // UIT_ type
+  char *name;
+  char *title;
+  struct ui_logwindow *log;
+};
+
+#endif
 
 
 
@@ -46,7 +59,7 @@ static void ui_main_key(struct input_key *key) {
 // Global stuff
 
 
-struct ui_textinput *global_textinput;
+static struct ui_textinput *global_textinput;
 
 
 void ui_init() {

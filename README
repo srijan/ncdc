@@ -1,0 +1,45 @@
+ncdc 0.1-alpha
+==============
+
+DESCRIPTION
+
+  ncdc aims to become an awesome Direct Connect client with an NCurses
+  interface, written in C. It is currently in a very early alpha stage and
+  nothing useful has been implemented yet.
+
+
+REQUIREMENTS
+
+
+  ncursesw
+  glib2
+
+
+
+BUILDING
+
+  To build ncdc from this repository (there are no packaged versions yet), you
+  will need the following:
+
+  - autotools and make and stuff
+  - A C compiler, obviously
+  - ncurses & glib development files
+  - The 'makeheaders' program, which is assumed to be in your $PATH
+    (Get it from http://www.hwaci.com/sw/mkhdr/index.html - In future versions
+    I'll probably include that program in repo, it's only a single C file.)
+
+  If you have all that, run:
+
+    autoreconf -i
+    ./configure --prefix=/usr
+    make
+
+  And optionally 'make install' if you want.
+
+
+
+CONTACT
+
+  projects@yorhel.nl
+  http://dev.yorhel.nl/
+

@@ -1,15 +1,40 @@
 
-
-#define NCDC_MAIN
 #include "ncdc.h"
-
 #include <stdlib.h>
 #include <unistd.h>
 #include <locale.h>
 #include <signal.h>
-#include <glib.h>
 #include <glib/gstdio.h>
 #include <stdio.h>
+
+
+// input handling declarations
+
+#if INTERFACE
+
+#define KEY_ESCAPE (KEY_MAX+1)
+#define INPT_KEY  0
+#define INPT_CHAR 1
+#define INPT_CTRL 2
+#define INPT_ALT  4
+
+struct input_key {
+  wchar_t code;    // character code (as given by get_wch())
+  char type;       // INPT_ type
+  char encoded[7]; // UTF-8 encoded character string (if type != key)
+};
+
+#endif
+
+
+// global variables
+const char *conf_dir;
+GMainLoop *main_loop;
+GArray *ui_tabs;
+int ui_tab_cur;
+int wincols;
+int winrows;
+
 
 
 static void handle_input() {
@@ -123,7 +148,7 @@ static void catch_sigwinch(int sig) {
 }
 
 
-void init_config() {
+static void init_config() {
   // get location of the configuration directory
   conf_dir = g_getenv("NCDC_DIR");
   if(!conf_dir)

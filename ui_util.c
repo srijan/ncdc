@@ -1,6 +1,5 @@
 
 #include "ncdc.h"
-
 #include <string.h>
 #include <errno.h>
 #include <unistd.h>
@@ -14,7 +13,20 @@
 // Log window "widget"
 
 
+#if INTERFACE
+struct ui_logwindow;
+#endif
+
 #define LOGWIN_PAD 9
+#define LOGWIN_BUF 2047 // must be 2^x-1
+
+struct ui_logwindow {
+  int lastlog;
+  int lastvis;
+  int file;
+  char *buf[LOGWIN_BUF+1];
+};
+
 
 struct ui_logwindow *ui_logwindow_create(const char *file) {
   struct ui_logwindow *lw = g_new0(struct ui_logwindow, 1);
@@ -127,6 +139,18 @@ void ui_logwindow_draw(struct ui_logwindow *lw, int y, int x, int rows, int cols
 
 // Text input "widget"
 // TODO: history and tab completion
+
+#if INTERFACE
+
+struct ui_textinput {
+  int pos;
+  int len; // number of characters in *str
+  gunichar *str; // 0-terminated string
+};
+
+#define ui_textinput_get(ti) g_ucs4_to_utf8((ti)->str, -1, NULL, NULL, NULL)
+
+#endif
 
 
 struct ui_textinput *ui_textinput_create() {

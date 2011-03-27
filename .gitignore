@@ -13,5 +13,8 @@ install-sh
 missing
 stamp-h1
 *.o
+main.h
+ui.h
+ui_util.h
 ncdc
 INSTALL

@@ -18,7 +18,7 @@ struct ui_logwindow;
 #endif
 
 #define LOGWIN_PAD 9
-#define LOGWIN_BUF 2047 // must be 2^x-1
+#define LOGWIN_BUF 1023 // must be 2^x-1
 
 struct ui_logwindow {
   int lastlog;
@@ -87,8 +87,13 @@ void ui_logwindow_add(struct ui_logwindow *lw, const char *msg) {
 
 
 void ui_logwindow_scroll(struct ui_logwindow *lw, int i) {
-  lw->lastvis = MIN(lw->lastvis + i, lw->lastlog);
-  lw->lastvis = MAX(lw->lastvis - LOGWIN_BUF + 1, MAX(1, lw->lastvis));
+  lw->lastvis += i;
+  // lastvis may never be larger than the last entry present
+  lw->lastvis = MIN(lw->lastvis, lw->lastlog);
+  // lastvis may never be smaller than the last entry still in the log
+  lw->lastvis = MAX(lw->lastlog - LOGWIN_BUF+1, lw->lastvis);
+  // lastvis may never be smaller than one
+  lw->lastvis = MAX(1, lw->lastvis);
 }
 
 
@@ -207,7 +212,7 @@ void ui_textinput_draw(struct ui_textinput *ti, int y, int x, int col) {
   i = 0;
   while(*str) {
     f -= g_unichar_width(*str);
-    if(f < -col)
+    if(f <= -col)
       break;
     if(f < 0) {
       enc[g_unichar_to_utf8(*str, enc)] = 0;

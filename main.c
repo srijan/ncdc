@@ -30,10 +30,6 @@ struct input_key {
 // global variables
 const char *conf_dir;
 GMainLoop *main_loop;
-GArray *ui_tabs;
-int ui_tab_cur;
-int wincols;
-int winrows;
 
 
 

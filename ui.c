@@ -17,6 +17,13 @@ struct ui_tab {
 
 #endif
 
+GArray *ui_tabs;
+int ui_tab_cur;
+
+// screen dimensions
+int wincols;
+int winrows;
+
 
 
 // Main tab
@@ -124,9 +131,17 @@ void ui_input(struct input_key *key) {
   // ctrl+c
   if(key->type == INPT_CTRL && key->code == 3)
     g_main_loop_quit(main_loop);
+
   // main text input (TODO: in some cases the focus shouldn't be on the text input.)
   else if(ui_textinput_key(global_textinput, key)) {
-    // don't do anything
+
+  // enter key is pressed while focused on the textinput
+  } else if(key->type == INPT_CTRL && key->code == '\n') {
+    char *str = ui_textinput_get(global_textinput);
+    ui_logwindow_add(main_tab.log, str);
+    g_free(str);
+    ui_textinput_set(global_textinput, "");
+
   // let tab handle it
   } else {
     if(curtab->type == UIT_MAIN)

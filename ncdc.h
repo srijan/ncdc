@@ -40,6 +40,15 @@
 #error Your wchar_t type is not guaranteed to be UCS-4!
 #endif
 
+
+// forward declaration for data types
+// (some of these remain incomplete, others are defined in interfaces)
+struct input_key;
+struct ui_tab;
+struct ui_logwindow;
+struct ui_textinput;
+
+
 // include the auto-generated header files
 #include "main.h"
 #include "commands.h"

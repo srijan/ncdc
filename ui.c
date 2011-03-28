@@ -98,7 +98,7 @@ void ui_init() {
   ui_tab_cur = ui_tabs;
 
   // global textinput field
-  global_textinput = ui_textinput_create();
+  global_textinput = ui_textinput_create(TRUE);
 
   // init curses
   initscr();
@@ -159,7 +159,7 @@ void ui_input(struct input_key *key) {
 
   // enter key is pressed while focused on the textinput
   } else if(key->type == INPT_CTRL && key->code == '\n') {
-    char *str = ui_textinput_get(global_textinput);
+    char *str = ui_textinput_reset(global_textinput);
     cmd_handle(str);
     g_free(str);
     ui_textinput_set(global_textinput, "");

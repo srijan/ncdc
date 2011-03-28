@@ -25,11 +25,11 @@
 
 #include "ncdc.h"
 #include <string.h>
+#include <stdlib.h>
 #include <stdarg.h>
 #include <errno.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <assert.h>
 #include <glib/gstdio.h>
 #include <glib/gprintf.h>
 
@@ -37,11 +37,8 @@
 
 
 // Log window "widget"
+// TODO: log file rotation (of some sorts)
 
-
-#if INTERFACE
-struct ui_logwindow;
-#endif
 
 #define LOGWIN_PAD 9
 #define LOGWIN_BUF 1023 // must be 2^x-1
@@ -49,7 +46,7 @@ struct ui_logwindow;
 struct ui_logwindow {
   int lastlog;
   int lastvis;
-  int file;
+  FILE *file;
   char *buf[LOGWIN_BUF+1];
 };
 
@@ -58,12 +55,10 @@ struct ui_logwindow *ui_logwindow_create(const char *file) {
   struct ui_logwindow *lw = g_new0(struct ui_logwindow, 1);
   if(file) {
     char *fn = g_build_filename(conf_dir, "logs", file, NULL);
-    lw->file = g_open(fn, O_WRONLY | O_CREAT | O_APPEND, 0700);
-    if(lw->file < 0)
+    lw->file = fopen(fn, "a");
+    if(!lw->file)
       g_warning("Unable to open log file '%s' for writing: %s", fn, strerror(errno));
     g_free(fn);
-  } else {
-    lw->file = -1;
   }
   return lw;
 }
@@ -71,8 +66,8 @@ struct ui_logwindow *ui_logwindow_create(const char *file) {
 
 void ui_logwindow_free(struct ui_logwindow *lw) {
   int i;
-  if(lw->file >= 0)
-    close(lw->file);
+  if(lw->file)
+    fclose(lw->file);
   for(i=0; i<LOGWIN_BUF; i++)
     if(lw->buf[i])
       g_free(lw->buf[i]);
@@ -87,19 +82,17 @@ static void ui_logwindow_addline(struct ui_logwindow *lw, const char *msg) {
 
   // TODO: convert invalid characters being written to the buffer
   //  ui_logwindow_draw() really requires valid UTF-8
-  assert(g_utf8_validate(msg, -1, NULL));
+  g_assert(g_utf8_validate(msg, -1, NULL));
 
   GDateTime *dt = g_date_time_new_now_local();
   char *tmp = g_date_time_format(dt, "%H:%M:%S ");
   lw->buf[lw->lastlog & LOGWIN_BUF] = g_strconcat(tmp, msg, NULL);
   g_free(tmp);
 
-  if(lw->file >= 0) {
+  if(lw->file) {
     tmp = g_date_time_format(dt, "[%F %H:%M:%S %Z] ");
-    // TODO: don't ignore errors
-    write(lw->file, tmp, strlen(tmp));
-    write(lw->file, msg, strlen(msg));
-    write(lw->file, "\n", 1);
+    if(fprintf(lw->file, "%s%s\n", tmp, msg) < 0 && !strstr(msg, "(LOGERR)"))
+      g_warning("Error writing to log file: %s (LOGERR)", strerror(errno));
     g_free(tmp);
   }
   g_date_time_unref(dt);
@@ -168,7 +161,7 @@ void ui_logwindow_draw(struct ui_logwindow *lw, int y, int x, int rows, int cols
     while(str[i]) {
       int width = g_unichar_width(str[i]);
       if(curlinecols+width >= (curline > 1 ? cols-LOGWIN_PAD : cols)) {
-        assert(++curline <= 100);
+        g_assert(++curline <= 100);
         curlinecols = 0;
       }
       lines[curline] = i+1;
@@ -191,42 +184,169 @@ void ui_logwindow_draw(struct ui_logwindow *lw, int y, int x, int rows, int cols
 
 
 
-// Text input "widget"
-// TODO: history and tab completion
+// Command history and tab completion
+// We only have one command history, so the struct and its instance is local to
+// this file, and the functions work with this instead of accepting an instance
+// as argument. The ui_textinput functions also access the struct and static
+// functions, but these don't need to be public - since ui_textinput is defined
+// below.
 
-#if INTERFACE
+#define CMDHIST_BUF 511 // must be 2^x-1
+#define CMDHIST_MAXCMD 1024
+
+
+struct ui_cmdhist {
+  char *buf[CMDHIST_BUF+1]; // circular buffer
+  char *fn;
+  int last;
+  gboolean ismod;
+};
+
+// we only have one command history, so this can be a global
+static struct ui_cmdhist *cmdhist;
+
+
+static void ui_cmdhist_add(const char *str) {
+  int cur = cmdhist->last & CMDHIST_BUF;
+  // ignore empty lines, or lines that are the same as the previous one
+  if(!str || !str[0] || (cmdhist->buf[cur] && 0 == strcmp(str, cmdhist->buf[cur])))
+    return;
+
+  cmdhist->last++;
+  cur = cmdhist->last & CMDHIST_BUF;
+  if(cmdhist->buf[cur]) {
+    g_free(cmdhist->buf[cur]);
+    cmdhist->buf[cur] = NULL;
+  }
+  cmdhist->buf[cur] = strdup(str);
+  cmdhist->ismod = TRUE;
+}
+
+
+void ui_cmdhist_init(const char *file) {
+  cmdhist = g_new0(struct ui_cmdhist, 1);
+
+  cmdhist->fn = g_build_filename(conf_dir, file, NULL);
+  FILE *f = fopen(cmdhist->fn, "r");
+  if(f) {
+    char l[CMDHIST_MAXCMD];
+    while(fgets(l, CMDHIST_MAXCMD, f)) {
+      int len = strlen(l);
+      if(len > 0 && l[len-1] == '\n')
+        l[len-1] = 0;
+      ui_cmdhist_add(l);
+    }
+  }
+}
+
+
+// searches the history either backward or forward for the string q. The line 'start' is also counted.
+// (only used by ui_textinput below, so can be static)
+static int ui_cmdhist_search(gboolean backward, const char *q, int start) {
+  int i;
+  for(i=start; cmdhist->buf[i&CMDHIST_BUF] && (backward ? (i>=MAX(1, cmdhist->last-CMDHIST_BUF)) : (i<=cmdhist->last)); backward ? i-- : i++) {
+    if(g_str_has_prefix(cmdhist->buf[i & CMDHIST_BUF], q))
+      return i;
+  }
+  return -1;
+}
+
+
+void ui_cmdhist_save() {
+  if(!cmdhist->ismod)
+    return;
+  cmdhist->ismod = FALSE;
+
+  FILE *f = fopen(cmdhist->fn, "w");
+  if(!f) {
+    g_warning("Unable to open history file '%s' for writing: %s", cmdhist->fn, strerror(errno));
+    return;
+  }
+
+  int i;
+  for(i=0; i<=CMDHIST_BUF; i++) {
+    char *l = cmdhist->buf[(cmdhist->last+1+i)&CMDHIST_BUF];
+    if(l) {
+      if(fputs(l, f) < 0 || fputc('\n', f) < 0)
+        g_warning("Error writing to history file '%s': %s", cmdhist->fn, strerror(errno));
+    }
+  }
+  if(fclose(f) < 0)
+    g_warning("Error writing to history file '%s': %s", cmdhist->fn, strerror(errno));
+}
+
+
+void ui_cmdhist_close() {
+  int i;
+  ui_cmdhist_save();
+  for(i=0; i<=CMDHIST_BUF; i++)
+    if(cmdhist->buf[i])
+      g_free(cmdhist->buf[i]);
+  g_free(cmdhist->fn);
+  g_free(cmdhist);
+}
+
+
+
+
+// Text input "widget"
+// TODO: tab completion
 
 struct ui_textinput {
   int pos;
   int len; // number of characters in *str
   gunichar *str; // 0-terminated string
+  gboolean usehist;
+  int s_pos;
+  char *s_q;
+  gboolean s_top;
 };
 
-#define ui_textinput_get(ti) g_ucs4_to_utf8((ti)->str, -1, NULL, NULL, NULL)
-
-#endif
 
 
-struct ui_textinput *ui_textinput_create() {
+struct ui_textinput *ui_textinput_create(gboolean usehist) {
   struct ui_textinput *ti = g_new0(struct ui_textinput, 1);
   ti->str = g_new0(gunichar, 1);
   ti->len = 0;
+  ti->usehist = usehist;
+  ti->s_pos = -1;
   return ti;
 }
 
 
 void ui_textinput_free(struct ui_textinput *ti) {
   g_free(ti->str);
+  if(ti->s_q)
+    g_free(ti->s_q);
   g_free(ti);
 }
 
 
-void ui_textinput_set(struct ui_textinput *ti, char *str) {
+void ui_textinput_set(struct ui_textinput *ti, const char *str) {
   g_free(ti->str);
   glong written;
   ti->str = g_utf8_to_ucs4(str, -1, NULL, &written, NULL);
-  assert(ti->str != NULL);
+  g_assert(ti->str != NULL);
   ti->pos = ti->len = written;
+}
+
+
+char *ui_textinput_get(struct ui_textinput *ti) {
+  return g_ucs4_to_utf8(ti->str, -1, NULL, NULL, NULL);
+}
+
+
+char *ui_textinput_reset(struct ui_textinput *ti) {
+  char *str = ui_textinput_get(ti);
+  ui_textinput_set(ti, "");
+  if(ti->usehist) {
+    ui_cmdhist_add(str);
+    if(ti->s_q)
+      g_free(ti->s_q);
+    ti->s_q = NULL;
+    ti->s_pos = -1;
+  }
+  return str;
 }
 
 
@@ -277,28 +397,70 @@ void ui_textinput_draw(struct ui_textinput *ti, int y, int x, int col) {
 }
 
 
+static void ui_textinput_search(struct ui_textinput *ti, gboolean backwards) {
+  int start;
+  if(ti->s_pos < 0) {
+    if(!backwards)
+      return;
+    ti->s_q = ui_textinput_get(ti);
+    start = cmdhist->last;
+    ti->s_top = FALSE;
+  } else
+    start = ti->s_pos+(!backwards ? 1 : ti->s_top ? 0 : -1);
+  int pos = ui_cmdhist_search(backwards, ti->s_q, start);
+  if(pos >= 0) {
+    ti->s_pos = pos;
+    ti->s_top = FALSE;
+    ui_textinput_set(ti, cmdhist->buf[pos & CMDHIST_BUF]);
+  } else if(backwards) {
+    ti->s_pos = start;
+    ti->s_top = TRUE;
+    ui_textinput_set(ti, "<end>");
+  } else {
+    ti->s_pos = -1;
+    ui_textinput_set(ti, ti->s_q);
+    g_free(ti->s_q);
+    ti->s_q = NULL;
+  }
+}
+
+
 gboolean ui_textinput_key(struct ui_textinput *ti, struct input_key *key) {
   if(key->type == INPT_KEY) {
     switch(key->code) {
-      case KEY_LEFT:  if(ti->pos > 0) ti->pos--; break;
-      case KEY_RIGHT: if(ti->pos < ti->len) ti->pos++; break;
-      case KEY_END:   ti->pos = ti->len; break;
-      case KEY_HOME:  ti->pos = 0; break;
-      case KEY_BACKSPACE:
-        if(ti->pos > 0) {
-          memmove(ti->str + ti->pos - 1, ti->str + ti->pos, (ti->len - ti->pos + 1) * sizeof(gunichar));
-          ti->pos--;
-          ti->len--;
-        }
-        break;
-      case KEY_DC:
-        if(ti->pos < ti->len) {
-          memmove(ti->str + ti->pos, ti->str + ti->pos + 1, (ti->len - ti->pos) * sizeof(gunichar));
-          ti->len--;
-        }
-        break;
-      default:
-        return FALSE;
+    case KEY_LEFT:
+      if(ti->pos > 0) ti->pos--;
+      break;
+    case KEY_RIGHT:
+      if(ti->pos < ti->len) ti->pos++;
+      break;
+    case KEY_END:
+      ti->pos = ti->len;
+      break;
+    case KEY_HOME:
+      ti->pos = 0;
+      break;
+    case KEY_BACKSPACE:
+      if(ti->pos > 0) {
+        memmove(ti->str + ti->pos - 1, ti->str + ti->pos, (ti->len - ti->pos + 1) * sizeof(gunichar));
+        ti->pos--;
+        ti->len--;
+      }
+      break;
+    case KEY_DC:
+      if(ti->pos < ti->len) {
+        memmove(ti->str + ti->pos, ti->str + ti->pos + 1, (ti->len - ti->pos) * sizeof(gunichar));
+        ti->len--;
+      }
+      break;
+    case KEY_UP:
+      ui_textinput_search(ti, TRUE);
+      break;
+    case KEY_DOWN:
+      ui_textinput_search(ti, FALSE);
+      break;
+    default:
+      return FALSE;
     }
   } else if(key->type == INPT_CHAR) {
     // increase string size by one (not *very* efficient...)

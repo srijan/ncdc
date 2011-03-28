@@ -44,7 +44,7 @@ static struct cmd *cmds;
 
 // get a command by name. performs a linear search. can be rewritten to use a
 // binary search, but I doubt the performance difference really matters.
-static struct cmd *getcmd(char *name) {
+static inline struct cmd *getcmd(char *name) {
   struct cmd *c = cmds;
   for(c=cmds; c->f; c++)
     if(strcmp(c->name, name) == 0)
@@ -54,6 +54,7 @@ static struct cmd *getcmd(char *name) {
 
 
 static void c_quit(char *args) {
+  ui_logwindow_add(tab->log, "Closing ncdc...");
   g_main_loop_quit(main_loop);
 }
 

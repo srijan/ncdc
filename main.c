@@ -29,8 +29,10 @@
 #include <unistd.h>
 #include <locale.h>
 #include <signal.h>
-#include <glib/gstdio.h>
+#include <errno.h>
+#include <string.h>
 #include <stdio.h>
+#include <glib/gstdio.h>
 
 
 // input handling declarations
@@ -169,6 +171,7 @@ static void catch_sigwinch(int sig) {
 }
 
 
+// TODO: make sure that there is no other ncdc instance working with the same config directory
 static void init_config() {
   // get location of the configuration directory
   conf_dir = g_getenv("NCDC_DIR");
@@ -177,19 +180,35 @@ static void init_config() {
 
   // try to create it (ignoring errors if it already exists)
   g_mkdir(conf_dir, 0700);
-  if(g_access(conf_dir, F_OK | R_OK | X_OK | W_OK) < 0) {
-    fprintf(stderr, "Directory '%s' does not exist or is not writable.", conf_dir);
-    exit(1);
-  }
+  if(g_access(conf_dir, F_OK | R_OK | X_OK | W_OK) < 0)
+    g_error("Directory '%s' does not exist or is not writable.", conf_dir);
 
   // we should also have a logs/ subdirectory
   char *logs = g_build_filename(conf_dir, "logs", NULL);
-  g_mkdir(logs, 0700);
-  if(g_access(conf_dir, F_OK | R_OK | X_OK | W_OK) < 0) {
-    fprintf(stderr, "Directory '%s' does not exist or is not writable.", logs);
-    exit(1);
-  }
+  g_mkdir(logs, 0777);
+  if(g_access(conf_dir, F_OK | R_OK | X_OK | W_OK) < 0)
+    g_error("Directory '%s' does not exist or is not writable.", logs);
   g_free(logs);
+}
+
+
+#define log_to_str(level) (\
+  (level) & G_LOG_LEVEL_ERROR    ? "ERROR"    :\
+  (level) & G_LOG_LEVEL_CRITICAL ? "CRITICAL" :\
+  (level) & G_LOG_LEVEL_WARNING  ? "WARNING"  :\
+  (level) & G_LOG_LEVEL_MESSAGE  ? "message"  :\
+  (level) & G_LOG_LEVEL_INFO     ? "info"     : "debug")
+
+// clean-up our ncurses window before throwing a fatal error
+static void log_fatal(const gchar *dom, GLogLevelFlags level, const gchar *msg, gpointer dat) {
+  endwin();
+  printf("*%s* %s\n", log_to_str(level), msg);
+}
+
+
+// redirect all non-fatal errors to the main window
+static void log_redirect(const gchar *dom, GLogLevelFlags level, const gchar *msg, gpointer dat) {
+  ui_logwindow_printf(ui_main->log, "*%s* %s", log_to_str(level), msg);
 }
 
 
@@ -198,17 +217,20 @@ int main(int argc, char **argv) {
 
   // init stuff
   init_config();
+  ui_cmdhist_init("history");
   ui_init();
+
+  // setup logging
+  g_log_set_handler(NULL, G_LOG_FATAL_MASK | G_LOG_FLAG_FATAL | G_LOG_LEVEL_ERROR, log_fatal, NULL);
+  g_log_set_default_handler(log_redirect, NULL);
 
   // setup SIGWINCH
   struct sigaction act;
   sigemptyset(&act.sa_mask);
   act.sa_flags = SA_RESTART;
   act.sa_handler = catch_sigwinch;
-  if(sigaction(SIGWINCH, &act, NULL) < 0) {
-    perror("Error setting up SIGWINCH");
-    exit(1);
-  }
+  if(sigaction(SIGWINCH, &act, NULL) < 0)
+    g_error("Can't setup SIGWINCH: %s", strerror(errno));
 
   // init and start main loop
   main_loop = g_main_loop_new(NULL, FALSE);
@@ -221,6 +243,7 @@ int main(int argc, char **argv) {
   g_main_loop_run(main_loop);
 
   // cleanup
+  ui_cmdhist_close();
   erase();
   refresh();
   endwin();

@@ -24,7 +24,6 @@
 */
 
 #include "config.h"
-#include <wchar.h>
 #include <glib.h>
 
 #define _XOPEN_SOURCE_EXTENDED

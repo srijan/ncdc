@@ -29,6 +29,7 @@
 #include <unistd.h>
 #include <locale.h>
 #include <signal.h>
+#include <wchar.h>
 #include <errno.h>
 #include <string.h>
 #include <stdio.h>
@@ -114,8 +115,8 @@ static void handle_input() {
         g_warning("Cannot encode character 0x%X", code);
       key.encoded[r] = 0;
       key.code = g_utf8_get_char_validated(key.encoded, -1);
-      if(key.code < 0) {
-        g_warning("Invalid UTF-8 sequence. Are you sure you are running a UTF-8 locale?");
+      if(key.code == (gunichar)-1 || key.code == (gunichar)-2) {
+        g_warning("Invalid UTF-8 sequence in keyboard input. Are you sure you are running a UTF-8 locale?");
         continue;
       }
     } else if(key.type != INPT_KEY) {

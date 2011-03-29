@@ -28,6 +28,7 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <errno.h>
+#include <limits.h>
 #include <glib/gstdio.h>
 #include <glib/gprintf.h>
 
@@ -142,39 +143,41 @@ void ui_logwindow_draw(struct ui_logwindow *lw, int y, int x, int rows, int cols
   int top = rows + y - 1;
   int cur = lw->lastvis;
 
-  // assumes we can't have more than 100 lines per log item, and that each log
-  // item does not exceed 64k characters
-  unsigned short lines[101];
+  // defines a mask over the string: <#0,#1), <#1,#2), ..
+  static unsigned short lines[201];
   lines[0] = 0;
 
   while(top >= y) {
-    char *tmp = lw->buf[cur & LOGWIN_BUF];
-    if(!tmp)
+    char *str = lw->buf[cur & LOGWIN_BUF];
+    if(!str)
       break;
-    gunichar *str = g_utf8_to_ucs4_fast(tmp, -1, NULL);
     int curline = 1, curlinecols = 0, i = 0;
     lines[1] = 0;
 
     // loop through the characters and determine on which line to put them
     while(str[i]) {
-      int width = g_unichar_width(str[i]);
+      int width = g_unichar_width(g_utf8_get_char(str+i));
       if(curlinecols+width >= (curline > 1 ? cols-LOGWIN_PAD : cols)) {
-        g_assert(++curline <= 100);
+        // too many lines? don't display the rest
+        if(curline >= 200)
+          break;
+        curline++;
         curlinecols = 0;
       }
-      lines[curline] = i+1;
+      // can be faster by using g_utf8_skip[] directly, but that is not
+      // documented in glib, so let's avoid it...
+      i = g_utf8_next_char(str+i) - str;
+      lines[curline] = i;
       curlinecols += width;
-      i++;
+      // too many bytes in the string? don't display the rest
+      if(i > USHRT_MAX-10)
+        break;
     }
 
     // print the lines
-    for(i=curline-1; top>=y && i>=0; i--, top--) {
-      tmp = g_ucs4_to_utf8(str+lines[i], lines[i+1]-lines[i], NULL, NULL, NULL);
-      mvaddstr(top, i == 0 ? x : x+9, tmp);
-      g_free(tmp);
-    }
+    for(i=curline-1; top>=y && i>=0; i--, top--)
+      mvaddnstr(top, i == 0 ? x : x+9, str+lines[i], lines[i+1]-lines[i]);
 
-    g_free(str);
     cur = (cur-1) & LOGWIN_BUF;
   }
 }
@@ -190,7 +193,7 @@ void ui_logwindow_draw(struct ui_logwindow *lw, int y, int x, int rows, int cols
 // below.
 
 #define CMDHIST_BUF 511 // must be 2^x-1
-#define CMDHIST_MAXCMD 1024
+#define CMDHIST_MAXCMD 2000
 
 
 struct ui_cmdhist {
@@ -216,23 +219,29 @@ static void ui_cmdhist_add(const char *str) {
     g_free(cmdhist->buf[cur]);
     cmdhist->buf[cur] = NULL;
   }
-  cmdhist->buf[cur] = strdup(str);
+
+  // truncate the string if it is longer than CMDHIST_MAXCMD bytes, making sure
+  // to not truncate within a UTF-8 sequence
+  int len = 0;
+  while(len < CMDHIST_MAXCMD-10 && str[len])
+    len = g_utf8_next_char(str+len) - str;
+  cmdhist->buf[cur] = g_strndup(str, len);
   cmdhist->ismod = TRUE;
 }
 
 
 void ui_cmdhist_init(const char *file) {
+  static char buf[CMDHIST_MAXCMD+2]; // + \n and \0
   cmdhist = g_new0(struct ui_cmdhist, 1);
 
   cmdhist->fn = g_build_filename(conf_dir, file, NULL);
   FILE *f = fopen(cmdhist->fn, "r");
   if(f) {
-    char l[CMDHIST_MAXCMD];
-    while(fgets(l, CMDHIST_MAXCMD, f)) {
-      int len = strlen(l);
-      if(len > 0 && l[len-1] == '\n')
-        l[len-1] = 0;
-      ui_cmdhist_add(l);
+    while(fgets(buf, CMDHIST_MAXCMD+2, f)) {
+      int len = strlen(buf);
+      if(len > 0 && buf[len-1] == '\n')
+        buf[len-1] = 0;
+      ui_cmdhist_add(buf);
     }
   }
 }

@@ -28,8 +28,6 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <errno.h>
-#include <unistd.h>
-#include <fcntl.h>
 #include <glib/gstdio.h>
 #include <glib/gprintf.h>
 
@@ -295,7 +293,7 @@ void ui_cmdhist_close() {
 struct ui_textinput {
   int pos;
   int len; // number of characters in *str
-  gunichar *str; // 0-terminated string
+  gunichar *str; // zero-terminated UCS-4 string
   gboolean usehist;
   int s_pos;
   char *s_q;
@@ -454,11 +452,12 @@ gboolean ui_textinput_key(struct ui_textinput *ti, struct input_key *key) {
       }
       break;
     case KEY_UP:
-      ui_textinput_search(ti, TRUE);
-      break;
     case KEY_DOWN:
-      ui_textinput_search(ti, FALSE);
-      break;
+      if(ti->usehist) {
+        ui_textinput_search(ti, key->code == KEY_UP);
+        return TRUE;
+      } else
+        return FALSE;
     default:
       return FALSE;
     }

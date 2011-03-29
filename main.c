@@ -46,7 +46,7 @@
 #define INPT_ALT  4
 
 struct input_key {
-  wchar_t code;    // character code (as given by get_wch())
+  gunichar code;   // character code (as given by get_wch() - but re-encoded)
   char type;       // INPT_ type
   char encoded[7]; // UTF-8 encoded character string (if type != key)
 };
@@ -91,26 +91,33 @@ static void handle_input() {
 
   struct input_key key;
   int r;
+  wint_t code;
   int lastesc = 0, curignore = 0;
-  while((r = get_wch((wint_t *)&(key.code))) != ERR) {
+  while((r = get_wch(&code)) != ERR) {
     if(curignore) {
       curignore = 0;
       continue;
     }
     // we use SIGWINCH, so KEY_RESIZE can be ignored
-    if(r == KEY_CODE_YES && key.code == KEY_RESIZE)
+    if(r == KEY_CODE_YES && code == KEY_RESIZE)
       continue;
     // backspace is often sent as DEL control character, correct this
-    if(r != KEY_CODE_YES && key.code == 127) {
+    if(r != KEY_CODE_YES && code == 127) {
       r = KEY_CODE_YES;
-      key.code = KEY_BACKSPACE;
+      code = KEY_BACKSPACE;
     }
-    key.type = r == KEY_CODE_YES ? INPT_KEY : key.code == 27 ? INPT_ALT : key.code <= 31 ? INPT_CTRL : INPT_CHAR;
-    // do something with key.encoded
+    key.type = r == KEY_CODE_YES ? INPT_KEY : code == 27 ? INPT_ALT : code <= 31 ? INPT_CTRL : INPT_CHAR;
+    key.code = code;
+    // do something with key.code and key.encoded
     if(key.type == INPT_CHAR) {
-      if((r = wctomb(key.encoded, key.code)) < 0)
-        g_warning("Cannot encode character 0x%X", key.code);
+      if((r = wctomb(key.encoded, code)) < 0)
+        g_warning("Cannot encode character 0x%X", code);
       key.encoded[r] = 0;
+      key.code = g_utf8_get_char_validated(key.encoded, -1);
+      if(key.code < 0) {
+        g_warning("Invalid UTF-8 sequence. Are you sure you are running a UTF-8 locale?");
+        continue;
+      }
     } else if(key.type != INPT_KEY) {
       // if it's not a "character" nor a key, then it very likely fits in a single byte
       key.encoded[0] = key.code;
@@ -214,6 +221,8 @@ static void log_redirect(const gchar *dom, GLogLevelFlags level, const gchar *ms
 
 int main(int argc, char **argv) {
   setlocale(LC_ALL, "");
+
+  // TODO: check that the current locale is UTF-8. Things aren't going to work otherwise
 
   // init stuff
   init_config();

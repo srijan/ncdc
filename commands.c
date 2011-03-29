@@ -111,9 +111,11 @@ static struct cmd cmds_list[] = {
 
 
 void cmd_handle(char *ostr) {
+  // special case: ignore empty commands
+  if(!ostr)
+    return;
   char *str = g_strdup(ostr);
   g_strstrip(str);
-  // special case: ignore empty commands
   if(!str || !str[0]) {
     g_free(str);
     return;

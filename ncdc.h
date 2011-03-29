@@ -34,12 +34,6 @@
 #include <ncurses.h>
 #endif
 
-// Make sure that wchar_t and gunichar are equivalent
-// TODO: this should be checked at ./configure time
-#ifndef __STDC_ISO_10646__
-#error Your wchar_t type is not guaranteed to be UCS-4!
-#endif
-
 
 // forward declaration for data types
 // (some of these remain incomplete, others are defined in interfaces)

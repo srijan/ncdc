@@ -53,10 +53,12 @@ struct ui_logwindow {
 struct ui_logwindow *ui_logwindow_create(const char *file) {
   struct ui_logwindow *lw = g_new0(struct ui_logwindow, 1);
   if(file) {
-    char *fn = g_build_filename(conf_dir, "logs", file, NULL);
+    char *n = g_strconcat(file, ".log", NULL);
+    char *fn = g_build_filename(conf_dir, "logs", n, NULL);
     lw->file = fopen(fn, "a");
     if(!lw->file)
       g_warning("Unable to open log file '%s' for writing: %s", fn, strerror(errno));
+    g_free(n);
     g_free(fn);
   }
   return lw;

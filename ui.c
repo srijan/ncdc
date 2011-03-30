@@ -31,6 +31,7 @@
 #if INTERFACE
 
 #define UIT_MAIN 0
+#define UIT_HUB 1
 
 struct ui_tab {
   int type; // UIT_ type
@@ -50,6 +51,7 @@ int winrows;
 
 
 
+
 // Main tab
 
 
@@ -60,7 +62,7 @@ static struct ui_tab *ui_main_create() {
   ui_main = g_new0(struct ui_tab, 1);
   ui_main->name = "main";
   ui_main->title = "Welcome to ncdc 0.1-alpha!";
-  ui_main->log = ui_logwindow_create("main.log");
+  ui_main->log = ui_logwindow_create("main");
 
   ui_logwindow_add(ui_main->log, "Welcome to ncdc 0.1-alpha!");
   ui_logwindow_printf(ui_main->log, "Using working directory: %s", conf_dir);
@@ -86,16 +88,60 @@ static void ui_main_key(struct input_key *key) {
 
 
 
+// Hub tab
+
+struct ui_tab *ui_hub_create(const char *name) {
+  struct ui_tab *tab = g_new0(struct ui_tab, 1);
+  tab->name = g_strdup(name);
+  tab->title = "Debugging hub tabs";
+  tab->type = UIT_HUB;
+  tab->log = ui_logwindow_create(name);
+  return tab;
+}
+
+
+void ui_hub_close(ui_tab *tab) {
+  GList *cur = g_list_find(ui_tabs, tab);
+  ui_tab_cur = cur->prev ? cur->prev : cur->next;
+  ui_tabs = g_list_delete_link(ui_tabs, cur);
+  ui_logwindow_free(tab->log);
+  g_free(tab->name);
+  g_free(tab);
+}
+
+
+static void ui_hub_draw(struct ui_tab *tab) {
+  ui_logwindow_draw(tab->log, 1, 0, winrows-3, wincols);
+}
+
+
+static void ui_hub_key(struct ui_tab *tab, struct input_key *key) {
+  if(key->type == INPT_KEY) {
+    if(key->code == KEY_NPAGE)
+      ui_logwindow_scroll(tab->log, winrows/2);
+    else if(key->code == KEY_PPAGE)
+      ui_logwindow_scroll(tab->log, -winrows/2);
+  }
+}
+
+
+
+
 // Global stuff
 
 
 static struct ui_textinput *global_textinput;
 
 
+void ui_tab_open(struct ui_tab *tab) {
+  ui_tabs = g_list_append(ui_tabs, tab);
+  ui_tab_cur = g_list_last(ui_tabs);
+}
+
+
 void ui_init() {
   // first tab = main tab
-  ui_tabs = g_list_append(ui_tabs, ui_main_create());
-  ui_tab_cur = ui_tabs;
+  ui_tab_open(ui_main_create());
 
   // global textinput field
   global_textinput = ui_textinput_create(TRUE);
@@ -134,13 +180,15 @@ void ui_draw() {
   attroff(A_REVERSE);
 
   // tab contents
-  if(curtab->type == UIT_MAIN)
-    ui_main_draw();
+  switch(curtab->type) {
+  case UIT_MAIN: ui_main_draw(); break;
+  case UIT_HUB:  ui_hub_draw(curtab);  break;
+  }
 
   // last line - text input
   mvaddstr(winrows-1, 0, curtab->name);
   addch('>');
-  int pos = strlen(curtab->name)+2;
+  int pos = strlen(curtab->name)+2; // TODO: use number of columns, not number of bytes...
   ui_textinput_draw(global_textinput, winrows-1, pos, wincols-pos);
 
   refresh();
@@ -154,8 +202,22 @@ void ui_input(struct input_key *key) {
   if(key->type == INPT_CTRL && key->code == 3)
     g_main_loop_quit(main_loop);
 
+  // alt+num (switch tab)
+  else if(key->type == INPT_ALT && key->code >= '0' && key->code <= '9') {
+    GList *n = g_list_nth(ui_tabs, key->code == '0' ? 9 : key->code-'1');
+    if(n)
+      ui_tab_cur = n;
+
+  // alt+j and alt+k (previous/next tab)
+  } else if(key->type == INPT_ALT && key->code == 'j') {
+    if(ui_tab_cur->prev)
+      ui_tab_cur = ui_tab_cur->prev;
+  } else if(key->type == INPT_ALT && key->code == 'k') {
+    if(ui_tab_cur->next)
+      ui_tab_cur = ui_tab_cur->next;
+
   // main text input (TODO: in some cases the focus shouldn't be on the text input.)
-  else if(ui_textinput_key(global_textinput, key)) {
+  } else if(ui_textinput_key(global_textinput, key)) {
 
   // enter key is pressed while focused on the textinput
   } else if(key->type == INPT_CTRL && key->code == '\n') {
@@ -166,8 +228,10 @@ void ui_input(struct input_key *key) {
 
   // let tab handle it
   } else {
-    if(curtab->type == UIT_MAIN)
-      ui_main_key(key);
+    switch(curtab->type) {
+    case UIT_MAIN: ui_main_key(key); break;
+    case UIT_HUB:  ui_hub_key(curtab, key); break;
+    }
   }
 }
 

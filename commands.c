@@ -91,6 +91,30 @@ static void c_help(char *args) {
 }
 
 
+// TODO: also allow /open <name> [<server>]; as shortcut for /open ..; /connect ..
+static void c_open(char *args) {
+  char *tmp;
+  int len = 0;
+  for(tmp=args; *tmp; tmp = g_utf8_next_char(tmp))
+    if(++len && !g_unichar_isalnum(g_utf8_get_char(tmp)))
+      break;
+  if(*tmp)
+    ui_logwindow_add(tab->log, "Sorry, tab name may only consist of alphanumeric characters.");
+  else
+    ui_tab_open(ui_hub_create(args));
+}
+
+
+static void c_close(char *args) {
+  if(args[0])
+    ui_logwindow_add(tab->log, "This command does not accept any arguments.");
+  else if(tab->type == UIT_MAIN)
+    ui_logwindow_add(tab->log, "Main tab cannot be closed.");
+  else if(tab->type == UIT_HUB)
+    ui_hub_close(tab);
+}
+
+
 // the actual command list (cmds is an alias to this, set by cmd_handle())
 static struct cmd cmds_list[] = {
   { "quit", c_quit,
@@ -105,6 +129,14 @@ static struct cmd cmds_list[] = {
     "[<command>]", "Request information on commands.",
     "Use /help without arguments to list all the available commands.\n"
     "Use /help <command> to get information about a particular command."
+  },
+  { "open", c_open,
+    "<name>", "Open a new hub tab.",
+    "Opens a new tab to use for a hub. The name is a (short) personal name you use to identify the hub."
+  },
+  { "close", c_close,
+    NULL, "Close the current tab.",
+    "When closing a hub tab, you will be disconnected from the hub."
   },
   { "", NULL }
 };

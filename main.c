@@ -185,7 +185,7 @@ void save_config() {
   char *cf = g_build_filename(conf_dir, "config.ini", NULL);
   FILE *f = fopen(cf, "w");
   if(!f || fputs(dat, f) < 0 || fclose(f)) {
-    g_critical("Cannot save config file '%s': %s", cf, strerror(errno));
+    g_critical("Cannot save config file '%s': %s", cf, g_strerror(errno));
     g_free(dat);
     g_free(cf);
   }
@@ -276,7 +276,7 @@ int main(int argc, char **argv) {
   act.sa_flags = SA_RESTART;
   act.sa_handler = catch_sigwinch;
   if(sigaction(SIGWINCH, &act, NULL) < 0)
-    g_error("Can't setup SIGWINCH: %s", strerror(errno));
+    g_error("Can't setup SIGWINCH: %s", g_strerror(errno));
 
   // init and start main loop
   main_loop = g_main_loop_new(NULL, FALSE);

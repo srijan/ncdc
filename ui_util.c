@@ -270,7 +270,7 @@ void ui_cmdhist_save() {
 
   FILE *f = fopen(cmdhist->fn, "w");
   if(!f) {
-    g_warning("Unable to open history file '%s' for writing: %s", cmdhist->fn, strerror(errno));
+    g_warning("Unable to open history file '%s' for writing: %s", cmdhist->fn, g_strerror(errno));
     return;
   }
 

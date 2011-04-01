@@ -47,7 +47,6 @@ static struct cmd *cmds;
 struct setting {
   char *name;
   char *group;      // NULL = hub name or "global" on non-hub-tabs
-  gboolean nounset; // TRUE = do not allow this to be unset (e.g. nick)
   void (*get)(char *, char *);
   void (*set)(char *, char *, char *);
 };
@@ -66,7 +65,21 @@ static void get_string(char *group, char *key) {
 }
 
 
+#define UNSET(group, key) do {\
+    g_key_file_remove_key(conf_file, group, key, NULL);\
+    ui_logwindow_printf(tab->log, "%s.%s reset.", group, key);\
+  } while(0)
+
+
 static void set_nick(char *group, char *key, char *val) {
+  if(!val) {
+    if(strcmp(group, "global") == 0) {
+      ui_logwindow_add(tab->log, "global.nick may not be unset.");
+      return;
+    }
+    UNSET(group, key);
+    return;
+  }
   if(strlen(val) > 32) {
     ui_logwindow_add(tab->log, "Too long nick name.");
     return;
@@ -85,9 +98,32 @@ static void set_nick(char *group, char *key, char *val) {
 }
 
 
+// set email/description/connection info
+static void set_userinfo(char *group, char *key, char *val) {
+  if(!val)
+    UNSET(group, key);
+  else {
+    int i;
+    for(i=strlen(val)-1; i>=0; i--)
+      if(val[i] == '$' || val[i] == '|')
+        break;
+    if(i >= 0) {
+      ui_logwindow_add(tab->log, "Invalid character.");
+      return;
+    }
+    g_key_file_set_string(conf_file, group, key, val);
+    get_string(group, key);
+  }
+  // TODO: when connected, send update to the hub(s)
+}
+
+
 // the actual settings list
 static struct setting settings[] = {
-  { "nick", NULL, TRUE, get_string, set_nick },
+  { "nick",        NULL, get_string, set_nick }, // as a special case, global.nick may not be /unset
+  { "email",       NULL, get_string, set_userinfo },
+  { "description", NULL, get_string, set_userinfo },
+  { "connection",  NULL, get_string, set_userinfo },
   { NULL }
 };
 
@@ -102,19 +138,64 @@ static inline struct setting *getsetting(const char *name) {
 }
 
 
+static inline gboolean parsesetting(char *name, char **group, char **key, struct setting **s, gboolean *checkalt) {
+  static char hubgroup[152]; // "#" + name of hub tab (name = max 25 char = 150 bytes...)
+  char *sep;
+
+  *key = name;
+  *group = NULL; // NULL = figure out automatically
+  *checkalt = FALSE;
+
+  // separate key/group
+  if((sep = strchr(*key, '.'))) {
+    *sep = 0;
+    *group = *key;
+    *key = sep+1;
+  }
+
+  // lookup key and validate or figure out group
+  *s = getsetting(*key);
+  if(!*s) {
+    ui_logwindow_printf(tab->log, "No configuration variable with the name '%s'.", *key);
+    return FALSE;
+  }
+  if(*group && (
+      ((*s)->group && strcmp(*group, (*s)->group) != 0) ||
+      (!(*s)->group && !g_key_file_has_group(conf_file, *group)))) {
+    ui_logwindow_add(tab->log, "Wrong configuration group.");
+    return FALSE;
+  }
+  if(!*group)
+    *group = (*s)->group;
+  if(!*group) {
+    if(tab->type == UIT_HUB) {
+      *checkalt = TRUE;
+      strcpy(hubgroup, "#");
+      strcat(hubgroup, tab->name);
+      *group = hubgroup;
+    } else
+      *group = "global";
+  }
+  return TRUE;
+}
+
+
 static void c_set(char *args) {
   if(!args[0]) {
-    // TODO: print out the list of settings
-    // how to handle hub-config overrides?
+    struct setting *s;
+    ui_logwindow_add(tab->log, "");
+    for(s=settings; s->name; s++)
+      c_set(s->name);
+    ui_logwindow_add(tab->log, "");
     return;
   }
 
-  static char hubgroup[152]; // "#" + name of hub tab (name = max 25 char = 150 bytes...)
-  char *key = args;
-  char *group = NULL; // NULL = figure out automatically
+  char *key;
+  char *group; // NULL = figure out automatically
   char *val = NULL; // NULL = get
   char *sep;
-  gboolean checkalt = FALSE;
+  struct setting *s;
+  gboolean checkalt;
 
   // seperate key/value
   if((sep = strchr(args, ' '))) {
@@ -122,36 +203,9 @@ static void c_set(char *args) {
     val = sep+1;
   }
 
-  // separate key/group
-  if((sep = strchr(key, '.'))) {
-    *sep = 0;
-    group = key;
-    key = sep+1;
-  }
-
-  // lookup key and validate or figure out group
-  struct setting *s = getsetting(key);
-  if(!s) {
-    ui_logwindow_printf(tab->log, "No configuration variable with the name '%s'.", key);
+  // get group and key
+  if(!parsesetting(args, &group, &key, &s, &checkalt))
     return;
-  }
-  if(group && (
-      (s->group && strcmp(group, s->group) != 0) ||
-      (!s->group && !g_key_file_has_group(conf_file, group)))) {
-    ui_logwindow_add(tab->log, "Wrong configuration group.");
-    return;
-  }
-  if(!group)
-    group = s->group;
-  if(!group) {
-    if(tab->type == UIT_HUB) {
-      checkalt = TRUE;
-      strcpy(hubgroup, "#");
-      strcat(hubgroup, tab->name);
-      group = hubgroup;
-    } else
-      group = "global";
-  }
 
   // get
   if(!val) {
@@ -165,6 +219,27 @@ static void c_set(char *args) {
     // set() may not always modify the config, but let's just save anyway
     save_config();
   }
+}
+
+
+static void c_unset(char *args) {
+  if(!args[0]) {
+    c_set("");
+    return;
+  }
+
+  char *key, *group;
+  struct setting *s;
+  gboolean checkalt;
+
+  // get group and key
+  if(!parsesetting(args, &group, &key, &s, &checkalt))
+    return;
+
+  if(checkalt && !g_key_file_has_key(conf_file, group, key, NULL))
+    group = "global";
+  s->set(group, key, NULL);
+  save_config();
 }
 
 
@@ -260,7 +335,8 @@ static struct cmd cmds_list[] = {
   },
   { "open", c_open,
     "<name>", "Open a new hub tab.",
-    "Opens a new tab to use for a hub. The name is a (short) personal name you use to identify the hub."
+    "Opens a new tab to use for a hub. The name is a (short) personal name you use to identify the hub.\n"
+    "If you have previously connected to a hub before from a tab with the same name, /open will automatically connect to the same hub again."
   },
   { "close", c_close,
     NULL, "Close the current tab.",
@@ -270,6 +346,11 @@ static struct cmd cmds_list[] = {
     "[<key> [<value>]]", "Get or set configuration variables.",
     "Use /set without arguments to get a list of configuration variables.\n"
     "/set <key> without value will print out the current value."
+  },
+  { "unset", c_unset,
+    "<key>", "Unset a configuration variable.",
+    "This command will remove any value set with the specified variable.\n"
+    "Can be useful to reset a variable back to its global or default value."
   },
   { "", NULL }
 };

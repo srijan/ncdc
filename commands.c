@@ -42,10 +42,138 @@ struct cmd {
 static struct cmd *cmds;
 
 
+
+// set options
+struct setting {
+  char *name;
+  char *group;      // NULL = hub name or "global" on non-hub-tabs
+  gboolean nounset; // TRUE = do not allow this to be unset (e.g. nick)
+  void (*get)(char *, char *);
+  void (*set)(char *, char *, char *);
+};
+
+
+static void get_string(char *group, char *key) {
+  GError *err = NULL;
+  char *str = g_key_file_get_string(conf_file, group, key, &err);
+  if(!str) {
+    ui_logwindow_printf(tab->log, "%s.%s is not set.", group, key);
+    g_error_free(err);
+  } else {
+    ui_logwindow_printf(tab->log, "%s.%s = %s", group, key, str);
+    g_free(str);
+  }
+}
+
+
+static void set_nick(char *group, char *key, char *val) {
+  if(strlen(val) > 32) {
+    ui_logwindow_add(tab->log, "Too long nick name.");
+    return;
+  }
+  int i;
+  for(i=strlen(val)-1; i>=0; i--)
+    if(val[i] == '$' || val[i] == '|' || val[i] == ' ' || val[i] == '<' || val[i] == '>')
+      break;
+  if(i >= 0) {
+    ui_logwindow_add(tab->log, "Invalid character in nick name.");
+    return;
+  }
+  g_key_file_set_string(conf_file, group, key, val);
+  get_string(group, key);
+  ui_logwindow_add(tab->log, "Your new nick will be used for new hub connections.");
+}
+
+
+// the actual settings list
+static struct setting settings[] = {
+  { "nick", NULL, TRUE, get_string, set_nick },
+  { NULL }
+};
+
+
+// get a setting by name
+static inline struct setting *getsetting(const char *name) {
+  struct setting *s;
+  for(s=settings; s->name; s++)
+    if(strcmp(s->name, name) == 0)
+      break;
+  return s->name ? s : NULL;
+}
+
+
+static void c_set(char *args) {
+  if(!args[0]) {
+    // TODO: print out the list of settings
+    // how to handle hub-config overrides?
+    return;
+  }
+
+  static char hubgroup[152]; // "#" + name of hub tab (name = max 25 char = 150 bytes...)
+  char *key = args;
+  char *group = NULL; // NULL = figure out automatically
+  char *val = NULL; // NULL = get
+  char *sep;
+  gboolean checkalt = FALSE;
+
+  // seperate key/value
+  if((sep = strchr(args, ' '))) {
+    *sep = 0;
+    val = sep+1;
+  }
+
+  // separate key/group
+  if((sep = strchr(key, '.'))) {
+    *sep = 0;
+    group = key;
+    key = sep+1;
+  }
+
+  // lookup key and validate or figure out group
+  struct setting *s = getsetting(key);
+  if(!s) {
+    ui_logwindow_printf(tab->log, "No configuration variable with the name '%s'.", key);
+    return;
+  }
+  if(group && (
+      (s->group && strcmp(group, s->group) != 0) ||
+      (!s->group && !g_key_file_has_group(conf_file, group)))) {
+    ui_logwindow_add(tab->log, "Wrong configuration group.");
+    return;
+  }
+  if(!group)
+    group = s->group;
+  if(!group) {
+    if(tab->type == UIT_HUB) {
+      checkalt = TRUE;
+      strcpy(hubgroup, "#");
+      strcat(hubgroup, tab->name);
+      group = hubgroup;
+    } else
+      group = "global";
+  }
+
+  // get
+  if(!val) {
+    if(checkalt && !g_key_file_has_key(conf_file, group, key, NULL))
+      group = "global";
+    s->get(group, key);
+
+  // set
+  } else {
+    s->set(group, key, val);
+    // set() may not always modify the config, but let's just save anyway
+    save_config();
+  }
+}
+
+
+
+
 // get a command by name. performs a linear search. can be rewritten to use a
 // binary search, but I doubt the performance difference really matters.
-static inline struct cmd *getcmd(char *name) {
-  struct cmd *c = cmds;
+static inline struct cmd *getcmd(const char *name) {
+  struct cmd *c;
   for(c=cmds; c->f; c++)
     if(strcmp(c->name, name) == 0)
       break;
@@ -98,8 +226,8 @@ static void c_open(char *args) {
   for(tmp=args; *tmp; tmp = g_utf8_next_char(tmp))
     if(++len && !g_unichar_isalnum(g_utf8_get_char(tmp)))
       break;
-  if(*tmp)
-    ui_logwindow_add(tab->log, "Sorry, tab name may only consist of alphanumeric characters.");
+  if(*tmp || len > 25)
+    ui_logwindow_add(tab->log, "Sorry, tab name may only consist of alphanumeric characters, and must not exceed 25 characters.");
   else
     ui_tab_open(ui_hub_create(args));
 }
@@ -137,6 +265,11 @@ static struct cmd cmds_list[] = {
   { "close", c_close,
     NULL, "Close the current tab.",
     "When closing a hub tab, you will be disconnected from the hub."
+  },
+  { "set", c_set,
+    "[<key> [<value>]]", "Get or set configuration variables.",
+    "Use /set without arguments to get a list of configuration variables.\n"
+    "/set <key> without value will print out the current value."
   },
   { "", NULL }
 };

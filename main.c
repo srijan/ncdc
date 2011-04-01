@@ -57,6 +57,7 @@ struct input_key {
 
 // global variables
 const char *conf_dir;
+GKeyFile *conf_file;
 GMainLoop *main_loop;
 
 
@@ -179,6 +180,18 @@ static void catch_sigwinch(int sig) {
 }
 
 
+void save_config() {
+  char *dat = g_key_file_to_data(conf_file, NULL, NULL);
+  char *cf = g_build_filename(conf_dir, "config.ini", NULL);
+  FILE *f = fopen(cf, "w");
+  if(!f || fputs(dat, f) < 0 || fclose(f)) {
+    g_critical("Cannot save config file '%s': %s", cf, strerror(errno));
+    g_free(dat);
+    g_free(cf);
+  }
+}
+
+
 // TODO: make sure that there is no other ncdc instance working with the same config directory
 static void init_config() {
   // get location of the configuration directory
@@ -197,6 +210,29 @@ static void init_config() {
   if(g_access(conf_dir, F_OK | R_OK | X_OK | W_OK) < 0)
     g_error("Directory '%s' does not exist or is not writable.", logs);
   g_free(logs);
+
+  // load config file (or create it)
+  conf_file = g_key_file_new();
+  char *cf = g_build_filename(conf_dir, "config.ini", NULL);
+  GError *err = NULL;
+  if(g_file_test(cf, G_FILE_TEST_EXISTS)) {
+    if(!g_key_file_load_from_file(conf_file, cf, G_KEY_FILE_KEEP_COMMENTS, &err))
+      g_error("Could not load '%s': %s", cf, err->message);
+  }
+  // always set the initial comment
+  g_key_file_set_comment(conf_file, NULL, NULL,
+    "This file is automatically managed by ncdc.\n"
+    "While you could edit it yourself, doing so is highly discouraged.\n"
+    "It is better to use the respective commands to change something.\n"
+    "Warning: Editing this file while ncdc is running may result in your changes getting lost!", NULL);
+  // make sure a nick is set
+  if(!g_key_file_has_key(conf_file, "global", "nick", NULL)) {
+    char *nick = g_strdup_printf("ncdc_%d", g_random_int_range(1, 9999));
+    g_key_file_set_string(conf_file, "global", "nick", nick);
+    g_free(nick);
+  }
+  save_config();
+  g_free(cf);
 }
 
 

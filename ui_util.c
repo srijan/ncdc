@@ -243,7 +243,9 @@ void ui_cmdhist_init(const char *file) {
       int len = strlen(buf);
       if(len > 0 && buf[len-1] == '\n')
         buf[len-1] = 0;
-      ui_cmdhist_add(buf);
+
+      if(g_utf8_validate(buf, -1, NULL))
+        ui_cmdhist_add(buf);
     }
   }
 }

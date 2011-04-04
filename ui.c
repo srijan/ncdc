@@ -38,6 +38,7 @@ struct ui_tab {
   char *name;
   char *title;
   struct ui_logwindow *log;
+  struct nmdc_hub *hub;
 };
 
 #endif
@@ -92,18 +93,23 @@ static void ui_main_key(struct input_key *key) {
 
 struct ui_tab *ui_hub_create(const char *name) {
   struct ui_tab *tab = g_new0(struct ui_tab, 1);
-  tab->name = g_strdup(name);
+  tab->name = g_strdup_printf("#%s", name);
   tab->title = "Debugging hub tabs";
   tab->type = UIT_HUB;
   tab->log = ui_logwindow_create(name);
+  tab->hub = nmdc_create(tab);
   return tab;
 }
 
 
 void ui_hub_close(ui_tab *tab) {
+  // remove from the ui_tabs list
   GList *cur = g_list_find(ui_tabs, tab);
   ui_tab_cur = cur->prev ? cur->prev : cur->next;
   ui_tabs = g_list_delete_link(ui_tabs, cur);
+
+  // free resources
+  nmdc_free(tab->hub);
   ui_logwindow_free(tab->log);
   g_free(tab->name);
   g_free(tab);

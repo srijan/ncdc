@@ -25,6 +25,7 @@
 
 #include "config.h"
 #include <glib.h>
+#include <gio/gio.h>
 
 #define _XOPEN_SOURCE_EXTENDED
 #ifdef HAVE_NCURSESW_NCURSES_H
@@ -40,6 +41,7 @@ struct input_key;
 struct ui_tab;
 struct ui_logwindow;
 struct ui_textinput;
+struct nmdc_hub;
 
 
 // include the auto-generated header files
@@ -47,4 +49,5 @@ struct ui_textinput;
 #include "commands.h"
 #include "ui.h"
 #include "ui_util.h"
+#include "nmdc.h"
 

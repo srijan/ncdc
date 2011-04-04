@@ -17,5 +17,6 @@ main.h
 commands.h
 ui.h
 ui_util.h
+nmdc.h
 ncdc
 INSTALL

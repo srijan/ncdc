@@ -62,6 +62,15 @@ GMainLoop *main_loop;
 
 
 
+// utility function (uses statically allocated memory for convenience, obviously not thread-safe in any way)
+char *get_hub_group(const char *hubname) {
+  static char hubgroup[152]; // "#" + name of hub tab (name = max 25 char = 150 bytes...)
+  strcpy(hubgroup, "#");
+  strcat(hubgroup, hubname);
+  return hubgroup;
+}
+
+
 static void handle_input() {
   /* Mapping from get_wch() to struct input_key:
    *  KEY_CODE_YES -> KEY
@@ -184,11 +193,10 @@ void save_config() {
   char *dat = g_key_file_to_data(conf_file, NULL, NULL);
   char *cf = g_build_filename(conf_dir, "config.ini", NULL);
   FILE *f = fopen(cf, "w");
-  if(!f || fputs(dat, f) < 0 || fclose(f)) {
+  if(!f || fputs(dat, f) < 0 || fclose(f))
     g_critical("Cannot save config file '%s': %s", cf, g_strerror(errno));
-    g_free(dat);
-    g_free(cf);
-  }
+  g_free(dat);
+  g_free(cf);
 }
 
 
@@ -262,6 +270,8 @@ int main(int argc, char **argv) {
   // TODO: check that the current locale is UTF-8. Things aren't going to work otherwise
 
   // init stuff
+  g_thread_init(NULL);
+  g_type_init();
   init_config();
   ui_cmdhist_init("history");
   ui_init();

@@ -139,7 +139,6 @@ static inline struct setting *getsetting(const char *name) {
 
 
 static inline gboolean parsesetting(char *name, char **group, char **key, struct setting **s, gboolean *checkalt) {
-  static char hubgroup[152]; // "#" + name of hub tab (name = max 25 char = 150 bytes...)
   char *sep;
 
   *key = name;
@@ -170,9 +169,7 @@ static inline gboolean parsesetting(char *name, char **group, char **key, struct
   if(!*group) {
     if(tab->type == UIT_HUB) {
       *checkalt = TRUE;
-      strcpy(hubgroup, "#");
-      strcat(hubgroup, tab->name);
-      *group = hubgroup;
+      *group = get_hub_group(tab->name);
     } else
       *group = "global";
   }
@@ -294,7 +291,6 @@ static void c_help(char *args) {
 }
 
 
-// TODO: also allow /open <name> [<server>]; as shortcut for /open ..; /connect ..
 static void c_open(char *args) {
   char *tmp;
   int len = 0;
@@ -305,6 +301,36 @@ static void c_open(char *args) {
     ui_logwindow_add(tab->log, "Sorry, tab name may only consist of alphanumeric characters, and must not exceed 25 characters.");
   else
     ui_tab_open(ui_hub_create(args));
+}
+
+
+static void c_connect(char *args) {
+  if(tab->type != UIT_HUB)
+    ui_logwindow_add(tab->log, "This command can only be used on hub tabs.");
+  else if(tab->hub->state != HUBS_IDLE)
+    ui_logwindow_add(tab->log, "Already connected (or connecting). You may want to /disconnect first.");
+  else {
+    if(args[0]) {
+      g_key_file_set_string(conf_file, get_hub_group(tab->name), "hubaddr", args);
+      save_config();
+    }
+    if(!g_key_file_has_key(conf_file, get_hub_group(tab->name), "hubaddr", NULL))
+      ui_logwindow_add(tab->log, "No hub address configured. Use '/connect <address>' to do so.");
+    else
+      nmdc_connect(tab->hub);
+  }
+}
+
+
+static void c_disconnect(char *args) {
+  if(args[0])
+    ui_logwindow_add(tab->log, "This command does not accept any arguments.");
+  else if(tab->type != UIT_HUB)
+    ui_logwindow_add(tab->log, "This command can only be used on hub tabs.");
+  else if(tab->hub->state == HUBS_IDLE)
+    ui_logwindow_add(tab->log, "Not connected.");
+  else
+    nmdc_disconnect(tab->hub);
 }
 
 
@@ -337,6 +363,15 @@ static struct cmd cmds_list[] = {
     "<name>", "Open a new hub tab.",
     "Opens a new tab to use for a hub. The name is a (short) personal name you use to identify the hub.\n"
     "If you have previously connected to a hub before from a tab with the same name, /open will automatically connect to the same hub again."
+  },
+  { "connect", c_connect,
+    "[<address>]", "Connect to a hub.",
+    "If no address is specified, will connect to the hub you last used on the current tab.\n"
+    "The address should be in the form of \"host:port\", where the \":port\" part is optional."
+  },
+  { "disconnect", c_disconnect,
+    NULL, "Disconnect from a hub.",
+    "Closes the connection with the hub."
   },
   { "close", c_close,
     NULL, "Close the current tab.",

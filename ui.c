@@ -98,6 +98,9 @@ struct ui_tab *ui_hub_create(const char *name) {
   tab->type = UIT_HUB;
   tab->log = ui_logwindow_create(name);
   tab->hub = nmdc_create(tab);
+  // already used this name before? open connection again
+  if(g_key_file_has_key(conf_file, get_hub_group(name), "hubaddr", NULL))
+    nmdc_connect(tab->hub);
   return tab;
 }
 
@@ -178,10 +181,15 @@ void ui_draw() {
   mvaddstr(0, 0, curtab->title);
   attroff(A_REVERSE);
 
-  // tabs
+  // second-last line
   attron(A_REVERSE);
   mvhline(winrows-2, 0, ' ', wincols);
-  move(winrows-2, 0);
+
+  GDateTime *t = g_date_time_new_now_local();
+  char *tf = g_date_time_format(t, "%H:%M:%S");
+  g_date_time_unref(t);
+  mvaddstr(winrows-2, 0, tf);
+  g_free(tf);
   // TODO: status info
   attroff(A_REVERSE);
 

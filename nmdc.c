@@ -67,7 +67,6 @@ static void handle_connect(GObject *src, GAsyncResult *res, gpointer dat) {
 
   GError *err = NULL;
   GSocketConnection *conn = g_socket_client_connect_to_uri_finish((GSocketClient *)src, res, &err);
-  g_object_unref(src);
 
   if(!conn) {
     if(err->code != G_IO_ERROR_CANCELLED) {
@@ -76,9 +75,15 @@ static void handle_connect(GObject *src, GAsyncResult *res, gpointer dat) {
     }
     g_error_free(err);
   } else {
-    ui_logwindow_add(hub->tab->log, "Connected.");
     hub->state = HUBS_CONNECTED;
     hub->conn = conn;
+
+    GInetSocketAddress *addr = (GInetSocketAddress *)g_socket_connection_get_remote_address(conn, NULL);
+    g_assert(addr);
+    char *ip = g_inet_address_to_string(g_inet_socket_address_get_address(addr));
+    ui_logwindow_printf(hub->tab->log, "Connected to %s:%d.", ip, g_inet_socket_address_get_port(addr));
+    g_free(ip);
+    g_object_unref(addr);
   }
 }
 
@@ -95,6 +100,7 @@ void nmdc_connect(struct nmdc_hub *hub) {
   g_socket_client_set_timeout(sc, 30);
 #endif
   g_socket_client_connect_to_host_async(sc, addr, 411, hub->cancel, handle_connect, hub);
+  g_object_unref(sc);
 
   g_free(addr);
 }
@@ -106,8 +112,10 @@ void nmdc_disconnect(struct nmdc_hub *hub) {
   g_cancellable_cancel(hub->cancel);
   g_object_unref(hub->cancel);
   hub->cancel = g_cancellable_new();
-  if(hub->conn)
+  if(hub->conn) {
     g_object_unref(hub->conn); // also closes the connection (does this block?)
+    hub->conn = NULL;
+  }
   hub->state = HUBS_IDLE;
   ui_logwindow_printf(hub->tab->log, "Disconnected.");
 }

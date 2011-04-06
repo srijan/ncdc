@@ -292,6 +292,10 @@ static void c_help(char *args) {
 
 
 static void c_open(char *args) {
+  if(!args[0]) {
+    ui_logwindow_add(tab->log, "No hub name given.");
+    return;
+  }
   char *tmp;
   int len = 0;
   for(tmp=args; *tmp; tmp = g_utf8_next_char(tmp))

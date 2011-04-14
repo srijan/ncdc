@@ -93,13 +93,14 @@ static void ui_main_key(struct input_key *key) {
 
 struct ui_tab *ui_hub_create(const char *name) {
   struct ui_tab *tab = g_new0(struct ui_tab, 1);
+  // NOTE: tab name is also used as configuration group
   tab->name = g_strdup_printf("#%s", name);
   tab->title = "Debugging hub tabs";
   tab->type = UIT_HUB;
   tab->log = ui_logwindow_create(name);
   tab->hub = nmdc_create(tab);
   // already used this name before? open connection again
-  if(g_key_file_has_key(conf_file, name, "hubaddr", NULL))
+  if(g_key_file_has_key(conf_file, tab->name, "hubaddr", NULL))
     nmdc_connect(tab->hub);
   return tab;
 }

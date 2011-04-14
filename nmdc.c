@@ -146,6 +146,20 @@ static void send_cmdf(struct nmdc_hub *hub, const char *fmt, ...) {
 }
 
 
+void send_myinfo(struct nmdc_hub *hub) {
+  // TODO: convert these to hub encoding
+  char *desc = hubconf_get(string, hub, "description"); // TODO: escape
+  char *conn = hubconf_get(string, hub, "connection");
+  char *mail = hubconf_get(string, hub, "email"); // TODO: escape
+  // TODO: more dynamic...
+  send_cmdf(hub, "$MyINFO $ALL %s %s<ncdc V:0.1,M:P,H:1/0/0,S:1>$ $%s\01$%s$0$",
+    hub->nick, desc?desc:"", conn?conn:"", mail?mail:"");
+  g_free(desc);
+  g_free(conn);
+  g_free(mail);
+}
+
+
 // Info & algorithm @ http://www.teamfair.info/wiki/index.php?title=Lock_to_key
 // This function modifies "lock" in-place for temporary data
 static GString *lock2key(char *lock) {
@@ -176,7 +190,7 @@ static void handle_cmd(struct nmdc_hub *hub, const char *cmd) {
 
   GMatchInfo *nfo;
 
-  // create regexes (declared statically, allocated/generated on first call)
+  // create regexes (declared statically, allocated/compiled on first call)
 #define CMDREGEX(name, regex) \
   static GRegex * name = NULL;\
   if(!name) name = g_regex_new("\\$" regex, G_REGEX_OPTIMIZE|G_REGEX_ANCHORED|G_REGEX_DOLLAR_ENDONLY|G_REGEX_DOTALL, 0, NULL)
@@ -203,7 +217,7 @@ static void handle_cmd(struct nmdc_hub *hub, const char *cmd) {
     // assumes hub->nick is in hub encoding
     if(strcmp(nick, hub->nick) == 0) {
       ui_logwindow_add(hub->tab->log, "Nick validated.");
-      // TODO: send $MyINFO
+      send_myinfo(hub);
     } else {
       // TODO: keep track of users
     }
@@ -292,8 +306,6 @@ static void handle_connect(GObject *src, GAsyncResult *res, gpointer dat) {
     hub->conn = conn;
     hub->in = g_data_input_stream_new(g_io_stream_get_input_stream(G_IO_STREAM(hub->conn)));
     hub->out = g_io_stream_get_output_stream(G_IO_STREAM(hub->conn));
-    // does this guarantee that a write() does not block?
-    g_buffered_output_stream_set_auto_grow(G_BUFFERED_OUTPUT_STREAM(hub->out), TRUE);
 
     // continuously wait for incoming commands
     g_data_input_stream_read_upto_async(hub->in, "|", -1, G_PRIORITY_DEFAULT, hub->cancel, handle_input, hub);

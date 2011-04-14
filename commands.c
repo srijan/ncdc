@@ -118,7 +118,7 @@ static void set_userinfo(char *group, char *key, char *val) {
 }
 
 
-// the actual settings list
+// the settings list
 static struct setting settings[] = {
   { "nick",        NULL, get_string, set_nick }, // as a special case, global.nick may not be /unset
   { "email",       NULL, get_string, set_userinfo },

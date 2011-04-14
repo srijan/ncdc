@@ -50,7 +50,8 @@ struct nmdc_hub {
   //   http://www.mail-archive.com/gtk-devel-list@gnome.org/msg10628.html
   GCancellable *cancel;
   // nick as used in this connection, NULL when no $ValidateNick has been sent yet
-  char *nick;
+  char *nick_hub; // in hub encoding
+  char *nick;     // UTF-8
 };
 
 #endif
@@ -146,14 +147,35 @@ static void send_cmdf(struct nmdc_hub *hub, const char *fmt, ...) {
 }
 
 
-void send_myinfo(struct nmdc_hub *hub) {
-  // TODO: convert these to hub encoding
-  char *desc = hubconf_get(string, hub, "description"); // TODO: escape
-  char *conn = hubconf_get(string, hub, "connection");
-  char *mail = hubconf_get(string, hub, "email"); // TODO: escape
+static char *charset_convert(struct nmdc_hub *hub, gboolean to_utf8, const char *str) {
+  char *fmt = hubconf_get(string, hub, "encoding");
+  GError *err = NULL;
+  // TODO: better fallback sequence?
+  char *res = g_convert_with_fallback(str, -1, to_utf8||!fmt?"UTF-8":fmt, !to_utf8||!fmt?"UTF-8":fmt, NULL, NULL, NULL, &err);
+  if(err) {
+    // TODO: even the _fallback function throws an error when the input
+    // contains an invalid byte sequence, we should still try to convert as
+    // many characters as possible in that case. An <encoding-error> is just
+    // plain ugly. (And why doesn't glib provide such functionality?)
+    if(!res)
+      res = strdup("<encoding-error>");
+    g_critical("Character conversion failed: %s", err->message);
+    g_error_free(err);
+  }
+  g_free(fmt);
+  return res;
+}
+
+
+void nmdc_send_myinfo(struct nmdc_hub *hub) {
+  // TODO: escape description & email
+  char *tmp;
+  tmp = hubconf_get(string, hub, "description"); char *desc = charset_convert(hub, FALSE, tmp?tmp:""); g_free(tmp);
+  tmp = hubconf_get(string, hub, "connection");  char *conn = charset_convert(hub, FALSE, tmp?tmp:""); g_free(tmp);
+  tmp = hubconf_get(string, hub, "email");       char *mail = charset_convert(hub, FALSE, tmp?tmp:""); g_free(tmp);
   // TODO: more dynamic...
   send_cmdf(hub, "$MyINFO $ALL %s %s<ncdc V:0.1,M:P,H:1/0/0,S:1>$ $%s\01$%s$0$",
-    hub->nick, desc?desc:"", conn?conn:"", mail?mail:"");
+    hub->nick_hub, desc, conn, mail);
   g_free(desc);
   g_free(conn);
   g_free(mail);
@@ -162,12 +184,12 @@ void send_myinfo(struct nmdc_hub *hub) {
 
 // Info & algorithm @ http://www.teamfair.info/wiki/index.php?title=Lock_to_key
 // This function modifies "lock" in-place for temporary data
-static GString *lock2key(char *lock) {
+static char *lock2key(char *lock) {
   char n;
   int i;
   int len = strlen(lock);
   if(len < 3)
-    return g_string_new("STUPIDKEY!"); // let's not crash on invalid data
+    return strdup("STUPIDKEY!"); // let's not crash on invalid data
   for(i=1; i<len; i++)
     lock[i] = lock[i] ^ lock[i-1];
   lock[0] = lock[0] ^ lock[len-1] ^ lock[len-2] ^ 5;
@@ -181,7 +203,7 @@ static GString *lock2key(char *lock) {
     else
       g_string_append_c(key, n);
   }
-  return key;
+  return g_string_free(key, FALSE);
 }
 
 
@@ -202,11 +224,12 @@ static void handle_cmd(struct nmdc_hub *hub, const char *cmd) {
   if(g_regex_match(lock, cmd, 0, &nfo)) { // 1 = lock
     char *lock = g_match_info_fetch(nfo, 1);
     // TODO: check for EXTENDEDPROTOCOL
-    GString *key = lock2key(lock);
-    send_cmdf(hub, "$Key %s", key->str);
-    hub->nick = hubconf_get(string, hub, "nick"); // TODO: convert to hub encoding
-    send_cmdf(hub, "$ValidateNick %s", hub->nick);
-    g_string_free(key, TRUE);
+    char *key = lock2key(lock);
+    send_cmdf(hub, "$Key %s", key);
+    hub->nick = hubconf_get(string, hub, "nick");
+    hub->nick_hub = charset_convert(hub, FALSE, hub->nick);
+    send_cmdf(hub, "$ValidateNick %s", hub->nick_hub);
+    g_free(key);
     g_free(lock);
   }
   g_match_info_free(nfo);
@@ -214,10 +237,9 @@ static void handle_cmd(struct nmdc_hub *hub, const char *cmd) {
   // $Hello
   if(g_regex_match(hello, cmd, 0, &nfo)) { // 1 = nick
     char *nick = g_match_info_fetch(nfo, 1);
-    // assumes hub->nick is in hub encoding
-    if(strcmp(nick, hub->nick) == 0) {
+    if(strcmp(nick, hub->nick_hub) == 0) {
       ui_logwindow_add(hub->tab->log, "Nick validated.");
-      send_myinfo(hub);
+      nmdc_send_myinfo(hub);
     } else {
       // TODO: keep track of users
     }
@@ -245,8 +267,9 @@ static void handle_cmd(struct nmdc_hub *hub, const char *cmd) {
 
   // global hub message
   if(cmd[0] != '$') {
-    // TODO: convert to UTF-8!
-    ui_logwindow_add(hub->tab->log, cmd);
+    char *msg = charset_convert(hub, TRUE, cmd);
+    ui_logwindow_add(hub->tab->log, msg);
+    g_free(msg);
   }
 }
 
@@ -347,8 +370,8 @@ void nmdc_disconnect(struct nmdc_hub *hub) {
     g_object_unref(hub->conn); // also closes the connection
     hub->conn = NULL;
   }
-  g_free(hub->nick);
-  hub->nick = NULL;
+  g_free(hub->nick);     hub->nick = NULL;
+  g_free(hub->nick_hub); hub->nick_hub = NULL;
   hub->state = HUBS_IDLE;
   ui_logwindow_printf(hub->tab->log, "Disconnected.");
 }

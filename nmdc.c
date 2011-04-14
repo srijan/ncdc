@@ -49,6 +49,8 @@ struct nmdc_hub {
   // the same time. The documentation advices against this, but...
   //   http://www.mail-archive.com/gtk-devel-list@gnome.org/msg10628.html
   GCancellable *cancel;
+  // nick as used in this connection, NULL when no $ValidateNick has been sent yet
+  char *nick;
 };
 
 #endif
@@ -91,7 +93,7 @@ static void handle_write(GObject *src, GAsyncResult *res, gpointer dat) {
   } else {
     if(written > 0) {
       hub->out_buf_pos -= written;
-      memmove(hub->out_buf+written, hub->out_buf, hub->out_buf_pos);
+      memmove(hub->out_buf, hub->out_buf+written, hub->out_buf_pos);
     }
     g_assert(hub->out_buf_pos >= 0);
     if(hub->out_buf_pos > 0)
@@ -100,10 +102,12 @@ static void handle_write(GObject *src, GAsyncResult *res, gpointer dat) {
 }
 
 
-static void send_cmd(struct nmdc_hub *hub, char *cmd) {
+static void send_cmd(struct nmdc_hub *hub, const char *cmd) {
   // ignore writes when we're not connected
   if(hub->state != HUBS_CONNECTED)
     return;
+
+  fprintf(stderr, "%s> %s\n", hub->tab->name, cmd); // debug
 
   // append cmd to the buffer
   int len = strlen(cmd)+1; // the 1 is the termination char
@@ -132,11 +136,104 @@ static void send_cmd(struct nmdc_hub *hub, char *cmd) {
 }
 
 
-static void handle_cmd(struct nmdc_hub *hub, char *cmd) {
-  // TODO
-  // DEBUG: just send back what we received.
-  //g_warning("< %d %s", hub->state, cmd);
-  send_cmd(hub, cmd);
+static void send_cmdf(struct nmdc_hub *hub, const char *fmt, ...) {
+  va_list va;
+  va_start(va, fmt);
+  char *str = g_strdup_vprintf(fmt, va);
+  va_end(va);
+  send_cmd(hub, str);
+  g_free(str);
+}
+
+
+// Info & algorithm @ http://www.teamfair.info/wiki/index.php?title=Lock_to_key
+// This function modifies "lock" in-place for temporary data
+static GString *lock2key(char *lock) {
+  char n;
+  int i;
+  int len = strlen(lock);
+  if(len < 3)
+    return g_string_new("STUPIDKEY!"); // let's not crash on invalid data
+  for(i=1; i<len; i++)
+    lock[i] = lock[i] ^ lock[i-1];
+  lock[0] = lock[0] ^ lock[len-1] ^ lock[len-2] ^ 5;
+  for(i=0; i<len; i++)
+    lock[i] = ((lock[i]<<4) & 0xF0) | ((lock[i]>>4) & 0x0F);
+  GString *key = g_string_sized_new(len+100);
+  for(i=0; i<len; i++) {
+    n = lock[i];
+    if(n == 0 || n == 5 || n == 36 || n == 96 || n == 124 || n == 126)
+      g_string_append_printf(key, "/%%DCN%03d%%/", n);
+    else
+      g_string_append_c(key, n);
+  }
+  return key;
+}
+
+
+static void handle_cmd(struct nmdc_hub *hub, const char *cmd) {
+  fprintf(stderr, "%s< %s\n", hub->tab->name, cmd); // debug
+
+  GMatchInfo *nfo;
+
+  // create regexes (declared statically, allocated/generated on first call)
+#define CMDREGEX(name, regex) \
+  static GRegex * name = NULL;\
+  if(!name) name = g_regex_new("\\$" regex, G_REGEX_OPTIMIZE|G_REGEX_ANCHORED|G_REGEX_DOLLAR_ENDONLY|G_REGEX_DOTALL, 0, NULL)
+
+  CMDREGEX(lock, "Lock ([^ $]+) Pk=[^ $]+");
+  CMDREGEX(hello, "Hello ([^ $]+)");
+
+  // $Lock
+  if(g_regex_match(lock, cmd, 0, &nfo)) { // 1 = lock
+    char *lock = g_match_info_fetch(nfo, 1);
+    // TODO: check for EXTENDEDPROTOCOL
+    GString *key = lock2key(lock);
+    send_cmdf(hub, "$Key %s", key->str);
+    hub->nick = hubconf_get(string, hub, "nick"); // TODO: convert to hub encoding
+    send_cmdf(hub, "$ValidateNick %s", hub->nick);
+    g_string_free(key, TRUE);
+    g_free(lock);
+  }
+  g_match_info_free(nfo);
+
+  // $Hello
+  if(g_regex_match(hello, cmd, 0, &nfo)) { // 1 = nick
+    char *nick = g_match_info_fetch(nfo, 1);
+    // assumes hub->nick is in hub encoding
+    if(strcmp(nick, hub->nick) == 0) {
+      ui_logwindow_add(hub->tab->log, "Nick validated.");
+      // TODO: send $MyINFO
+    } else {
+      // TODO: keep track of users
+    }
+    g_free(nick);
+  }
+  g_match_info_free(nfo);
+
+  // $GetPass
+  if(strncmp(cmd, "$GetPass", 8) == 0) {
+    ui_logwindow_add(hub->tab->log, "Hub requires a password. This version of ncdc does not support passworded login yet.");
+    nmdc_disconnect(hub);
+  }
+
+  // $ValidateDenide
+  if(strncmp(cmd, "$ValidateDenide", 15) == 0) {
+    ui_logwindow_add(hub->tab->log, "Username invalid or already taken.");
+    nmdc_disconnect(hub);
+  }
+
+  // $HubIsFull
+  if(strncmp(cmd, "$HubIsFull", 10) == 0) {
+    ui_logwindow_add(hub->tab->log, "Hub is full.");
+    nmdc_disconnect(hub);
+  }
+
+  // global hub message
+  if(cmd[0] != '$') {
+    // TODO: convert to UTF-8!
+    ui_logwindow_add(hub->tab->log, cmd);
+  }
 }
 
 
@@ -153,7 +250,7 @@ static void handle_input(GObject *src, GAsyncResult *res, gpointer dat) {
     }
     g_error_free(err);
 
-  } else {
+  } else if(hub->state == HUBS_CONNECTED) {
     // consume the termination character.  the char should be in the read
     // buffer, and this call should therefore not block. if the hub
     // disconnected for some reason, this function will fail and all data that
@@ -238,6 +335,8 @@ void nmdc_disconnect(struct nmdc_hub *hub) {
     g_object_unref(hub->conn); // also closes the connection
     hub->conn = NULL;
   }
+  g_free(hub->nick);
+  hub->nick = NULL;
   hub->state = HUBS_IDLE;
   ui_logwindow_printf(hub->tab->log, "Disconnected.");
 }

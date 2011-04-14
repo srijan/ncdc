@@ -298,14 +298,25 @@ static void c_open(char *args) {
   }
   char *tmp;
   int len = 0;
+  GList *n;
   for(tmp=args; *tmp; tmp = g_utf8_next_char(tmp))
     if(++len && !g_unichar_isalnum(g_utf8_get_char(tmp)))
       break;
   if(*tmp || len > 25)
     ui_logwindow_add(tab->log, "Sorry, tab name may only consist of alphanumeric characters, and must not exceed 25 characters.");
-  else
-    // TODO: check whether it is already open
-    ui_tab_open(ui_hub_create(args));
+  else {
+    for(n=ui_tabs; n; n=n->next) {
+      tmp = ((struct ui_tab *)n->data)->name;
+      if(tmp[0] == '#' && strcmp(tmp+1, args) == 0)
+        break;
+    }
+    if(!n)
+      ui_tab_open(ui_hub_create(args));
+    else if(n != ui_tab_cur)
+      ui_tab_cur = n;
+    else
+      ui_logwindow_add(tab->log, "Tab already selected.");
+  }
 }
 
 

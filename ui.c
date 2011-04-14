@@ -99,7 +99,7 @@ struct ui_tab *ui_hub_create(const char *name) {
   tab->log = ui_logwindow_create(name);
   tab->hub = nmdc_create(tab);
   // already used this name before? open connection again
-  if(g_key_file_has_key(conf_file, get_hub_group(name), "hubaddr", NULL))
+  if(g_key_file_has_key(conf_file, name, "hubaddr", NULL))
     nmdc_connect(tab->hub);
   return tab;
 }

@@ -61,16 +61,6 @@ GKeyFile *conf_file;
 GMainLoop *main_loop;
 
 
-
-// utility function (uses statically allocated memory for convenience, obviously not thread-safe in any way)
-char *get_hub_group(const char *hubname) {
-  static char hubgroup[152]; // "#" + name of hub tab (name = max 25 char = 150 bytes...)
-  strcpy(hubgroup, "#");
-  strcat(hubgroup, hubname);
-  return hubgroup;
-}
-
-
 static void handle_input() {
   /* Mapping from get_wch() to struct input_key:
    *  KEY_CODE_YES -> KEY

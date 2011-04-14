@@ -169,7 +169,7 @@ static inline gboolean parsesetting(char *name, char **group, char **key, struct
   if(!*group) {
     if(tab->type == UIT_HUB) {
       *checkalt = TRUE;
-      *group = get_hub_group(tab->name);
+      *group = tab->name;
     } else
       *group = "global";
   }
@@ -304,6 +304,7 @@ static void c_open(char *args) {
   if(*tmp || len > 25)
     ui_logwindow_add(tab->log, "Sorry, tab name may only consist of alphanumeric characters, and must not exceed 25 characters.");
   else
+    // TODO: check whether it is already open
     ui_tab_open(ui_hub_create(args));
 }
 
@@ -315,10 +316,10 @@ static void c_connect(char *args) {
     ui_logwindow_add(tab->log, "Already connected (or connecting). You may want to /disconnect first.");
   else {
     if(args[0]) {
-      g_key_file_set_string(conf_file, get_hub_group(tab->name), "hubaddr", args);
+      g_key_file_set_string(conf_file, tab->name, "hubaddr", args);
       save_config();
     }
-    if(!g_key_file_has_key(conf_file, get_hub_group(tab->name), "hubaddr", NULL))
+    if(!g_key_file_has_key(conf_file, tab->name, "hubaddr", NULL))
       ui_logwindow_add(tab->log, "No hub address configured. Use '/connect <address>' to do so.");
     else
       nmdc_connect(tab->hub);

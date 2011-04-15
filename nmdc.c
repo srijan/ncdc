@@ -25,6 +25,7 @@
 
 
 #include "ncdc.h"
+#include <errno.h>
 #include <string.h>
 
 
@@ -147,21 +148,71 @@ static void send_cmdf(struct nmdc_hub *hub, const char *fmt, ...) {
 }
 
 
+/* A best-effort character conversion function.
+ *
+ * If, for whatever reason, a character could not be converted, a question mark
+ * will be inserted instead. Unlike g_convert_with_fallback(), this function
+ * does not fail on invalid byte sequences in the input string, either. Those
+ * will simply be replaced with question marks as well.
+ *
+ * The character sets in 'to' and 'from' are assumed to form a valid conversion
+ * according to your iconv implementation.
+ *
+ * Modifying this function to not require glib, but instead use the iconv and
+ * memory allocation functions provided by your system, should be trivial.
+ *
+ * This function does not correctly handle character sets that may use zeroes
+ * in the middle of a string (e.g. UTF-16).
+ *
+ * This function may not represent best practice with respect to character set
+ * conversion, nor has it been thouroughly tested.
+ */
+static char *convert_best_effort(const char *to, const char *from, const char *str) {
+  GIConv cd = g_iconv_open(to, from);
+  if(cd == (GIConv)-1) {
+    g_critical("No conversion from '%s' to '%s': %s", from, to, g_strerror(errno));
+    return g_strdup("<encoding-error>");
+  }
+  gsize inlen = strlen(str);
+  gsize outlen = inlen+96;
+  gsize outsize = inlen+100;
+  char *inbuf = (char *)str;
+  char *dest = g_malloc(outsize);
+  char *outbuf = dest;
+  while(inlen > 0) {
+    gsize r = g_iconv(cd, &inbuf, &inlen, &outbuf, &outlen);
+    if(r != (gsize)-1)
+      continue;
+    if(errno == E2BIG) {
+      gsize used = outsize - outlen - 4;
+      outlen += outsize;
+      outsize += outsize;
+      dest = g_realloc(dest, outsize);
+      outbuf = dest + used;
+    } else if(errno == EILSEQ || errno == EINVAL) {
+      // skip this byte from the input
+      inbuf++;
+      inlen--;
+      // Only output question mark if we happen to have enough space, otherwise
+      // it's too much of a hassle...  (In most (all?) cases we do have enough
+      // space, otherwise we'd have gotten E2BIG anyway)
+      if(outlen >= 1) {
+        *outbuf = '?';
+        outbuf++;
+        outlen--;
+      }
+    } else
+      g_assert_not_reached();
+  }
+  memset(outbuf, 0, 4);
+  g_iconv_close(cd);
+  return dest;
+}
+
+
 static char *charset_convert(struct nmdc_hub *hub, gboolean to_utf8, const char *str) {
   char *fmt = hubconf_get(string, hub, "encoding");
-  GError *err = NULL;
-  // TODO: better fallback sequence?
-  char *res = g_convert_with_fallback(str, -1, to_utf8||!fmt?"UTF-8":fmt, !to_utf8||!fmt?"UTF-8":fmt, NULL, NULL, NULL, &err);
-  if(err) {
-    // TODO: even the _fallback function throws an error when the input
-    // contains an invalid byte sequence, we should still try to convert as
-    // many characters as possible in that case. An <encoding-error> is just
-    // plain ugly. (And why doesn't glib provide such functionality?)
-    if(!res)
-      res = strdup("<encoding-error>");
-    g_critical("Character conversion failed: %s", err->message);
-    g_error_free(err);
-  }
+  char *res = convert_best_effort(to_utf8||!fmt?"UTF-8":fmt, !to_utf8||!fmt?"UTF-8":fmt, str);
   g_free(fmt);
   return res;
 }
@@ -189,7 +240,7 @@ static char *lock2key(char *lock) {
   int i;
   int len = strlen(lock);
   if(len < 3)
-    return strdup("STUPIDKEY!"); // let's not crash on invalid data
+    return g_strdup("STUPIDKEY!"); // let's not crash on invalid data
   for(i=1; i<len; i++)
     lock[i] = lock[i] ^ lock[i-1];
   lock[0] = lock[0] ^ lock[len-1] ^ lock[len-2] ^ 5;

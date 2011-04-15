@@ -53,6 +53,8 @@ struct nmdc_hub {
   // nick as used in this connection, NULL when no $ValidateNick has been sent yet
   char *nick_hub; // in hub encoding
   char *nick;     // UTF-8
+  // TRUE is the above nick has also been validated (and we're properly logged in)
+  gboolean nick_valid;
 };
 
 #endif
@@ -219,6 +221,8 @@ static char *charset_convert(struct nmdc_hub *hub, gboolean to_utf8, const char 
 
 
 void nmdc_send_myinfo(struct nmdc_hub *hub) {
+  if(!hub->nick_valid)
+    return;
   // TODO: escape description & email
   char *tmp;
   tmp = hubconf_get(string, hub, "description"); char *desc = charset_convert(hub, FALSE, tmp?tmp:""); g_free(tmp);
@@ -230,6 +234,16 @@ void nmdc_send_myinfo(struct nmdc_hub *hub) {
   g_free(desc);
   g_free(conn);
   g_free(mail);
+}
+
+
+void nmdc_say(struct nmdc_hub *hub, const char *str) {
+  if(!hub->nick_valid)
+    return;
+  char *msg = charset_convert(hub, FALSE, str);
+  // TODO: escape message
+  send_cmdf(hub, "<%s> %s", hub->nick_hub, msg);
+  g_free(msg);
 }
 
 
@@ -290,6 +304,7 @@ static void handle_cmd(struct nmdc_hub *hub, const char *cmd) {
     char *nick = g_match_info_fetch(nfo, 1);
     if(strcmp(nick, hub->nick_hub) == 0) {
       ui_logwindow_add(hub->tab->log, "Nick validated.");
+      hub->nick_valid = TRUE;
       nmdc_send_myinfo(hub);
     } else {
       // TODO: keep track of users
@@ -319,6 +334,7 @@ static void handle_cmd(struct nmdc_hub *hub, const char *cmd) {
   // global hub message
   if(cmd[0] != '$') {
     char *msg = charset_convert(hub, TRUE, cmd);
+    // TODO: unescape message
     ui_logwindow_add(hub->tab->log, msg);
     g_free(msg);
   }
@@ -423,6 +439,7 @@ void nmdc_disconnect(struct nmdc_hub *hub) {
   }
   g_free(hub->nick);     hub->nick = NULL;
   g_free(hub->nick_hub); hub->nick_hub = NULL;
+  hub->nick_valid = FALSE;
   hub->state = HUBS_IDLE;
   ui_logwindow_printf(hub->tab->log, "Disconnected.");
 }

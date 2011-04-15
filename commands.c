@@ -302,7 +302,12 @@ static void c_quit(char *args) {
 
 
 static void c_say(char *args) {
-  ui_logwindow_add(tab->log, "Chatting has not been implemented yet.");
+  if(tab->type != UIT_HUB)
+    ui_logwindow_add(tab->log, "Chatting only works on hub tabs.");
+  else if(!tab->hub->nick_valid)
+    ui_logwindow_add(tab->log, "Not connected or logged in yet.");
+  else
+    nmdc_say(tab->hub, args);
 }
 
 

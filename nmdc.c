@@ -220,14 +220,56 @@ static char *charset_convert(struct nmdc_hub *hub, gboolean to_utf8, const char 
 }
 
 
+static char *encode_and_escape(struct nmdc_hub *hub, const char *str) {
+  char *enc = charset_convert(hub, FALSE, str);
+  GString *dest = g_string_sized_new(strlen(enc));
+  char *tmp = enc;
+  while(*tmp) {
+    if(*tmp == '$')
+      g_string_append(dest, "&#36;");
+    else if(*tmp == '|')
+      g_string_append(dest, "&#124;");
+    else if(*tmp == '&' && (strncmp(tmp, "&amp;", 5) == 0 || strncmp(tmp, "&#36;", 5) == 0 || strncmp(tmp, "&#124;", 6) == 0))
+      g_string_append(dest, "&amp;");
+    else
+      g_string_append_c(dest, *tmp);
+    tmp++;
+  }
+  g_free(enc);
+  return g_string_free(dest, FALSE);
+}
+
+
+static char *unescape_and_decode(struct nmdc_hub *hub, const char *str) {
+  GString *dest = g_string_sized_new(strlen(str));
+  while(*str) {
+    if(strncmp(str, "&#36;", 5) == 0) {
+      g_string_append_c(dest, '$');
+      str += 5;
+    } else if(strncmp(str, "&#124;", 6) == 0) {
+      g_string_append_c(dest, '|');
+      str += 6;
+    } else if(strncmp(str, "&amp;", 5) == 0) {
+      g_string_append_c(dest, '&');
+      str += 5;
+    } else {
+      g_string_append_c(dest, *str);
+      str++;
+    }
+  }
+  char *dec = charset_convert(hub, TRUE, dest->str);
+  g_string_free(dest, TRUE);
+  return dec;
+}
+
+
 void nmdc_send_myinfo(struct nmdc_hub *hub) {
   if(!hub->nick_valid)
     return;
-  // TODO: escape description & email
   char *tmp;
-  tmp = hubconf_get(string, hub, "description"); char *desc = charset_convert(hub, FALSE, tmp?tmp:""); g_free(tmp);
-  tmp = hubconf_get(string, hub, "connection");  char *conn = charset_convert(hub, FALSE, tmp?tmp:""); g_free(tmp);
-  tmp = hubconf_get(string, hub, "email");       char *mail = charset_convert(hub, FALSE, tmp?tmp:""); g_free(tmp);
+  tmp = hubconf_get(string, hub, "description"); char *desc = encode_and_escape(hub, tmp?tmp:""); g_free(tmp);
+  tmp = hubconf_get(string, hub, "connection");  char *conn = encode_and_escape(hub, tmp?tmp:""); g_free(tmp);
+  tmp = hubconf_get(string, hub, "email");       char *mail = encode_and_escape(hub, tmp?tmp:""); g_free(tmp);
   // TODO: more dynamic...
   send_cmdf(hub, "$MyINFO $ALL %s %s<ncdc V:0.1,M:P,H:1/0/0,S:1>$ $%s\01$%s$0$",
     hub->nick_hub, desc, conn, mail);
@@ -240,8 +282,7 @@ void nmdc_send_myinfo(struct nmdc_hub *hub) {
 void nmdc_say(struct nmdc_hub *hub, const char *str) {
   if(!hub->nick_valid)
     return;
-  char *msg = charset_convert(hub, FALSE, str);
-  // TODO: escape message
+  char *msg = encode_and_escape(hub, str);
   send_cmdf(hub, "<%s> %s", hub->nick_hub, msg);
   g_free(msg);
 }
@@ -333,8 +374,7 @@ static void handle_cmd(struct nmdc_hub *hub, const char *cmd) {
 
   // global hub message
   if(cmd[0] != '$') {
-    char *msg = charset_convert(hub, TRUE, cmd);
-    // TODO: unescape message
+    char *msg = unescape_and_decode(hub, cmd);
     ui_logwindow_add(hub->tab->log, msg);
     g_free(msg);
   }

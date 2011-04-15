@@ -168,6 +168,12 @@ static gboolean screen_update_timer(gpointer dat) {
   return TRUE;
 }
 
+static gboolean screen_update_check(gpointer dat) {
+  if(ui_checkupdate())
+    ui_draw();
+  return TRUE;
+}
+
 
 // Fired when the screen is resized.  Normally I would check for KEY_RESIZE,
 // but that doesn't work very nicely together with select(). See
@@ -285,6 +291,7 @@ int main(int argc, char **argv) {
   g_io_add_watch(in, G_IO_IN, stdin_read, NULL);
 
   g_timeout_add_seconds(1, screen_update_timer, NULL);
+  g_timeout_add(100, screen_update_check, NULL);
 
   g_main_loop_run(main_loop);
 

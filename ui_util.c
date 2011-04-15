@@ -39,6 +39,8 @@
 // TODO: log file rotation (of some sorts)
 
 
+#if INTERFACE
+
 #define LOGWIN_PAD 9
 #define LOGWIN_BUF 1023 // must be 2^x-1
 
@@ -47,7 +49,10 @@ struct ui_logwindow {
   int lastvis;
   FILE *file;
   char *buf[LOGWIN_BUF+1];
+  gboolean updated;
 };
+
+#endif
 
 
 struct ui_logwindow *ui_logwindow_create(const char *file) {
@@ -80,6 +85,7 @@ static void ui_logwindow_addline(struct ui_logwindow *lw, const char *msg) {
   if(lw->lastlog == lw->lastvis)
     lw->lastvis = lw->lastlog + 1;
   lw->lastlog++;
+  lw->updated = TRUE;
 
   // TODO: convert invalid characters being written to the buffer
   //  ui_logwindow_draw() really requires valid UTF-8
@@ -144,6 +150,7 @@ void ui_logwindow_scroll(struct ui_logwindow *lw, int i) {
 void ui_logwindow_draw(struct ui_logwindow *lw, int y, int x, int rows, int cols) {
   int top = rows + y - 1;
   int cur = lw->lastvis;
+  lw->updated = FALSE;
 
   // defines a mask over the string: <#0,#1), <#1,#2), ..
   static unsigned short lines[201];

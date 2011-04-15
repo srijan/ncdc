@@ -210,6 +210,12 @@ void ui_draw() {
 }
 
 
+gboolean ui_checkupdate() {
+  struct ui_tab *cur = ui_tab_cur->data;
+  return cur->log->updated;
+}
+
+
 void ui_input(struct input_key *key) {
   struct ui_tab *curtab = ui_tab_cur->data;
 

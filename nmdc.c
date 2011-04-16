@@ -54,6 +54,7 @@ struct nmdc_hub {
   char *nick;     // UTF-8
   // TRUE is the above nick has also been validated (and we're properly logged in)
   gboolean nick_valid;
+  char *hubname;  // UTF-8, or NULL when unknown
 };
 
 #endif
@@ -256,6 +257,7 @@ static void handle_cmd(struct nmdc_hub *hub, const char *cmd) {
 
   CMDREGEX(lock, "Lock ([^ $]+) Pk=[^ $]+");
   CMDREGEX(hello, "Hello ([^ $]+)");
+  CMDREGEX(hubname, "HubName (.+)");
 
   // $Lock
   if(g_regex_match(lock, cmd, 0, &nfo)) { // 1 = lock
@@ -282,6 +284,14 @@ static void handle_cmd(struct nmdc_hub *hub, const char *cmd) {
       // TODO: keep track of users
     }
     g_free(nick);
+  }
+  g_match_info_free(nfo);
+
+  // $HubName
+  if(g_regex_match(hubname, cmd, 0, &nfo)) { // 1 = name
+    char *name = g_match_info_fetch(nfo, 1);
+    hub->hubname = unescape_and_decode(hub, name);
+    g_free(name);
   }
   g_match_info_free(nfo);
 
@@ -423,6 +433,7 @@ void nmdc_disconnect(struct nmdc_hub *hub) {
   }
   g_free(hub->nick);     hub->nick = NULL;
   g_free(hub->nick_hub); hub->nick_hub = NULL;
+  g_free(hub->hubname);  hub->hubname = NULL;
   hub->nick_valid = FALSE;
   hub->state = HUBS_IDLE;
   ui_logwindow_printf(hub->tab->log, "Disconnected.");

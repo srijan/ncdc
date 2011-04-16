@@ -37,7 +37,6 @@
 struct ui_tab {
   int type; // UIT_ type
   char *name;
-  char *title;
   struct ui_logwindow *log;
   struct nmdc_hub *hub;
 };
@@ -63,7 +62,6 @@ struct ui_tab *ui_main;
 static struct ui_tab *ui_main_create() {
   ui_main = g_new0(struct ui_tab, 1);
   ui_main->name = "main";
-  ui_main->title = g_strdup_printf("Welcome to ncdc %s!", VERSION);
   ui_main->log = ui_logwindow_create("main");
 
   ui_logwindow_printf(ui_main->log, "Welcome to ncdc %s!", VERSION);
@@ -78,6 +76,11 @@ static void ui_main_draw() {
 
   mvaddstr(winrows-3, 0, "main>");
   ui_textinput_draw(ui_global_textinput, winrows-3, 6, wincols-6);
+}
+
+
+static char *ui_main_title() {
+  return g_strdup_printf("Welcome to ncdc %s!", VERSION);
 }
 
 
@@ -102,7 +105,6 @@ struct ui_tab *ui_hub_create(const char *name) {
   struct ui_tab *tab = g_new0(struct ui_tab, 1);
   // NOTE: tab name is also used as configuration group
   tab->name = g_strdup_printf("#%s", name);
-  tab->title = "Debugging hub tabs";
   tab->type = UIT_HUB;
   tab->log = ui_logwindow_create(tab->name);
   tab->hub = nmdc_create(tab);
@@ -147,6 +149,15 @@ static void ui_hub_draw(struct ui_tab *tab) {
   addstr("> ");
   int pos = str_columns(tab->name)+2;
   ui_textinput_draw(ui_global_textinput, winrows-3, pos, wincols-pos);
+}
+
+
+static char *ui_hub_title(struct ui_tab *tab) {
+  return g_strdup_printf("%s: %s", tab->name,
+    tab->hub->state == HUBS_IDLE       ? "Not connected." :
+    tab->hub->state == HUBS_CONNECTING ? "Connecting..." :
+    !tab->hub->nick_valid              ? "Logging in..." :
+    tab->hub->hubname                  ? tab->hub->hubname : "Connected.");
 }
 
 
@@ -205,10 +216,14 @@ void ui_draw() {
   erase();
 
   // first line - title
+  char *title =
+    curtab->type == UIT_MAIN ? ui_main_title() :
+    curtab->type == UIT_HUB  ? ui_hub_title(curtab) : g_strdup("");
   attron(A_REVERSE);
   mvhline(0, 0, ' ', wincols);
-  mvaddstr(0, 0, curtab->title);
+  mvaddstr(0, 0, title);
   attroff(A_REVERSE);
+  g_free(title);
 
   // second-last line - time and tab list
   attron(A_REVERSE);

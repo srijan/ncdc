@@ -385,7 +385,11 @@ static void handle_input(GObject *src, GAsyncResult *res, gpointer dat) {
   struct nmdc_hub *hub = dat;
 
   GError *err = NULL;
+#if GLIB_CHECK_VERSION(2, 25, 16)
   char *str = g_data_input_stream_read_upto_finish(G_DATA_INPUT_STREAM(src), res, NULL, &err);
+#else
+  char *str = g_data_input_stream_read_until_finish(G_DATA_INPUT_STREAM(src), res, NULL, &err);
+#endif
 
   if(err) {
     if(err->code != G_IO_ERROR_CANCELLED) {
@@ -413,7 +417,11 @@ static void handle_input(GObject *src, GAsyncResult *res, gpointer dat) {
         g_free(str);
       }
       if(hub->state == HUBS_CONNECTED) // handle_cmd() may change the state
+#if GLIB_CHECK_VERSION(2, 25, 16)
         g_data_input_stream_read_upto_async(hub->in, "|", -1, G_PRIORITY_DEFAULT, hub->cancel, handle_input, hub);
+#else
+        g_data_input_stream_read_until_async(hub->in, "|", G_PRIORITY_DEFAULT, hub->cancel, handle_input, hub);
+#endif
     }
   }
 }
@@ -423,7 +431,7 @@ static void handle_connect(GObject *src, GAsyncResult *res, gpointer dat) {
   struct nmdc_hub *hub = dat;
 
   GError *err = NULL;
-  GSocketConnection *conn = g_socket_client_connect_to_uri_finish(G_SOCKET_CLIENT(src), res, &err);
+  GSocketConnection *conn = g_socket_client_connect_to_host_finish(G_SOCKET_CLIENT(src), res, &err);
 
   if(!conn) {
     if(err->code != G_IO_ERROR_CANCELLED) {
@@ -437,8 +445,13 @@ static void handle_connect(GObject *src, GAsyncResult *res, gpointer dat) {
     hub->in = g_data_input_stream_new(g_io_stream_get_input_stream(G_IO_STREAM(hub->conn)));
     hub->out = g_io_stream_get_output_stream(G_IO_STREAM(hub->conn));
 
-    // continuously wait for incoming commands
+    // continuously wait for incoming commands.
+    // The documentation says 2.24, but _upto_ was actually added in late 2.25
+#if GLIB_CHECK_VERSION(2, 25, 16)
     g_data_input_stream_read_upto_async(hub->in, "|", -1, G_PRIORITY_DEFAULT, hub->cancel, handle_input, hub);
+#else
+    g_data_input_stream_read_until_async(hub->in, "|", G_PRIORITY_DEFAULT, hub->cancel, handle_input, hub);
+#endif
 
     GInetSocketAddress *addr = G_INET_SOCKET_ADDRESS(g_socket_connection_get_remote_address(conn, NULL));
     g_assert(addr);

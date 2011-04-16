@@ -285,11 +285,9 @@ void ui_input(struct input_key *key) {
 
   // alt+j and alt+k (previous/next tab)
   } else if(key->type == INPT_ALT && key->code == 'j') {
-    if(ui_tab_cur->prev)
-      ui_tab_cur = ui_tab_cur->prev;
+    ui_tab_cur = ui_tab_cur->prev ? ui_tab_cur->prev : g_list_last(ui_tabs);
   } else if(key->type == INPT_ALT && key->code == 'k') {
-    if(ui_tab_cur->next)
-      ui_tab_cur = ui_tab_cur->next;
+    ui_tab_cur = ui_tab_cur->next ? ui_tab_cur->next : ui_tabs;
 
   // alt+c (alias for /close)
   } else if(key->type == INPT_ALT && key->code == 'c') {

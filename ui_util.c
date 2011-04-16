@@ -270,7 +270,7 @@ static int ui_cmdhist_search(gboolean backward, const char *q, int start) {
 }
 
 
-void ui_cmdhist_save() {
+static void ui_cmdhist_save() {
   if(!cmdhist->ismod)
     return;
   cmdhist->ismod = FALSE;
@@ -309,6 +309,7 @@ void ui_cmdhist_close() {
 
 // Text input "widget"
 // TODO: tab completion
+// TODO: use GString or something?
 
 struct ui_textinput {
   int pos;
@@ -443,7 +444,7 @@ static void ui_textinput_search(struct ui_textinput *ti, gboolean backwards) {
 }
 
 
-gboolean ui_textinput_key(struct ui_textinput *ti, struct input_key *key) {
+gboolean ui_textinput_key(struct ui_textinput *ti, struct input_key *key, char **str) {
   if(key->type == INPT_KEY) {
     switch(key->code) {
     case KEY_LEFT:
@@ -489,6 +490,8 @@ gboolean ui_textinput_key(struct ui_textinput *ti, struct input_key *key) {
     memmove(ti->str + ti->pos + 1, ti->str + ti->pos, (ti->len - ti->pos) * sizeof(gunichar));
     ti->str[ti->pos] = key->code;
     ti->pos++;
+  } else if(key->type == INPT_CTRL && key->code == '\n') {
+    *str = ui_textinput_reset(ti);
   } else
     return FALSE;
   return TRUE;

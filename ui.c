@@ -74,16 +74,22 @@ static struct ui_tab *ui_main_create() {
 
 
 static void ui_main_draw() {
-  ui_logwindow_draw(ui_main->log, 1, 0, winrows-3, wincols);
+  ui_logwindow_draw(ui_main->log, 1, 0, winrows-4, wincols);
+
+  mvaddstr(winrows-3, 0, "main>");
+  ui_textinput_draw(ui_global_textinput, winrows-3, 6, wincols-6);
 }
 
 
 static void ui_main_key(struct input_key *key) {
-  if(key->type == INPT_KEY) {
-    if(key->code == KEY_NPAGE)
-      ui_logwindow_scroll(ui_main->log, winrows/2);
-    else if(key->code == KEY_PPAGE)
-      ui_logwindow_scroll(ui_main->log, -winrows/2);
+  char *str = NULL;
+  if(key->type == INPT_KEY && key->code == KEY_NPAGE)
+    ui_logwindow_scroll(ui_main->log, winrows/2);
+  else if(key->type == INPT_KEY && key->code == KEY_PPAGE)
+    ui_logwindow_scroll(ui_main->log, -winrows/2);
+  else if(ui_textinput_key(ui_global_textinput, key, &str) && str) {
+    cmd_handle(str);
+    g_free(str);
   }
 }
 
@@ -122,16 +128,37 @@ void ui_hub_close(ui_tab *tab) {
 
 
 static void ui_hub_draw(struct ui_tab *tab) {
-  ui_logwindow_draw(tab->log, 1, 0, winrows-3, wincols);
+  ui_logwindow_draw(tab->log, 1, 0, winrows-5, wincols);
+
+  attron(A_REVERSE);
+  mvhline(winrows-4, 0, ' ', wincols);
+  if(tab->hub->state == HUBS_IDLE)
+    mvaddstr(winrows-4, wincols-16, "Not connected.");
+  else if(tab->hub->state == HUBS_CONNECTING)
+    mvaddstr(winrows-4, wincols-15, "Connecting...");
+  else if(!tab->hub->nick_valid)
+    mvaddstr(winrows-4, wincols-15, "Logging in...");
+  else
+    mvaddstr(winrows-4, wincols-21, "31 users    1.69TiB"); // TODO: actual numbers
+  // TODO: display more info (nick, address?)
+  attroff(A_REVERSE);
+
+  mvaddstr(winrows-3, 0, tab->name);
+  addstr("> ");
+  int pos = strlen(tab->name)+2; // TODO: number of columns, not bytes
+  ui_textinput_draw(ui_global_textinput, winrows-3, pos, wincols-pos);
 }
 
 
 static void ui_hub_key(struct ui_tab *tab, struct input_key *key) {
-  if(key->type == INPT_KEY) {
-    if(key->code == KEY_NPAGE)
-      ui_logwindow_scroll(tab->log, winrows/2);
-    else if(key->code == KEY_PPAGE)
-      ui_logwindow_scroll(tab->log, -winrows/2);
+  char *str = NULL;
+  if(key->type == INPT_KEY && key->code == KEY_NPAGE)
+    ui_logwindow_scroll(tab->log, winrows/2);
+  else if(key->type == INPT_KEY && key->code == KEY_PPAGE)
+    ui_logwindow_scroll(tab->log, -winrows/2);
+  else if(ui_textinput_key(ui_global_textinput, key, &str) && str) {
+    cmd_handle(str);
+    g_free(str);
   }
 }
 
@@ -141,7 +168,7 @@ static void ui_hub_key(struct ui_tab *tab, struct input_key *key) {
 // Global stuff
 
 
-static struct ui_textinput *global_textinput;
+struct ui_textinput *ui_global_textinput;
 
 
 void ui_tab_open(struct ui_tab *tab) {
@@ -151,11 +178,11 @@ void ui_tab_open(struct ui_tab *tab) {
 
 
 void ui_init() {
+  // global textinput field
+  ui_global_textinput = ui_textinput_create(TRUE);
+
   // first tab = main tab
   ui_tab_open(ui_main_create());
-
-  // global textinput field
-  global_textinput = ui_textinput_create(TRUE);
 
   // init curses
   initscr();
@@ -177,34 +204,46 @@ void ui_draw() {
   curs_set(0); // may be overridden later on by a textinput widget
   erase();
 
-  // first line
+  // first line - title
   attron(A_REVERSE);
   mvhline(0, 0, ' ', wincols);
   mvaddstr(0, 0, curtab->title);
   attroff(A_REVERSE);
 
-  // second-last line
+  // second-last line - time and tab list
   attron(A_REVERSE);
+  // time
   mvhline(winrows-2, 0, ' ', wincols);
-
   time_t tm = time(NULL);
   char ts[10];
   strftime(ts, 9, "%H:%M:%S", localtime(&tm));
   mvaddstr(winrows-2, 0, ts);
-  // TODO: status info
+  addstr(" --");
+  // tab list
+  // TODO: handle screen overflows
+  GList *n;
+  int i=0;
+  for(n=ui_tabs; n; n=n->next) {
+    i++;
+    addch(' ');
+    if(n == ui_tab_cur)
+      attron(A_BOLD);
+    char *tmp = g_strdup_printf("%d:%s", i, ((struct ui_tab *)n->data)->name);
+    addstr(tmp);
+    g_free(tmp);
+    if(n == ui_tab_cur)
+      attroff(A_BOLD);
+  }
   attroff(A_REVERSE);
+
+  // last line - status info
+  mvaddstr(winrows-1, wincols-14, "Here be stats");
 
   // tab contents
   switch(curtab->type) {
   case UIT_MAIN: ui_main_draw(); break;
   case UIT_HUB:  ui_hub_draw(curtab);  break;
   }
-
-  // last line - text input
-  mvaddstr(winrows-1, 0, curtab->name);
-  addch('>');
-  int pos = strlen(curtab->name)+2; // TODO: use number of columns, not number of bytes...
-  ui_textinput_draw(global_textinput, winrows-1, pos, wincols-pos);
 
   refresh();
 }
@@ -240,16 +279,6 @@ void ui_input(struct input_key *key) {
   // alt+c (alias for /close)
   } else if(key->type == INPT_ALT && key->code == 'c') {
     cmd_handle("/close");
-
-  // main text input (TODO: in some cases the focus shouldn't be on the text input.)
-  } else if(ui_textinput_key(global_textinput, key)) {
-
-  // enter key is pressed while focused on the textinput
-  } else if(key->type == INPT_CTRL && key->code == '\n') {
-    char *str = ui_textinput_reset(global_textinput);
-    cmd_handle(str);
-    g_free(str);
-    ui_textinput_set(global_textinput, "");
 
   // let tab handle it
   } else {

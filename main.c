@@ -26,14 +26,17 @@
 
 #include "ncdc.h"
 #include <stdlib.h>
-#include <unistd.h>
 #include <locale.h>
 #include <signal.h>
 #include <wchar.h>
 #include <errno.h>
 #include <string.h>
 #include <stdio.h>
-#include <glib/gstdio.h>
+
+
+
+// global variables
+GMainLoop *main_loop;
 
 
 // input handling declarations
@@ -53,12 +56,6 @@ struct input_key {
 };
 
 #endif
-
-
-// global variables
-const char *conf_dir;
-GKeyFile *conf_file;
-GMainLoop *main_loop;
 
 
 static void handle_input() {
@@ -185,78 +182,16 @@ static void catch_sigwinch(int sig) {
 }
 
 
-void save_config() {
-  char *dat = g_key_file_to_data(conf_file, NULL, NULL);
-  char *cf = g_build_filename(conf_dir, "config.ini", NULL);
-  FILE *f = fopen(cf, "w");
-  if(!f || fputs(dat, f) < 0 || fclose(f))
-    g_critical("Cannot save config file '%s': %s", cf, g_strerror(errno));
-  g_free(dat);
-  g_free(cf);
-}
-
-
-// TODO: make sure that there is no other ncdc instance working with the same config directory
-static void init_config() {
-  // get location of the configuration directory
-  conf_dir = g_getenv("NCDC_DIR");
-  if(!conf_dir)
-    conf_dir = g_build_filename(g_get_home_dir(), ".ncdc", NULL);
-
-  // try to create it (ignoring errors if it already exists)
-  g_mkdir(conf_dir, 0700);
-  if(g_access(conf_dir, F_OK | R_OK | X_OK | W_OK) < 0)
-    g_error("Directory '%s' does not exist or is not writable.", conf_dir);
-
-  // we should also have a logs/ subdirectory
-  char *logs = g_build_filename(conf_dir, "logs", NULL);
-  g_mkdir(logs, 0777);
-  if(g_access(conf_dir, F_OK | R_OK | X_OK | W_OK) < 0)
-    g_error("Directory '%s' does not exist or is not writable.", logs);
-  g_free(logs);
-
-  // load config file (or create it)
-  conf_file = g_key_file_new();
-  char *cf = g_build_filename(conf_dir, "config.ini", NULL);
-  GError *err = NULL;
-  if(g_file_test(cf, G_FILE_TEST_EXISTS)) {
-    if(!g_key_file_load_from_file(conf_file, cf, G_KEY_FILE_KEEP_COMMENTS, &err))
-      g_error("Could not load '%s': %s", cf, err->message);
-  }
-  // always set the initial comment
-  g_key_file_set_comment(conf_file, NULL, NULL,
-    "This file is automatically managed by ncdc.\n"
-    "While you could edit it yourself, doing so is highly discouraged.\n"
-    "It is better to use the respective commands to change something.\n"
-    "Warning: Editing this file while ncdc is running may result in your changes getting lost!", NULL);
-  // make sure a nick is set
-  if(!g_key_file_has_key(conf_file, "global", "nick", NULL)) {
-    char *nick = g_strdup_printf("ncdc_%d", g_random_int_range(1, 9999));
-    g_key_file_set_string(conf_file, "global", "nick", nick);
-    g_free(nick);
-  }
-  save_config();
-  g_free(cf);
-}
-
-
-#define log_to_str(level) (\
-  (level) & G_LOG_LEVEL_ERROR    ? "ERROR"    :\
-  (level) & G_LOG_LEVEL_CRITICAL ? "CRITICAL" :\
-  (level) & G_LOG_LEVEL_WARNING  ? "WARNING"  :\
-  (level) & G_LOG_LEVEL_MESSAGE  ? "message"  :\
-  (level) & G_LOG_LEVEL_INFO     ? "info"     : "debug")
-
 // clean-up our ncurses window before throwing a fatal error
 static void log_fatal(const gchar *dom, GLogLevelFlags level, const gchar *msg, gpointer dat) {
   endwin();
-  printf("*%s* %s\n", log_to_str(level), msg);
+  printf("*%s* %s\n", loglevel_to_str(level), msg);
 }
 
 
 // redirect all non-fatal errors to the main window
 static void log_redirect(const gchar *dom, GLogLevelFlags level, const gchar *msg, gpointer dat) {
-  ui_logwindow_printf(ui_main->log, "*%s* %s", log_to_str(level), msg);
+  ui_logwindow_printf(ui_main->log, "*%s* %s", loglevel_to_str(level), msg);
 }
 
 
@@ -264,11 +199,12 @@ int main(int argc, char **argv) {
   setlocale(LC_ALL, "");
 
   // TODO: check that the current locale is UTF-8. Things aren't going to work otherwise
+  // TODO: make sure that there is no other ncdc instance working with the same config directory
 
   // init stuff
   g_thread_init(NULL);
   g_type_init();
-  init_config();
+  conf_init();
   ui_cmdhist_init("history");
   ui_init();
 

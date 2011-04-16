@@ -103,14 +103,6 @@ static void set_userinfo(char *group, char *key, char *val) {
   if(!val)
     UNSET(group, key);
   else {
-    int i;
-    for(i=strlen(val)-1; i>=0; i--)
-      if(val[i] == '$' || val[i] == '|')
-        break;
-    if(i >= 0) {
-      ui_logwindow_add(tab->log, "Invalid character.");
-      return;
-    }
     g_key_file_set_string(conf_file, group, key, val);
     get_string(group, key);
   }
@@ -119,40 +111,19 @@ static void set_userinfo(char *group, char *key, char *val) {
 
 
 static void set_encoding(char *group, char *key, char *val) {
+  GError *err = NULL;
   if(!val || strcasecmp(val, "UTF-8") == 0)
     UNSET(group, key);
-  else {
-    // Test that conversion is possible from UTF-8 to val and backwards.  Not a
-    // very comprehensive test, normally the _fallback function is used anyway.
-    // The reason for this test is to make sure the conversion *exists*,
-    // whether it makes sense or not can't easily be determined. Note that my
-    // code currently can't handle zeroes in encoded strings, which is why this
-    // is also tested (though, again, not comprehensive. But at least it does
-    // not allow UTF-16)
-    GError *err = NULL;
-    gsize read, written, written2;
-    char *enc = g_convert("abc", -1, "UTF-8", val, &read, &written, &err);
+  else if(!str_convert_check(val, &err)) {
     if(err) {
       ui_logwindow_printf(tab->log, "ERROR: Can't use that encoding: %s", err->message);
       g_error_free(err);
-    } else if(!enc || read != 3 || strlen(enc) != written) {
-      ui_logwindow_add(tab->log, "ERROR: Invalid encoding.");
-      g_free(enc);
     } else {
-      char *dec = g_convert(enc, written, val, "UTF-8", &read, &written2, &err);
-      g_free(enc);
-      if(err) {
-        ui_logwindow_printf(tab->log, "ERROR: Can't use that encoding: %s", err->message);
-        g_error_free(err);
-      } else if(!dec || read != written || written2 != 3 || strcmp(dec, "abc") != 0) {
-        ui_logwindow_add(tab->log, "ERROR: Invalid encoding.");
-        g_free(dec);
-      } else {
-        g_key_file_set_string(conf_file, group, key, val);
-        get_string(group, key);
-        g_free(dec);
-      }
+      ui_logwindow_add(tab->log, "ERROR: Invalid encoding.");
     }
+  } else {
+    g_key_file_set_string(conf_file, group, key, val);
+    get_string(group, key);
   }
   // TODO: note that this only affects new incoming data? and that a reconnect
   // may be necessary to re-convert all names/descriptions/stuff?
@@ -256,7 +227,7 @@ static void c_set(char *args) {
   } else {
     s->set(group, key, val);
     // set() may not always modify the config, but let's just save anyway
-    save_config();
+    conf_save();
   }
 }
 
@@ -278,7 +249,7 @@ static void c_unset(char *args) {
   if(checkalt && !g_key_file_has_key(conf_file, group, key, NULL))
     group = "global";
   s->set(group, key, NULL);
-  save_config();
+  conf_save();
 }
 
 
@@ -375,7 +346,7 @@ static void c_connect(char *args) {
   else {
     if(args[0]) {
       g_key_file_set_string(conf_file, tab->name, "hubaddr", args);
-      save_config();
+      conf_save();
     }
     if(!g_key_file_has_key(conf_file, tab->name, "hubaddr", NULL))
       ui_logwindow_add(tab->log, "No hub address configured. Use '/connect <address>' to do so.");

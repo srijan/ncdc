@@ -47,6 +47,7 @@ struct nmdc_hub;
 // include the auto-generated header files
 #include "main.h"
 #include "commands.h"
+#include "util.h"
 #include "ui.h"
 #include "ui_util.h"
 #include "nmdc.h"

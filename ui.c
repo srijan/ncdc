@@ -26,6 +26,7 @@
 
 #include "ncdc.h"
 #include <string.h>
+#include <time.h>
 
 
 #if INTERFACE
@@ -186,11 +187,10 @@ void ui_draw() {
   attron(A_REVERSE);
   mvhline(winrows-2, 0, ' ', wincols);
 
-  GDateTime *t = g_date_time_new_now_local();
-  char *tf = g_date_time_format(t, "%H:%M:%S");
-  g_date_time_unref(t);
-  mvaddstr(winrows-2, 0, tf);
-  g_free(tf);
+  time_t tm = time(NULL);
+  char ts[10];
+  strftime(ts, 9, "%H:%M:%S", localtime(&tm));
+  mvaddstr(winrows-2, 0, ts);
   // TODO: status info
   attroff(A_REVERSE);
 

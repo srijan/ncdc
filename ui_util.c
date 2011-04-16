@@ -28,6 +28,7 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <errno.h>
+#include <time.h>
 #include <limits.h>
 #include <glib/gstdio.h>
 #include <glib/gprintf.h>
@@ -91,18 +92,16 @@ static void ui_logwindow_addline(struct ui_logwindow *lw, const char *msg) {
   //  ui_logwindow_draw() really requires valid UTF-8
   g_assert(g_utf8_validate(msg, -1, NULL));
 
-  GDateTime *dt = g_date_time_new_now_local();
-  char *tmp = g_date_time_format(dt, "%H:%M:%S ");
-  lw->buf[lw->lastlog & LOGWIN_BUF] = g_strconcat(tmp, msg, NULL);
-  g_free(tmp);
+  time_t tm = time(NULL);
+  char ts[50];
+  strftime(ts, 10, "%H:%M:%S ", localtime(&tm));
+  lw->buf[lw->lastlog & LOGWIN_BUF] = g_strconcat(ts, msg, NULL);
 
   if(lw->file) {
-    tmp = g_date_time_format(dt, "[%F %H:%M:%S %Z] ");
-    if(fprintf(lw->file, "%s%s\n", tmp, msg) < 0 && !strstr(msg, "(LOGERR)"))
+    strftime(ts, 49, "[%F %H:%M:%S %Z] ", localtime(&tm));
+    if(fprintf(lw->file, "%s%s\n", ts, msg) < 0 && !strstr(msg, "(LOGERR)"))
       g_warning("Error writing to log file: %s (LOGERR)", strerror(errno));
-    g_free(tmp);
   }
-  g_date_time_unref(dt);
 
   int next = (lw->lastlog + 1) & LOGWIN_BUF;
   if(lw->buf[next]) {

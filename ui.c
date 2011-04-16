@@ -63,10 +63,10 @@ struct ui_tab *ui_main;
 static struct ui_tab *ui_main_create() {
   ui_main = g_new0(struct ui_tab, 1);
   ui_main->name = "main";
-  ui_main->title = "Welcome to ncdc 0.1-alpha!";
+  ui_main->title = g_strdup_printf("Welcome to ncdc %s!", VERSION);
   ui_main->log = ui_logwindow_create("main");
 
-  ui_logwindow_add(ui_main->log, "Welcome to ncdc 0.1-alpha!");
+  ui_logwindow_printf(ui_main->log, "Welcome to ncdc %s!", VERSION);
   ui_logwindow_printf(ui_main->log, "Using working directory: %s", conf_dir);
 
   return ui_main;

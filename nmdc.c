@@ -271,8 +271,8 @@ void nmdc_send_myinfo(struct nmdc_hub *hub) {
   tmp = hubconf_get(string, hub, "connection");  char *conn = encode_and_escape(hub, tmp?tmp:""); g_free(tmp);
   tmp = hubconf_get(string, hub, "email");       char *mail = encode_and_escape(hub, tmp?tmp:""); g_free(tmp);
   // TODO: more dynamic...
-  send_cmdf(hub, "$MyINFO $ALL %s %s<ncdc V:0.1,M:P,H:1/0/0,S:1>$ $%s\01$%s$0$",
-    hub->nick_hub, desc, conn, mail);
+  send_cmdf(hub, "$MyINFO $ALL %s %s<ncdc V:%s,M:P,H:1/0/0,S:1>$ $%s\01$%s$0$",
+    hub->nick_hub, desc, VERSION, conn, mail);
   g_free(desc);
   g_free(conn);
   g_free(mail);

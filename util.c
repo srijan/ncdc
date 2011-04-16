@@ -41,6 +41,10 @@
   (level) & G_LOG_LEVEL_MESSAGE  ? "message"  :\
   (level) & G_LOG_LEVEL_INFO     ? "info"     : "debug")
 
+// number of columns of a gunichar
+#define gunichar_width(x) (g_unichar_iswide(x) ? 2 : g_unichar_iszerowidth(x) ? 0 : 1)
+
+
 #endif
 
 
@@ -217,5 +221,16 @@ gboolean str_convert_check(const char *fmt, GError **err) {
       return TRUE;
     }
   }
+}
+
+
+// Number of columns required to represent the UTF-8 string.
+int str_columns(const char *str) {
+  int w = 0;
+  while(*str) {
+    w += gunichar_width(g_utf8_get_char(str));
+    str = g_utf8_next_char(str);
+  }
+  return w;
 }
 

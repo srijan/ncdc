@@ -145,7 +145,7 @@ static void ui_hub_draw(struct ui_tab *tab) {
 
   mvaddstr(winrows-3, 0, tab->name);
   addstr("> ");
-  int pos = strlen(tab->name)+2; // TODO: number of columns, not bytes
+  int pos = str_columns(tab->name)+2;
   ui_textinput_draw(ui_global_textinput, winrows-3, pos, wincols-pos);
 }
 

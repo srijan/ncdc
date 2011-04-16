@@ -33,8 +33,6 @@
 #include <glib/gstdio.h>
 #include <glib/gprintf.h>
 
-#define g_unichar_width(x) (g_unichar_iswide(x) ? 2 : g_unichar_iszerowidth(x) ? 0 : 1)
-
 
 // Log window "widget"
 // TODO: log file rotation (of some sorts)
@@ -165,7 +163,7 @@ void ui_logwindow_draw(struct ui_logwindow *lw, int y, int x, int rows, int cols
 
     // loop through the characters and determine on which line to put them
     while(str[i]) {
-      int width = g_unichar_width(g_utf8_get_char(str+i));
+      int width = gunichar_width(g_utf8_get_char(str+i));
       if(curlinecols+width >= (curline > 1 ? cols-LOGWIN_PAD : cols)) {
         // too many lines? don't display the rest
         if(curline >= 200)
@@ -173,8 +171,6 @@ void ui_logwindow_draw(struct ui_logwindow *lw, int y, int x, int rows, int cols
         curline++;
         curlinecols = 0;
       }
-      // can be faster by using g_utf8_skip[] directly, but that is not
-      // documented in glib, so let's avoid it...
       i = g_utf8_next_char(str+i) - str;
       lines[curline] = i;
       curlinecols += width;
@@ -386,7 +382,7 @@ void ui_textinput_draw(struct ui_textinput *ti, int y, int x, int col) {
   int width = 0;
   gunichar *str = ti->str;
   for(i=0; i<=ti->pos && str[i]; i++)
-    width += g_unichar_width(str[i]);
+    width += gunichar_width(str[i]);
   int f = width - (col*85)/100;
   if(f < 0)
     f = 0;
@@ -399,14 +395,14 @@ void ui_textinput_draw(struct ui_textinput *ti, int y, int x, int col) {
   char enc[7];
   i = 0;
   while(*str) {
-    f -= g_unichar_width(*str);
+    f -= gunichar_width(*str);
     if(f <= -col)
       break;
     if(f < 0) {
       enc[g_unichar_to_utf8(*str, enc)] = 0;
       addstr(enc);
       if(i < ti->pos)
-        pos += g_unichar_width(*str);
+        pos += gunichar_width(*str);
     }
     i++;
     str++;

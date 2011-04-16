@@ -98,7 +98,7 @@ struct ui_tab *ui_hub_create(const char *name) {
   tab->name = g_strdup_printf("#%s", name);
   tab->title = "Debugging hub tabs";
   tab->type = UIT_HUB;
-  tab->log = ui_logwindow_create(name);
+  tab->log = ui_logwindow_create(tab->name);
   tab->hub = nmdc_create(tab);
   // already used this name before? open connection again
   if(g_key_file_has_key(conf_file, tab->name, "hubaddr", NULL))
@@ -236,6 +236,10 @@ void ui_input(struct input_key *key) {
   } else if(key->type == INPT_ALT && key->code == 'k') {
     if(ui_tab_cur->next)
       ui_tab_cur = ui_tab_cur->next;
+
+  // alt+c (alias for /close)
+  } else if(key->type == INPT_ALT && key->code == 'c') {
+    cmd_handle("/close");
 
   // main text input (TODO: in some cases the focus shouldn't be on the text input.)
   } else if(ui_textinput_key(global_textinput, key)) {

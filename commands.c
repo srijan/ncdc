@@ -397,6 +397,19 @@ static void c_disconnect(char *args) {
 }
 
 
+static void c_reconnect(char *args) {
+  if(args[0])
+    ui_logwindow_add(tab->log, "This command does not accept any arguments.");
+  else if(tab->type != UIT_HUB)
+    ui_logwindow_add(tab->log, "This command can only be used on hub tabs.");
+  else {
+    if(tab->hub->state != HUBS_IDLE)
+      nmdc_disconnect(tab->hub);
+    c_connect(""); // also checks for the existance of "hubaddr"
+  }
+}
+
+
 static void c_close(char *args) {
   if(args[0])
     ui_logwindow_add(tab->log, "This command does not accept any arguments.");
@@ -415,7 +428,11 @@ static struct cmd cmds_list[] = {
   },
   { "say",  c_say,
     "<message>", "Send a chat message.",
-    "Not implemented yet."
+    "You normally don't have to use the /say command explicitely, any command not staring"
+    " with '/' will automatically imply \"/say <command>\". For example, typing \"hello.\""
+    " in the command line is equivalent to \"/say hello.\".\n\n"
+    "Using the /say command explicitely may be useful to send message starting with '/' to"
+    " the chat, for example \"/say /help is what you are looking for\"."
   },
   { "help", c_help,
     "[<command>]", "Request information on commands.",
@@ -424,8 +441,10 @@ static struct cmd cmds_list[] = {
   },
   { "open", c_open,
     "<name>", "Open a new hub tab.",
-    "Opens a new tab to use for a hub. The name is a (short) personal name you use to identify the hub.\n"
-    "If you have previously connected to a hub before from a tab with the same name, /open will automatically connect to the same hub again."
+    "Opens a new tab to use for a hub. The name is a (short) personal name you use to"
+    " identify the hub, and will be used for storing hub-specific configuration.\n\n"
+    "If you have previously connected to a hub from a tab with the same name, /open"
+    " will automatically connect to the same hub again."
   },
   { "connect", c_connect,
     "[<address>]", "Connect to a hub.",
@@ -436,9 +455,14 @@ static struct cmd cmds_list[] = {
     NULL, "Disconnect from a hub.",
     "Closes the connection with the hub."
   },
+  { "reconnect", c_reconnect,
+    NULL, "Shortcut for /disconnect and /connect",
+    "When your nick or the hub encoding have been changed, the new settings will be used after the reconnect."
+  },
   { "close", c_close,
     NULL, "Close the current tab.",
-    "When closing a hub tab, you will be disconnected from the hub."
+    "When closing a hub tab, you will be disconnected from the hub.\n"
+    "Alt+c is a shortcut for this command."
   },
   { "set", c_set,
     "[<key> [<value>]]", "Get or set configuration variables.",

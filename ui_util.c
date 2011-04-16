@@ -146,6 +146,7 @@ void ui_logwindow_scroll(struct ui_logwindow *lw, int i) {
 
 
 // TODO: this function is called often and can be optimized.
+// TODO: wrap on word boundary
 void ui_logwindow_draw(struct ui_logwindow *lw, int y, int x, int rows, int cols) {
   int top = rows + y - 1;
   int cur = lw->lastvis;

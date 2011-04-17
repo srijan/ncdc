@@ -37,6 +37,7 @@ struct nmdc_user {
   char *desc;
   char *tag;
   char *conn;
+  char *mail;
   guint64 sharesize;
 }
 
@@ -66,10 +67,12 @@ struct nmdc_hub {
   // TRUE is the above nick has also been validated (and we're properly logged in)
   gboolean nick_valid;
   char *hubname;  // UTF-8, or NULL when unknown
-  int sharecount;
-  guint64 sharesize;
   // user list, key = username (in hub encoding!), value = struct nmdc_user *
   GHashTable *users;
+  int sharecount;
+  guint64 sharesize;
+  // what we and the hub support
+  gboolean supports_nogetinfo;
 };
 
 #endif
@@ -138,9 +141,10 @@ static char *lock2key(char *lock) {
   int len = strlen(lock);
   if(len < 3)
     return g_strdup("STUPIDKEY!"); // let's not crash on invalid data
-  for(i=1; i<len; i++)
+  int fst = lock[0] ^ lock[len-1] ^ lock[len-2] ^ 5;
+  for(i=len-1; i; i--)
     lock[i] = lock[i] ^ lock[i-1];
-  lock[0] = lock[0] ^ lock[len-1] ^ lock[len-2] ^ 5;
+  lock[0] = fst;
   for(i=0; i<len; i++)
     lock[i] = ((lock[i]<<4) & 0xF0) | ((lock[i]>>4) & 0x0F);
   GString *key = g_string_sized_new(len+100);
@@ -177,14 +181,15 @@ static void user_free(gpointer dat) {
   g_free(u->desc);
   g_free(u->tag);
   g_free(u->conn);
+  g_free(u->mail);
   g_free(u);
 }
 
 
 static void user_myinfo(struct nmdc_hub *hub, struct nmdc_user *u, const char *str) {
   static GRegex *nfo_reg = NULL;
-  if(!nfo_reg) //          desc    tag            conn   flags share
-    nfo_reg = g_regex_new("([^$]+)<([^$]+)>\\$ \\$([^$]+)(.)\\$([0-9]+)\\$", G_REGEX_OPTIMIZE, 0, NULL);
+  if(!nfo_reg) //          desc    tag            conn   flag  email     share
+    nfo_reg = g_regex_new("([^$]*)<([^$]+)>\\$ \\$([^$]+)(.)\\$([^$]*)\\$([0-9]+)\\$", G_REGEX_OPTIMIZE|G_REGEX_RAW, 0, NULL);
 
   GMatchInfo *nfo;
   if(g_regex_match(nfo_reg, str, 0, &nfo)) {
@@ -192,11 +197,13 @@ static void user_myinfo(struct nmdc_hub *hub, struct nmdc_user *u, const char *s
     char *tag = g_match_info_fetch(nfo, 2);
     char *conn = g_match_info_fetch(nfo, 3);
     //char *flag = g_match_info_fetch(nfo, 4); // currently ignored
-    char *share = g_match_info_fetch(nfo, 5);
+    char *mail = g_match_info_fetch(nfo, 5);
+    char *share = g_match_info_fetch(nfo, 6);
     u->desc = unescape_and_decode(hub, desc);
     g_free(desc);
     u->tag = tag;
     u->conn = conn;
+    u->mail = mail;
     u->sharesize = g_ascii_strtoull(share, NULL, 10);
     g_free(share);
     u->hasinfo = TRUE;
@@ -328,9 +335,10 @@ static void handle_cmd(struct nmdc_hub *hub, const char *cmd) {
   // create regexes (declared statically, allocated/compiled on first call)
 #define CMDREGEX(name, regex) \
   static GRegex * name = NULL;\
-  if(!name) name = g_regex_new("\\$" regex, G_REGEX_OPTIMIZE|G_REGEX_ANCHORED|G_REGEX_DOLLAR_ENDONLY|G_REGEX_DOTALL, 0, NULL)
+  if(!name) name = g_regex_new("\\$" regex, G_REGEX_OPTIMIZE|G_REGEX_ANCHORED|G_REGEX_DOTALL|G_REGEX_RAW, 0, NULL)
 
   CMDREGEX(lock, "Lock ([^ $]+) Pk=[^ $]+");
+  CMDREGEX(supports, "Supports (.+)");
   CMDREGEX(hello, "Hello ([^ $]+)");
   CMDREGEX(quit, "Quit ([^ $]+)");
   CMDREGEX(nicklist, "NickList (.+)");
@@ -340,7 +348,8 @@ static void handle_cmd(struct nmdc_hub *hub, const char *cmd) {
   // $Lock
   if(g_regex_match(lock, cmd, 0, &nfo)) { // 1 = lock
     char *lock = g_match_info_fetch(nfo, 1);
-    // TODO: check for EXTENDEDPROTOCOL
+    if(strncmp(lock, "EXTENDEDPROTOCOL", 16) == 0)
+      send_cmd(hub, "$Supports NoGetINFO");
     char *key = lock2key(lock);
     send_cmdf(hub, "$Key %s", key);
     hub->nick = conf_hub_get(string, hub->tab->name, "nick");
@@ -348,6 +357,15 @@ static void handle_cmd(struct nmdc_hub *hub, const char *cmd) {
     send_cmdf(hub, "$ValidateNick %s", hub->nick_hub);
     g_free(key);
     g_free(lock);
+  }
+  g_match_info_free(nfo);
+
+  // $Supports
+  if(g_regex_match(supports, cmd, 0, &nfo)) { // 1 = list
+    char *list = g_match_info_fetch(nfo, 1);
+    if(strstr(list, "NoGetINFO"))
+      hub->supports_nogetinfo = TRUE;
+    g_free(list);
   }
   g_match_info_free(nfo);
 
@@ -362,8 +380,8 @@ static void handle_cmd(struct nmdc_hub *hub, const char *cmd) {
       send_cmd(hub, "$GetNickList");
     } else {
       struct nmdc_user *u = user_add(hub, nick);
-      if(!u->hasinfo)
-        send_cmdf(hub, "$GetMyINFO %s", nick);
+      if(!u->hasinfo && !hub->supports_nogetinfo)
+        send_cmdf(hub, "$GetINFO %s", nick);
     }
     g_free(nick);
   }
@@ -391,7 +409,7 @@ static void handle_cmd(struct nmdc_hub *hub, const char *cmd) {
     char **cur;
     for(cur=list; *cur&&**cur; cur++) {
       struct nmdc_user *u = user_add(hub, *cur);
-      if(!u->hasinfo)
+      if(!u->hasinfo && !hub->supports_nogetinfo)
         send_cmdf(hub, "$GetINFO %s %s", *cur, hub->nick_hub);
     }
     g_strfreev(list);
@@ -562,7 +580,7 @@ void nmdc_disconnect(struct nmdc_hub *hub) {
   g_free(hub->nick);     hub->nick = NULL;
   g_free(hub->nick_hub); hub->nick_hub = NULL;
   g_free(hub->hubname);  hub->hubname = NULL;
-  hub->nick_valid = hub->state = hub->sharecount = hub->sharesize = 0;
+  hub->nick_valid = hub->state = hub->sharecount = hub->sharesize = hub->supports_nogetinfo = 0;
   ui_logwindow_printf(hub->tab->log, "Disconnected.");
 }
 

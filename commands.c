@@ -65,6 +65,17 @@ static void get_string(char *group, char *key) {
 }
 
 
+static void get_bool(char *group, char *key) {
+  GError *err = NULL;
+  gboolean val = g_key_file_get_boolean(conf_file, group, key, &err);
+  if(err) {
+    ui_logwindow_printf(tab->log, "%s.%s is not set.", group, key);
+    g_error_free(err);
+  } else
+    ui_logwindow_printf(tab->log, "%s.%s = %s", group, key, val ? "true" : "false");
+}
+
+
 #define UNSET(group, key) do {\
     g_key_file_remove_key(conf_file, group, key, NULL);\
     ui_logwindow_printf(tab->log, "%s.%s reset.", group, key);\
@@ -130,13 +141,30 @@ static void set_encoding(char *group, char *key, char *val) {
 }
 
 
+static void set_autoconnect(char *group, char *key, char *val) {
+  if(strcmp(group, "global") == 0 || group[0] != '#')
+    ui_logwindow_add(tab->log, "ERROR: autoconnect can only be used as hub setting.");
+  else if(!val)
+    UNSET(group, key);
+  else {
+    gboolean new = FALSE;
+    if(strcmp(val, "1") == 0 || strcmp(val, "t") == 0 || strcmp(val, "y") == 0 || strcmp(val, "true") == 0 || strcmp(val, "yes") == 0)
+      new = TRUE;
+    g_key_file_set_boolean(conf_file, group, key, new);
+    get_bool(group, key);
+  }
+}
+
+
 // the settings list
+// TODO: help text / documentation?
 static struct setting settings[] = {
-  { "nick",        NULL, get_string, set_nick }, // as a special case, global.nick may not be /unset
-  { "email",       NULL, get_string, set_userinfo },
-  { "description", NULL, get_string, set_userinfo },
+  { "autoconnect", NULL, get_bool,   set_autoconnect }, // may not be used in "global"
   { "connection",  NULL, get_string, set_userinfo },
+  { "description", NULL, get_string, set_userinfo },
+  { "email",       NULL, get_string, set_userinfo },
   { "encoding",    NULL, get_string, set_encoding },
+  { "nick",        NULL, get_string, set_nick },        // global.nick may not be /unset
   { NULL }
 };
 

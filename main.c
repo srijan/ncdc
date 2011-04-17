@@ -195,6 +195,17 @@ static void log_redirect(const gchar *dom, GLogLevelFlags level, const gchar *ms
 }
 
 
+static void open_autoconnect() {
+  char **groups = g_key_file_get_groups(conf_file, NULL);
+  char **group;
+  // TODO: make sure the tabs are opened in the same order as they were in the last run?
+  for(group=groups; *group; group++)
+    if(**group == '#' && g_key_file_get_boolean(conf_file, *group, "autoconnect", NULL))
+      ui_tab_open(ui_hub_create(*group+1));
+  g_strfreev(groups);
+}
+
+
 int main(int argc, char **argv) {
   setlocale(LC_ALL, "");
 
@@ -219,6 +230,8 @@ int main(int argc, char **argv) {
   act.sa_handler = catch_sigwinch;
   if(sigaction(SIGWINCH, &act, NULL) < 0)
     g_error("Can't setup SIGWINCH: %s", g_strerror(errno));
+
+  open_autoconnect();
 
   // init and start main loop
   main_loop = g_main_loop_new(NULL, FALSE);

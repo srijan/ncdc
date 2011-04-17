@@ -289,6 +289,18 @@ void ui_input(struct input_key *key) {
   } else if(key->type == INPT_ALT && key->code == 'k') {
     ui_tab_cur = ui_tab_cur->next ? ui_tab_cur->next : ui_tabs;
 
+  // alt+h and alt+l (swap tab with left/right)
+  } else if(key->type == INPT_ALT && key->code == 'h' && ui_tab_cur->prev) {
+    GList *prev = ui_tab_cur->prev;
+    ui_tabs = g_list_delete_link(ui_tabs, ui_tab_cur);
+    ui_tabs = g_list_insert_before(ui_tabs, prev, curtab);
+    ui_tab_cur = prev->prev;
+  } else if(key->type == INPT_ALT && key->code == 'l' && ui_tab_cur->next) {
+    GList *next = ui_tab_cur->next;
+    ui_tabs = g_list_delete_link(ui_tabs, ui_tab_cur);
+    ui_tabs = g_list_insert_before(ui_tabs, next->next, curtab);
+    ui_tab_cur = next->next;
+
   // alt+c (alias for /close)
   } else if(key->type == INPT_ALT && key->code == 'c') {
     cmd_handle("/close");

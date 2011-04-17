@@ -188,11 +188,19 @@ static void user_free(gpointer dat) {
 
 static void user_myinfo(struct nmdc_hub *hub, struct nmdc_user *u, const char *str) {
   static GRegex *nfo_reg = NULL;
-  if(!nfo_reg) //          desc    tag            conn   flag  email     share
-    nfo_reg = g_regex_new("([^$]*)<([^$]+)>\\$ \\$([^$]+)(.)\\$([^$]*)\\$([0-9]+)\\$", G_REGEX_OPTIMIZE|G_REGEX_RAW, 0, NULL);
+  static GRegex *nfo_notag = NULL;
+  if(!nfo_reg) //          desc   tag               conn   flag   email     share
+    nfo_reg = g_regex_new("([^$]*)<([^>$]+)>\\$.\\$([^$]*)(\\C)\\$([^$]*)\\$([0-9]+)\\$", G_REGEX_OPTIMIZE|G_REGEX_RAW, 0, NULL);
+  if(!nfo_notag) //          desc   tag      conn   flag    email     share
+    nfo_notag = g_regex_new("([^$]*)()\\$.\\$([^$]*)(\\C)\\$([^$]*)\\$([0-9]+)\\$", G_REGEX_OPTIMIZE|G_REGEX_RAW, 0, NULL);
 
-  GMatchInfo *nfo;
-  if(g_regex_match(nfo_reg, str, 0, &nfo)) {
+  GMatchInfo *nfo = NULL;
+  gboolean match = g_regex_match(nfo_reg, str, 0, &nfo);
+  if(!match) {
+    g_match_info_free(nfo);
+    match = g_regex_match(nfo_notag, str, 0, &nfo);
+  }
+  if(match) {
     char *desc = g_match_info_fetch(nfo, 1);
     char *tag = g_match_info_fetch(nfo, 2);
     char *conn = g_match_info_fetch(nfo, 3);
@@ -207,7 +215,8 @@ static void user_myinfo(struct nmdc_hub *hub, struct nmdc_user *u, const char *s
     u->sharesize = g_ascii_strtoull(share, NULL, 10);
     g_free(share);
     u->hasinfo = TRUE;
-  }
+  } else
+    g_critical("Don't understand MyINFO string: %s", str);
   g_match_info_free(nfo);
 }
 
@@ -426,7 +435,10 @@ static void handle_cmd(struct nmdc_hub *hub, const char *cmd) {
     else
       hub->sharesize -= u->sharesize;
     user_myinfo(hub, u, str);
-    hub->sharesize += u->sharesize;
+    if(!u->hasinfo)
+      hub->sharecount--;
+    else
+      hub->sharesize += u->sharesize;
     g_free(str);
     g_free(nick);
   }

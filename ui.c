@@ -141,8 +141,9 @@ static void ui_hub_draw(struct ui_tab *tab) {
   else if(!tab->hub->nick_valid)
     mvaddstr(winrows-4, wincols-15, "Logging in...");
   else {
-    // TODO: actual sharesize
-    char *tmp = g_strdup_printf("%6d users   %9s%c", tab->hub->users, "1.69TiB", '+');
+    int count = g_hash_table_size(tab->hub->users);
+    char *tmp = g_strdup_printf("%6d users   %9s%c", count,
+      str_formatsize(tab->hub->sharesize), tab->hub->sharecount == count ? '+' : ' ');
     mvaddstr(winrows-4, wincols-26, tmp);
     g_free(tmp);
   }

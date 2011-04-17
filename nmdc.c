@@ -30,7 +30,18 @@
 
 #if INTERFACE
 
-#define HUBS_IDLE       0
+struct nmdc_user {
+  gboolean hasinfo;
+  // UTF-8, not equal to the key in nmdc_hub->users
+  char *name;
+  char *desc;
+  char *tag;
+  char *conn;
+  guint64 sharesize;
+}
+
+
+#define HUBS_IDLE       0 // must be 0
 #define HUBS_CONNECTING 1
 #define HUBS_CONNECTED  2
 
@@ -55,12 +66,149 @@ struct nmdc_hub {
   // TRUE is the above nick has also been validated (and we're properly logged in)
   gboolean nick_valid;
   char *hubname;  // UTF-8, or NULL when unknown
-  int users;
+  int sharecount;
   guint64 sharesize;
+  // user list, key = username (in hub encoding!), value = struct nmdc_user *
+  GHashTable *users;
 };
 
 #endif
 
+
+
+
+// nmdc utility functions
+
+static char *charset_convert(struct nmdc_hub *hub, gboolean to_utf8, const char *str) {
+  char *fmt = conf_hub_get(string, hub->tab->name, "encoding");
+  char *res = str_convert(to_utf8||!fmt?"UTF-8":fmt, !to_utf8||!fmt?"UTF-8":fmt, str);
+  g_free(fmt);
+  return res;
+}
+
+
+static char *encode_and_escape(struct nmdc_hub *hub, const char *str) {
+  char *enc = charset_convert(hub, FALSE, str);
+  GString *dest = g_string_sized_new(strlen(enc));
+  char *tmp = enc;
+  while(*tmp) {
+    if(*tmp == '$')
+      g_string_append(dest, "&#36;");
+    else if(*tmp == '|')
+      g_string_append(dest, "&#124;");
+    else if(*tmp == '&' && (strncmp(tmp, "&amp;", 5) == 0 || strncmp(tmp, "&#36;", 5) == 0 || strncmp(tmp, "&#124;", 6) == 0))
+      g_string_append(dest, "&amp;");
+    else
+      g_string_append_c(dest, *tmp);
+    tmp++;
+  }
+  g_free(enc);
+  return g_string_free(dest, FALSE);
+}
+
+
+static char *unescape_and_decode(struct nmdc_hub *hub, const char *str) {
+  GString *dest = g_string_sized_new(strlen(str));
+  while(*str) {
+    if(strncmp(str, "&#36;", 5) == 0) {
+      g_string_append_c(dest, '$');
+      str += 5;
+    } else if(strncmp(str, "&#124;", 6) == 0) {
+      g_string_append_c(dest, '|');
+      str += 6;
+    } else if(strncmp(str, "&amp;", 5) == 0) {
+      g_string_append_c(dest, '&');
+      str += 5;
+    } else {
+      g_string_append_c(dest, *str);
+      str++;
+    }
+  }
+  char *dec = charset_convert(hub, TRUE, dest->str);
+  g_string_free(dest, TRUE);
+  return dec;
+}
+
+
+// Info & algorithm @ http://www.teamfair.info/wiki/index.php?title=Lock_to_key
+// This function modifies "lock" in-place for temporary data
+static char *lock2key(char *lock) {
+  char n;
+  int i;
+  int len = strlen(lock);
+  if(len < 3)
+    return g_strdup("STUPIDKEY!"); // let's not crash on invalid data
+  for(i=1; i<len; i++)
+    lock[i] = lock[i] ^ lock[i-1];
+  lock[0] = lock[0] ^ lock[len-1] ^ lock[len-2] ^ 5;
+  for(i=0; i<len; i++)
+    lock[i] = ((lock[i]<<4) & 0xF0) | ((lock[i]>>4) & 0x0F);
+  GString *key = g_string_sized_new(len+100);
+  for(i=0; i<len; i++) {
+    n = lock[i];
+    if(n == 0 || n == 5 || n == 36 || n == 96 || n == 124 || n == 126)
+      g_string_append_printf(key, "/%%DCN%03d%%/", n);
+    else
+      g_string_append_c(key, n);
+  }
+  return g_string_free(key, FALSE);
+}
+
+
+
+
+
+// struct nmdc_user related functions
+
+static struct nmdc_user *user_add(struct nmdc_hub *hub, const char *name) {
+  struct nmdc_user *u = g_hash_table_lookup(hub->users, name);
+  if(u)
+    return u;
+  u = g_new0(struct nmdc_user, 1);
+  u->name = charset_convert(hub, TRUE, name);
+  g_hash_table_insert(hub->users, g_strdup(name), u);
+  return u;
+}
+
+
+static void user_free(gpointer dat) {
+  struct nmdc_user *u = dat;
+  g_free(u->name);
+  g_free(u->desc);
+  g_free(u->tag);
+  g_free(u->conn);
+  g_free(u);
+}
+
+
+static void user_myinfo(struct nmdc_hub *hub, struct nmdc_user *u, const char *str) {
+  static GRegex *nfo_reg = NULL;
+  if(!nfo_reg) //          desc    tag            conn   flags share
+    nfo_reg = g_regex_new("([^$]+)<([^$]+)>\\$ \\$([^$]+)(.)\\$([0-9]+)\\$", G_REGEX_OPTIMIZE, 0, NULL);
+
+  GMatchInfo *nfo;
+  if(g_regex_match(nfo_reg, str, 0, &nfo)) {
+    char *desc = g_match_info_fetch(nfo, 1);
+    char *tag = g_match_info_fetch(nfo, 2);
+    char *conn = g_match_info_fetch(nfo, 3);
+    //char *flag = g_match_info_fetch(nfo, 4); // currently ignored
+    char *share = g_match_info_fetch(nfo, 5);
+    u->desc = unescape_and_decode(hub, desc);
+    g_free(desc);
+    u->tag = tag;
+    u->conn = conn;
+    u->sharesize = g_ascii_strtoull(share, NULL, 10);
+    g_free(share);
+    u->hasinfo = TRUE;
+  }
+  g_match_info_free(nfo);
+}
+
+
+
+
+
+// hub stuff
 
 struct nmdc_hub *nmdc_create(struct ui_tab *tab) {
   struct nmdc_hub *hub = g_new0(struct nmdc_hub, 1);
@@ -68,6 +216,7 @@ struct nmdc_hub *nmdc_create(struct ui_tab *tab) {
   hub->cancel = g_cancellable_new();
   hub->out_buf_len = 1024;
   hub->out_buf = g_new(char, hub->out_buf_len);
+  hub->users = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, user_free);
   return hub;
 }
 
@@ -146,57 +295,6 @@ static void send_cmdf(struct nmdc_hub *hub, const char *fmt, ...) {
 }
 
 
-static char *charset_convert(struct nmdc_hub *hub, gboolean to_utf8, const char *str) {
-  char *fmt = conf_hub_get(string, hub->tab->name, "encoding");
-  char *res = str_convert(to_utf8||!fmt?"UTF-8":fmt, !to_utf8||!fmt?"UTF-8":fmt, str);
-  g_free(fmt);
-  return res;
-}
-
-
-static char *encode_and_escape(struct nmdc_hub *hub, const char *str) {
-  char *enc = charset_convert(hub, FALSE, str);
-  GString *dest = g_string_sized_new(strlen(enc));
-  char *tmp = enc;
-  while(*tmp) {
-    if(*tmp == '$')
-      g_string_append(dest, "&#36;");
-    else if(*tmp == '|')
-      g_string_append(dest, "&#124;");
-    else if(*tmp == '&' && (strncmp(tmp, "&amp;", 5) == 0 || strncmp(tmp, "&#36;", 5) == 0 || strncmp(tmp, "&#124;", 6) == 0))
-      g_string_append(dest, "&amp;");
-    else
-      g_string_append_c(dest, *tmp);
-    tmp++;
-  }
-  g_free(enc);
-  return g_string_free(dest, FALSE);
-}
-
-
-static char *unescape_and_decode(struct nmdc_hub *hub, const char *str) {
-  GString *dest = g_string_sized_new(strlen(str));
-  while(*str) {
-    if(strncmp(str, "&#36;", 5) == 0) {
-      g_string_append_c(dest, '$');
-      str += 5;
-    } else if(strncmp(str, "&#124;", 6) == 0) {
-      g_string_append_c(dest, '|');
-      str += 6;
-    } else if(strncmp(str, "&amp;", 5) == 0) {
-      g_string_append_c(dest, '&');
-      str += 5;
-    } else {
-      g_string_append_c(dest, *str);
-      str++;
-    }
-  }
-  char *dec = charset_convert(hub, TRUE, dest->str);
-  g_string_free(dest, TRUE);
-  return dec;
-}
-
-
 void nmdc_send_myinfo(struct nmdc_hub *hub) {
   if(!hub->nick_valid)
     return;
@@ -222,31 +320,6 @@ void nmdc_say(struct nmdc_hub *hub, const char *str) {
 }
 
 
-// Info & algorithm @ http://www.teamfair.info/wiki/index.php?title=Lock_to_key
-// This function modifies "lock" in-place for temporary data
-static char *lock2key(char *lock) {
-  char n;
-  int i;
-  int len = strlen(lock);
-  if(len < 3)
-    return g_strdup("STUPIDKEY!"); // let's not crash on invalid data
-  for(i=1; i<len; i++)
-    lock[i] = lock[i] ^ lock[i-1];
-  lock[0] = lock[0] ^ lock[len-1] ^ lock[len-2] ^ 5;
-  for(i=0; i<len; i++)
-    lock[i] = ((lock[i]<<4) & 0xF0) | ((lock[i]>>4) & 0x0F);
-  GString *key = g_string_sized_new(len+100);
-  for(i=0; i<len; i++) {
-    n = lock[i];
-    if(n == 0 || n == 5 || n == 36 || n == 96 || n == 124 || n == 126)
-      g_string_append_printf(key, "/%%DCN%03d%%/", n);
-    else
-      g_string_append_c(key, n);
-  }
-  return g_string_free(key, FALSE);
-}
-
-
 static void handle_cmd(struct nmdc_hub *hub, const char *cmd) {
   fprintf(stderr, "%s< %s\n", hub->tab->name, cmd); // debug
 
@@ -261,6 +334,7 @@ static void handle_cmd(struct nmdc_hub *hub, const char *cmd) {
   CMDREGEX(hello, "Hello ([^ $]+)");
   CMDREGEX(quit, "Quit ([^ $]+)");
   CMDREGEX(nicklist, "NickList (.+)");
+  CMDREGEX(myinfo, "MyINFO \\$ALL ([^ $]+) (.+)");
   CMDREGEX(hubname, "HubName (.+)");
 
   // $Lock
@@ -287,9 +361,9 @@ static void handle_cmd(struct nmdc_hub *hub, const char *cmd) {
       nmdc_send_myinfo(hub);
       send_cmd(hub, "$GetNickList");
     } else {
-      hub->users++;
-      // TODO: keep a list of users
-      // TODO: request $MyINFO when necessary
+      struct nmdc_user *u = user_add(hub, nick);
+      if(!u->hasinfo)
+        send_cmdf(hub, "$GetMyINFO %s", nick);
     }
     g_free(nick);
   }
@@ -297,24 +371,46 @@ static void handle_cmd(struct nmdc_hub *hub, const char *cmd) {
 
   // $Quit
   if(g_regex_match(quit, cmd, 0, &nfo)) { // 1 = nick
-    hub->users--;
-    // TODO: update list of users
+    char *nick = g_match_info_fetch(nfo, 1);
+    struct nmdc_user *u = g_hash_table_lookup(hub->users, nick);
+    if(u) {
+      hub->sharecount--;
+      hub->sharesize -= u->sharesize;
+      g_hash_table_remove(hub->users, nick);
+    }
+    g_free(nick);
   }
   g_match_info_free(nfo);
 
   // $NickList
   if(g_regex_match(nicklist, cmd, 0, &nfo)) { // 1 = list of users
-    // TODO: update list of users
-    // TODO: request $MyINFO when necessary
     // not really efficient, but does the trick
     char *str = g_match_info_fetch(nfo, 1);
     char **list = g_strsplit(str, "$$", 0);
     g_free(str);
     char **cur;
-    hub->users = 0;
-    for(cur=list; *cur&&**cur; cur++)
-      hub->users++;
+    for(cur=list; *cur&&**cur; cur++) {
+      struct nmdc_user *u = user_add(hub, *cur);
+      if(!u->hasinfo)
+        send_cmdf(hub, "$GetINFO %s %s", *cur, hub->nick_hub);
+    }
     g_strfreev(list);
+  }
+  g_match_info_free(nfo);
+
+  // $MyINFO
+  if(g_regex_match(myinfo, cmd, 0, &nfo)) { // 1 = nick, 2 = info string
+    char *nick = g_match_info_fetch(nfo, 1);
+    char *str = g_match_info_fetch(nfo, 2);
+    struct nmdc_user *u = user_add(hub, nick);
+    if(!u->hasinfo)
+      hub->sharecount++;
+    else
+      hub->sharesize -= u->sharesize;
+    user_myinfo(hub, u, str);
+    hub->sharesize += u->sharesize;
+    g_free(str);
+    g_free(nick);
   }
   g_match_info_free(nfo);
 
@@ -462,18 +558,18 @@ void nmdc_disconnect(struct nmdc_hub *hub) {
     g_object_unref(hub->conn); // also closes the connection
     hub->conn = NULL;
   }
+  g_hash_table_remove_all(hub->users);
   g_free(hub->nick);     hub->nick = NULL;
   g_free(hub->nick_hub); hub->nick_hub = NULL;
   g_free(hub->hubname);  hub->hubname = NULL;
-  hub->nick_valid = FALSE;
-  hub->state = HUBS_IDLE;
-  hub->users = 0;
+  hub->nick_valid = hub->state = hub->sharecount = hub->sharesize = 0;
   ui_logwindow_printf(hub->tab->log, "Disconnected.");
 }
 
 
 void nmdc_free(struct nmdc_hub *hub) {
   nmdc_disconnect(hub);
+  g_hash_table_unref(hub->users);
   g_object_unref(hub->cancel);
   g_free(hub->out_buf);
   g_free(hub->out_buf_old);

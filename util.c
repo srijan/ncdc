@@ -234,3 +234,20 @@ int str_columns(const char *str) {
   return w;
 }
 
+
+// Stolen from ncdu (with small modifications)
+// Result is stored in an internal buffer.
+char *str_formatsize(guint64 size) {
+  static char dat[10]; /* "xxx.xxMiB" */
+  double r = size;
+  char c = ' ';
+  if(r < 1000.0f)      { }
+  else if(r < 1023e3f) { c = 'k'; r/=1024.0f; }
+  else if(r < 1023e6f) { c = 'M'; r/=1048576.0f; }
+  else if(r < 1023e9f) { c = 'G'; r/=1073741824.0f; }
+  else if(r < 1023e12f){ c = 'T'; r/=1099511627776.0f; }
+  else                 { c = 'P'; r/=1125899906842624.0f; }
+  sprintf(dat, "%6.2f%c%cB", r, c, c == ' ' ? ' ' : 'i');
+  return dat;
+}
+

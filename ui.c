@@ -140,8 +140,12 @@ static void ui_hub_draw(struct ui_tab *tab) {
     mvaddstr(winrows-4, wincols-15, "Connecting...");
   else if(!tab->hub->nick_valid)
     mvaddstr(winrows-4, wincols-15, "Logging in...");
-  else
-    mvaddstr(winrows-4, wincols-21, "31 users    1.69TiB"); // TODO: actual numbers
+  else {
+    // TODO: actual sharesize
+    char *tmp = g_strdup_printf("%6d users   %9s%c", tab->hub->users, "1.69TiB", '+');
+    mvaddstr(winrows-4, wincols-26, tmp);
+    g_free(tmp);
+  }
   // TODO: display more info (nick, address?)
   attroff(A_REVERSE);
 

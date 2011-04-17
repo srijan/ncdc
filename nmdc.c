@@ -55,6 +55,8 @@ struct nmdc_hub {
   // TRUE is the above nick has also been validated (and we're properly logged in)
   gboolean nick_valid;
   char *hubname;  // UTF-8, or NULL when unknown
+  int users;
+  guint64 sharesize;
 };
 
 #endif
@@ -257,6 +259,8 @@ static void handle_cmd(struct nmdc_hub *hub, const char *cmd) {
 
   CMDREGEX(lock, "Lock ([^ $]+) Pk=[^ $]+");
   CMDREGEX(hello, "Hello ([^ $]+)");
+  CMDREGEX(quit, "Quit ([^ $]+)");
+  CMDREGEX(nicklist, "NickList (.+)");
   CMDREGEX(hubname, "HubName (.+)");
 
   // $Lock
@@ -279,11 +283,38 @@ static void handle_cmd(struct nmdc_hub *hub, const char *cmd) {
     if(strcmp(nick, hub->nick_hub) == 0) {
       ui_logwindow_add(hub->tab->log, "Nick validated.");
       hub->nick_valid = TRUE;
+      send_cmd(hub, "$Version 1,0091");
       nmdc_send_myinfo(hub);
+      send_cmd(hub, "$GetNickList");
     } else {
-      // TODO: keep track of users
+      hub->users++;
+      // TODO: keep a list of users
+      // TODO: request $MyINFO when necessary
     }
     g_free(nick);
+  }
+  g_match_info_free(nfo);
+
+  // $Quit
+  if(g_regex_match(quit, cmd, 0, &nfo)) { // 1 = nick
+    hub->users--;
+    // TODO: update list of users
+  }
+  g_match_info_free(nfo);
+
+  // $NickList
+  if(g_regex_match(nicklist, cmd, 0, &nfo)) { // 1 = list of users
+    // TODO: update list of users
+    // TODO: request $MyINFO when necessary
+    // not really efficient, but does the trick
+    char *str = g_match_info_fetch(nfo, 1);
+    char **list = g_strsplit(str, "$$", 0);
+    g_free(str);
+    char **cur;
+    hub->users = 0;
+    for(cur=list; *cur&&**cur; cur++)
+      hub->users++;
+    g_strfreev(list);
   }
   g_match_info_free(nfo);
 
@@ -436,6 +467,7 @@ void nmdc_disconnect(struct nmdc_hub *hub) {
   g_free(hub->hubname);  hub->hubname = NULL;
   hub->nick_valid = FALSE;
   hub->state = HUBS_IDLE;
+  hub->users = 0;
   ui_logwindow_printf(hub->tab->log, "Disconnected.");
 }
 

@@ -373,6 +373,10 @@ static void c_connect(char *args) {
     ui_logwindow_add(tab->log, "Already connected (or connecting). You may want to /disconnect first.");
   else {
     if(args[0]) {
+      if(strncmp(args, "dchub://", 8) == 0)
+        args += 8;
+      if(args[strlen(args)-1] == '/')
+        args[strlen(args)-1] = 0;
       g_key_file_set_string(conf_file, tab->name, "hubaddr", args);
       conf_save();
     }
@@ -448,7 +452,13 @@ static struct cmd cmds_list[] = {
   { "connect", c_connect,
     "[<address>]", "Connect to a hub.",
     "If no address is specified, will connect to the hub you last used on the current tab.\n"
-    "The address should be in the form of \"host:port\", where the \":port\" part is optional."
+    "The address should be in the form of \"dchub://host:port/\" or \"host:port\".\n"
+    "The \":port\" part is in both cases optional and defaults to :411.\n\n"
+    "Note that this command can only be used on hub tabs. If you want to open a new"
+    " connection to a hub, you need to use /open first. For example:\n"
+    "  /open testhub\n"
+    "  /connect dchub://dc.some-test-hub.com/\n"
+    "See \"/help open\" for more information."
   },
   { "disconnect", c_disconnect,
     NULL, "Disconnect from a hub.",

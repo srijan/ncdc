@@ -238,7 +238,7 @@ int str_columns(const char *str) {
 // Stolen from ncdu (with small modifications)
 // Result is stored in an internal buffer.
 char *str_formatsize(guint64 size) {
-  static char dat[10]; /* "xxx.xxMiB" */
+  static char dat[11]; /* "xxx.xx MiB" */
   double r = size;
   char c = ' ';
   if(r < 1000.0f)      { }
@@ -247,7 +247,7 @@ char *str_formatsize(guint64 size) {
   else if(r < 1023e9f) { c = 'G'; r/=1073741824.0f; }
   else if(r < 1023e12f){ c = 'T'; r/=1099511627776.0f; }
   else                 { c = 'P'; r/=1125899906842624.0f; }
-  sprintf(dat, "%6.2f%c%cB", r, c, c == ' ' ? ' ' : 'i');
+  sprintf(dat, "%6.2f %c%cB", r, c, c == ' ' ? ' ' : 'i');
   return dat;
 }
 

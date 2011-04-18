@@ -117,7 +117,18 @@ static void set_userinfo(char *group, char *key, char *val) {
     g_key_file_set_string(conf_file, group, key, val);
     get_string(group, key);
   }
-  // TODO: when connected, send update to the hub(s)
+  // hub-specific setting, so only one hub to check
+  if(group[0] == '#')
+    nmdc_send_myinfo(tab->hub);
+  // global setting, check affected hubs
+  else {
+    GList *n;
+    for(n=ui_tabs; n; n=n->next) {
+      struct ui_tab *t = n->data;
+      if(t->type == UIT_HUB && !g_key_file_has_key(conf_file, t->name, key, NULL))
+        nmdc_send_myinfo(t->hub);
+    }
+  }
 }
 
 

@@ -73,6 +73,10 @@ struct nmdc_hub {
   guint64 sharesize;
   // what we and the hub support
   gboolean supports_nogetinfo;
+  // MyINFO send timer (event loop source id)
+  guint myinfo_timer;
+  // last MyINFO string
+  char *myinfo_last;
 };
 
 #endif
@@ -234,16 +238,6 @@ static void user_myinfo(struct nmdc_hub *hub, struct nmdc_user *u, const char *s
 
 // hub stuff
 
-struct nmdc_hub *nmdc_create(struct ui_tab *tab) {
-  struct nmdc_hub *hub = g_new0(struct nmdc_hub, 1);
-  hub->tab = tab;
-  hub->cancel = g_cancellable_new();
-  hub->out_buf_len = 1024;
-  hub->out_buf = g_new(char, hub->out_buf_len);
-  hub->users = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, user_free);
-  return hub;
-}
-
 
 static void handle_write(GObject *src, GAsyncResult *res, gpointer dat) {
   struct nmdc_hub *hub = dat;
@@ -326,12 +320,30 @@ void nmdc_send_myinfo(struct nmdc_hub *hub) {
   tmp = conf_hub_get(string, hub->tab->name, "description"); char *desc = encode_and_escape(hub, tmp?tmp:""); g_free(tmp);
   tmp = conf_hub_get(string, hub->tab->name, "connection");  char *conn = encode_and_escape(hub, tmp?tmp:""); g_free(tmp);
   tmp = conf_hub_get(string, hub->tab->name, "email");       char *mail = encode_and_escape(hub, tmp?tmp:""); g_free(tmp);
-  // TODO: more dynamic...
-  send_cmdf(hub, "$MyINFO $ALL %s %s<ncdc V:%s,M:P,H:1/0/0,S:1>$ $%s\01$%s$0$",
-    hub->nick_hub, desc, VERSION, conn, mail);
+
+  // TODO: differentiate between normal/passworded/OP
+  int hubs = 0;
+  GList *n;
+  for(n=ui_tabs; n; n=n->next) {
+    struct ui_tab *t = n->data;
+    if(t->type == UIT_HUB && t->hub->nick_valid)
+      hubs++;
+  }
+
+  // TODO: sharesize, mode, slots and "open new slot when upload is slower than.." stuff. When implemented.
+  tmp = g_strdup_printf("$MyINFO $ALL %s %s<ncdc V:%s,M:P,H:%d/0/0,S:1>$ $%s\01$%s$0$",
+    hub->nick_hub, desc, VERSION, hubs, conn, mail);
   g_free(desc);
   g_free(conn);
   g_free(mail);
+
+  // send the MyINFO command only when it's different from the last one we sent
+  if(!hub->myinfo_last || strcmp(tmp, hub->myinfo_last) != 0) {
+    g_free(hub->myinfo_last);
+    hub->myinfo_last = tmp;
+    send_cmd(hub, tmp);
+  } else
+    g_free(tmp);
 }
 
 
@@ -574,6 +586,24 @@ static void handle_connect(GObject *src, GAsyncResult *res, gpointer dat) {
 }
 
 
+gboolean check_myinfo(gpointer data) {
+  nmdc_send_myinfo(data);
+  return TRUE;
+}
+
+
+struct nmdc_hub *nmdc_create(struct ui_tab *tab) {
+  struct nmdc_hub *hub = g_new0(struct nmdc_hub, 1);
+  hub->tab = tab;
+  hub->cancel = g_cancellable_new();
+  hub->out_buf_len = 1024;
+  hub->out_buf = g_new(char, hub->out_buf_len);
+  hub->users = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, user_free);
+  hub->myinfo_timer = g_timeout_add_seconds(5*60, check_myinfo, hub);
+  return hub;
+}
+
+
 void nmdc_connect(struct nmdc_hub *hub) {
   char *addr = conf_hub_get(string, hub->tab->name, "hubaddr");
   g_assert(addr);
@@ -605,6 +635,7 @@ void nmdc_disconnect(struct nmdc_hub *hub) {
   g_free(hub->nick);     hub->nick = NULL;
   g_free(hub->nick_hub); hub->nick_hub = NULL;
   g_free(hub->hubname);  hub->hubname = NULL;
+  g_free(hub->myinfo_last); hub->myinfo_last = NULL;
   hub->nick_valid = hub->state = hub->sharecount = hub->sharesize = hub->supports_nogetinfo = 0;
   ui_logwindow_printf(hub->tab->log, "Disconnected.");
 }
@@ -614,6 +645,7 @@ void nmdc_free(struct nmdc_hub *hub) {
   nmdc_disconnect(hub);
   g_hash_table_unref(hub->users);
   g_object_unref(hub->cancel);
+  g_source_remove(hub->myinfo_timer);
   g_free(hub->out_buf);
   g_free(hub->out_buf_old);
   g_free(hub);

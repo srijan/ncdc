@@ -272,7 +272,7 @@ static void send_cmd(struct nmdc_hub *hub, const char *cmd) {
   if(hub->state != HUBS_CONNECTED)
     return;
 
-  fprintf(stderr, "%s> %s\n", hub->tab->name, cmd); // debug
+  g_debug("%s> %s\n", hub->tab->name, cmd);
 
   // append cmd to the buffer
   int len = strlen(cmd)+1; // the 1 is the termination char
@@ -337,7 +337,7 @@ void nmdc_say(struct nmdc_hub *hub, const char *str) {
 
 
 static void handle_cmd(struct nmdc_hub *hub, const char *cmd) {
-  fprintf(stderr, "%s< %s\n", hub->tab->name, cmd); // debug
+  g_debug("%s< %s\n", hub->tab->name, cmd);
 
   GMatchInfo *nfo;
 

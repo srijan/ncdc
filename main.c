@@ -182,16 +182,19 @@ static void catch_sigwinch(int sig) {
 }
 
 
-// clean-up our ncurses window before throwing a fatal error
-static void log_fatal(const gchar *dom, GLogLevelFlags level, const gchar *msg, gpointer dat) {
-  endwin();
-  printf("*%s* %s\n", loglevel_to_str(level), msg);
+// redirect all non-fatal errors to stderr (NOT stdout!)
+// TODO: option to ignore debug stuff (compile-time? run-time?)
+static void log_redirect(const gchar *dom, GLogLevelFlags level, const gchar *msg, gpointer dat) {
+  fprintf(stderr, "*%s* %s", loglevel_to_str(level), msg);
 }
 
 
-// redirect all non-fatal errors to the main window
-static void log_redirect(const gchar *dom, GLogLevelFlags level, const gchar *msg, gpointer dat) {
-  ui_logwindow_printf(ui_main->log, "*%s* %s", loglevel_to_str(level), msg);
+// clean-up our ncurses window before throwing a fatal error
+static void log_fatal(const gchar *dom, GLogLevelFlags level, const gchar *msg, gpointer dat) {
+  endwin();
+  // print to both stderr (log file) and stdout
+  fprintf(stderr, "\n\n*%s* %s\n", loglevel_to_str(level), msg);
+  printf("\n\n*%s* %s\n", loglevel_to_str(level), msg);
 }
 
 
@@ -216,12 +219,19 @@ int main(int argc, char **argv) {
   g_thread_init(NULL);
   g_type_init();
   conf_init();
-  ui_cmdhist_init("history");
-  ui_init();
 
   // setup logging
+  char *errlog = g_build_filename(conf_dir, "stderr.log", NULL);
+  if(!freopen(errlog, "w", stderr)) {
+    fprintf(stderr, "ERROR: Couldn't open %s for writing: %s\n", errlog, strerror(errno));
+    exit(1);
+  }
   g_log_set_handler(NULL, G_LOG_FATAL_MASK | G_LOG_FLAG_FATAL | G_LOG_LEVEL_ERROR, log_fatal, NULL);
   g_log_set_default_handler(log_redirect, NULL);
+
+  // init UI
+  ui_cmdhist_init("history");
+  ui_init();
 
   // setup SIGWINCH
   struct sigaction act;

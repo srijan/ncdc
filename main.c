@@ -185,7 +185,8 @@ static void catch_sigwinch(int sig) {
 // redirect all non-fatal errors to stderr (NOT stdout!)
 // TODO: option to ignore debug stuff (compile-time? run-time?)
 static void log_redirect(const gchar *dom, GLogLevelFlags level, const gchar *msg, gpointer dat) {
-  fprintf(stderr, "*%s* %s", loglevel_to_str(level), msg);
+  fprintf(stderr, "*%s* %s\n", loglevel_to_str(level), msg);
+  fflush(stderr);
 }
 
 
@@ -194,6 +195,7 @@ static void log_fatal(const gchar *dom, GLogLevelFlags level, const gchar *msg, 
   endwin();
   // print to both stderr (log file) and stdout
   fprintf(stderr, "\n\n*%s* %s\n", loglevel_to_str(level), msg);
+  fflush(stderr);
   printf("\n\n*%s* %s\n", loglevel_to_str(level), msg);
 }
 
@@ -226,6 +228,7 @@ int main(int argc, char **argv) {
     fprintf(stderr, "ERROR: Couldn't open %s for writing: %s\n", errlog, strerror(errno));
     exit(1);
   }
+  g_free(errlog);
   g_log_set_handler(NULL, G_LOG_FATAL_MASK | G_LOG_FLAG_FATAL | G_LOG_LEVEL_ERROR, log_fatal, NULL);
   g_log_set_default_handler(log_redirect, NULL);
 

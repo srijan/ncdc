@@ -32,8 +32,8 @@
 
 struct nmdc_user {
   gboolean hasinfo;
-  // UTF-8, not equal to the key in nmdc_hub->users
-  char *name;
+  char *name;     // UTF-8
+  char *name_hub; // hub-encoded (used as hash key)
   char *desc;
   char *tag;
   char *conn;
@@ -169,14 +169,16 @@ static struct nmdc_user *user_add(struct nmdc_hub *hub, const char *name) {
   if(u)
     return u;
   u = g_new0(struct nmdc_user, 1);
+  u->name_hub = g_strdup(name);
   u->name = charset_convert(hub, TRUE, name);
-  g_hash_table_insert(hub->users, g_strdup(name), u);
+  g_hash_table_insert(hub->users, u->name_hub, u);
   return u;
 }
 
 
 static void user_free(gpointer dat) {
   struct nmdc_user *u = dat;
+  g_free(u->name_hub);
   g_free(u->name);
   g_free(u->desc);
   g_free(u->tag);
@@ -201,6 +203,10 @@ static void user_myinfo(struct nmdc_hub *hub, struct nmdc_user *u, const char *s
     match = g_regex_match(nfo_notag, str, 0, &nfo);
   }
   if(match) {
+    g_free(u->desc);
+    g_free(u->tag);
+    g_free(u->conn);
+    g_free(u->mail);
     char *desc = g_match_info_fetch(nfo, 1);
     char *tag = g_match_info_fetch(nfo, 2);
     char *conn = g_match_info_fetch(nfo, 3);
@@ -232,7 +238,7 @@ struct nmdc_hub *nmdc_create(struct ui_tab *tab) {
   hub->cancel = g_cancellable_new();
   hub->out_buf_len = 1024;
   hub->out_buf = g_new(char, hub->out_buf_len);
-  hub->users = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, user_free);
+  hub->users = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, user_free);
   return hub;
 }
 
@@ -272,7 +278,7 @@ static void send_cmd(struct nmdc_hub *hub, const char *cmd) {
   if(hub->state != HUBS_CONNECTED)
     return;
 
-  g_debug("%s> %s\n", hub->tab->name, cmd);
+  g_debug("%s> %s", hub->tab->name, cmd);
 
   // append cmd to the buffer
   int len = strlen(cmd)+1; // the 1 is the termination char
@@ -337,7 +343,7 @@ void nmdc_say(struct nmdc_hub *hub, const char *str) {
 
 
 static void handle_cmd(struct nmdc_hub *hub, const char *cmd) {
-  g_debug("%s< %s\n", hub->tab->name, cmd);
+  g_debug("%s< %s", hub->tab->name, cmd);
 
   GMatchInfo *nfo;
 
@@ -382,11 +388,15 @@ static void handle_cmd(struct nmdc_hub *hub, const char *cmd) {
   if(g_regex_match(hello, cmd, 0, &nfo)) { // 1 = nick
     char *nick = g_match_info_fetch(nfo, 1);
     if(strcmp(nick, hub->nick_hub) == 0) {
-      ui_logwindow_add(hub->tab->log, "Nick validated.");
-      hub->nick_valid = TRUE;
-      send_cmd(hub, "$Version 1,0091");
-      nmdc_send_myinfo(hub);
-      send_cmd(hub, "$GetNickList");
+      // some hubs send our $Hello twice (like verlihub)
+      // just ignore the second one
+      if(!hub->nick_valid) {
+        ui_logwindow_add(hub->tab->log, "Nick validated.");
+        hub->nick_valid = TRUE;
+        send_cmd(hub, "$Version 1,0091");
+        nmdc_send_myinfo(hub);
+        send_cmd(hub, "$GetNickList");
+      }
     } else {
       struct nmdc_user *u = user_add(hub, nick);
       if(!u->hasinfo && !hub->supports_nogetinfo)

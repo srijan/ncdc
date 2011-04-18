@@ -141,8 +141,10 @@ static void ui_hub_draw(struct ui_tab *tab) {
   else if(!tab->hub->nick_valid)
     mvaddstr(winrows-4, wincols-15, "Logging in...");
   else {
-    char *tmp = g_strdup_printf("%s @ dchub://%s/", tab->hub->nick, conf_hub_get(string, tab->name, "hubaddr"));
+    char *addr = conf_hub_get(string, tab->name, "hubaddr");
+    char *tmp = g_strdup_printf("%s @ dchub://%s/", tab->hub->nick, addr);
     mvaddstr(winrows-4, 0, tmp);
+    g_free(addr);
     g_free(tmp);
     int count = g_hash_table_size(tab->hub->users);
     tmp = g_strdup_printf("%6d users  %10s%c", count,

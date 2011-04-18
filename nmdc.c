@@ -188,6 +188,8 @@ static void user_free(gpointer dat) {
 }
 
 
+#define ASSIGN_OR_FREE(lval, rval) do { if(rval[0]) lval = rval; else { lval =  NULL; g_free(rval); } } while(0)
+
 static void user_myinfo(struct nmdc_hub *hub, struct nmdc_user *u, const char *str) {
   static GRegex *nfo_reg = NULL;
   static GRegex *nfo_notag = NULL;
@@ -213,11 +215,11 @@ static void user_myinfo(struct nmdc_hub *hub, struct nmdc_user *u, const char *s
     //char *flag = g_match_info_fetch(nfo, 4); // currently ignored
     char *mail = g_match_info_fetch(nfo, 5);
     char *share = g_match_info_fetch(nfo, 6);
-    u->desc = unescape_and_decode(hub, desc);
+    u->desc = desc[0] ? unescape_and_decode(hub, desc) : NULL;
     g_free(desc);
-    u->tag = tag;
-    u->conn = conn;
-    u->mail = mail;
+    ASSIGN_OR_FREE(u->tag, tag);
+    ASSIGN_OR_FREE(u->conn, conn);
+    ASSIGN_OR_FREE(u->mail, mail);
     u->sharesize = g_ascii_strtoull(share, NULL, 10);
     g_free(share);
     u->hasinfo = TRUE;

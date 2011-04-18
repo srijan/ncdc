@@ -364,7 +364,7 @@ static void handle_cmd(struct nmdc_hub *hub, const char *cmd) {
   if(g_regex_match(lock, cmd, 0, &nfo)) { // 1 = lock
     char *lock = g_match_info_fetch(nfo, 1);
     if(strncmp(lock, "EXTENDEDPROTOCOL", 16) == 0)
-      send_cmd(hub, "$Supports NoGetINFO");
+      send_cmd(hub, "$Supports NoGetINFO NoHello");
     char *key = lock2key(lock);
     send_cmdf(hub, "$Key %s", key);
     hub->nick = conf_hub_get(string, hub->tab->name, "nick");
@@ -380,6 +380,7 @@ static void handle_cmd(struct nmdc_hub *hub, const char *cmd) {
     char *list = g_match_info_fetch(nfo, 1);
     if(strstr(list, "NoGetINFO"))
       hub->supports_nogetinfo = TRUE;
+    // we also support NoHello, but no need to check for that
     g_free(list);
   }
   g_match_info_free(nfo);

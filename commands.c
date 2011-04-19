@@ -238,6 +238,8 @@ static inline gboolean parsesetting(char *name, char **group, char **key, struct
 
 
 static void c_set(char *args) {
+  g_return_if_fail(tab->log);
+
   if(!args[0]) {
     struct setting *s;
     ui_logwindow_add(tab->log, "");
@@ -280,6 +282,8 @@ static void c_set(char *args) {
 
 
 static void c_unset(char *args) {
+  g_return_if_fail(tab->log);
+
   if(!args[0]) {
     c_set("");
     return;
@@ -314,12 +318,13 @@ static inline struct cmd *getcmd(const char *name) {
 
 
 static void c_quit(char *args) {
-  ui_logwindow_add(tab->log, "Closing ncdc...");
+  ui_msg("Closing ncdc...");
   g_main_loop_quit(main_loop);
 }
 
 
 static void c_say(char *args) {
+  g_return_if_fail(tab->log);
   if(tab->type != UIT_HUB)
     ui_logwindow_add(tab->log, "Chatting only works on hub tabs.");
   else if(!tab->hub->nick_valid)
@@ -330,6 +335,7 @@ static void c_say(char *args) {
 
 
 static void c_help(char *args) {
+  g_return_if_fail(tab->log);
   struct cmd *c;
   // list available commands
   if(!args[0]) {
@@ -357,6 +363,7 @@ static void c_help(char *args) {
 
 
 static void c_open(char *args) {
+  g_return_if_fail(tab->log);
   if(!args[0]) {
     ui_logwindow_add(tab->log, "No hub name given.");
     return;
@@ -386,6 +393,7 @@ static void c_open(char *args) {
 
 
 static void c_connect(char *args) {
+  g_return_if_fail(tab->log);
   if(tab->type != UIT_HUB)
     ui_logwindow_add(tab->log, "This command can only be used on hub tabs.");
   else if(tab->hub->state != HUBS_IDLE)
@@ -408,6 +416,7 @@ static void c_connect(char *args) {
 
 
 static void c_disconnect(char *args) {
+  g_return_if_fail(tab->log);
   if(args[0])
     ui_logwindow_add(tab->log, "This command does not accept any arguments.");
   else if(tab->type != UIT_HUB)
@@ -420,6 +429,7 @@ static void c_disconnect(char *args) {
 
 
 static void c_reconnect(char *args) {
+  g_return_if_fail(tab->log);
   if(args[0])
     ui_logwindow_add(tab->log, "This command does not accept any arguments.");
   else if(tab->type != UIT_HUB)
@@ -434,19 +444,42 @@ static void c_reconnect(char *args) {
 
 static void c_close(char *args) {
   if(args[0])
-    ui_logwindow_add(tab->log, "This command does not accept any arguments.");
+    ui_msg("This command does not accept any arguments.");
   else if(tab->type == UIT_MAIN)
-    ui_logwindow_add(tab->log, "Main tab cannot be closed.");
+    ui_msg("Main tab cannot be closed.");
   else if(tab->type == UIT_HUB)
     ui_hub_close(tab);
+  else if(tab->type == UIT_USERLIST)
+    ui_userlist_close(tab);
 }
 
 
 static void c_clear(char *args) {
   if(args[0])
-    ui_logwindow_add(tab->log, "This command does not accept any arguments.");
-  else
+    ui_msg("This command does not accept any arguments.");
+  else if(tab->log)
     ui_logwindow_clear(tab->log);
+}
+
+
+static void c_userlist(char *args) {
+  g_return_if_fail(tab->log);
+  if(args[0])
+    ui_logwindow_add(tab->log, "This command does not accept any arguments.");
+  else if(tab->type != UIT_HUB)
+    ui_logwindow_add(tab->log, "This command can only be used on hub tabs.");
+  else {
+    GList *n;
+    for(n=ui_tabs; n; n=n->next) {
+      struct ui_tab *t = n->data;
+      if(t->type == UIT_USERLIST && t->hub == tab->hub)
+        break;
+    }
+    if(n)
+      ui_tab_cur = n;
+    else
+      ui_tab_open(ui_userlist_create(tab->hub));
+  }
 }
 
 
@@ -514,6 +547,10 @@ static struct cmd cmds_list[] = {
     "<key>", "Unset a configuration variable.",
     "This command will remove any value set with the specified variable.\n"
     "Can be useful to reset a variable back to its global or default value."
+  },
+  { "userlist", c_userlist,
+    NULL, "Open the user list.",
+    "" // TODO?
   },
   { "", NULL }
 };

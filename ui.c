@@ -31,14 +31,15 @@
 
 #if INTERFACE
 
-#define UIT_MAIN 0
-#define UIT_HUB 1
+#define UIT_MAIN     0
+#define UIT_HUB      1
+#define UIT_USERLIST 2
 
 struct ui_tab {
   int type; // UIT_ type
   char *name;
-  struct ui_logwindow *log;
-  struct nmdc_hub *hub;
+  struct ui_logwindow *log; // MAIN, HUB
+  struct nmdc_hub *hub;     // HUB, USERLIST
 };
 
 #endif
@@ -116,12 +117,15 @@ struct ui_tab *ui_hub_create(const char *name) {
 
 
 void ui_hub_close(ui_tab *tab) {
-  // remove from the ui_tabs list
-  GList *cur = g_list_find(ui_tabs, tab);
-  ui_tab_cur = cur->prev ? cur->prev : cur->next;
-  ui_tabs = g_list_delete_link(ui_tabs, cur);
+  // also close the userlist tab, if there is one
+  GList *n;
+  for(n=ui_tabs; n; n=n->next) {
+    struct ui_tab *t = n->data;
+    if(t->type == UIT_USERLIST && t->hub == tab->hub)
+      ui_userlist_close(t);
+  }
+  ui_tab_remove(tab);
 
-  // free resources
   nmdc_free(tab->hub);
   ui_logwindow_free(tab->log);
   g_free(tab->name);
@@ -185,15 +189,92 @@ static void ui_hub_key(struct ui_tab *tab, struct input_key *key) {
 
 
 
+// Userlist tab
+
+struct ui_tab *ui_userlist_create(struct nmdc_hub *hub) {
+  struct ui_tab *tab = g_new0(struct ui_tab, 1);
+  tab->name = g_strdup_printf("u/%s", hub->tab->name);
+  tab->type = UIT_USERLIST;
+  tab->hub = hub;
+  return tab;
+}
+
+
+void ui_userlist_close(struct ui_tab *tab) {
+  ui_tab_remove(tab);
+  g_free(tab->name);
+  g_free(tab);
+}
+
+
+static char *ui_userlist_title(struct ui_tab *tab) {
+  return g_strdup_printf("%s / User list", tab->hub->tab->name);
+}
+
+
+
+
+// Generic message displaying thing.
+
+static char *ui_msg_text = NULL;
+static guint ui_msg_timer;
+static gboolean ui_msg_updated = FALSE;
+
+
+static gboolean ui_msg_timeout(gpointer data) {
+  ui_msg(NULL);
+  return FALSE;
+}
+
+
+// a notication message, either displayed in the log of the current tab or, if
+// the hub has no tab, in the "status bar". Calling this function with NULL
+// will reset the status bar message.
+void ui_msg(char *msg) {
+  struct ui_tab *tab = ui_tab_cur->data;
+  if(ui_msg_text) {
+    g_free(ui_msg_text);
+    ui_msg_text = NULL;
+    g_source_remove(ui_msg_timer);
+    ui_msg_updated = TRUE;
+  }
+  if(msg && tab->log)
+    ui_logwindow_add(tab->log, msg);
+  else if(msg) {
+    ui_msg_text = g_strdup(msg);
+    ui_msg_timer = g_timeout_add(3000, ui_msg_timeout, NULL);
+    ui_msg_updated = TRUE;
+  }
+}
+
+
+void ui_msgf(const char *fmt, ...) {
+  va_list va;
+  va_start(va, fmt);
+  char *str = g_strdup_vprintf(fmt, va);
+  va_end(va);
+  ui_msg(str);
+  g_free(str);
+}
+
+
+
 // Global stuff
 
-
 struct ui_textinput *ui_global_textinput;
-
 
 void ui_tab_open(struct ui_tab *tab) {
   ui_tabs = g_list_append(ui_tabs, tab);
   ui_tab_cur = g_list_last(ui_tabs);
+}
+
+
+// to be called from ui_*_close()
+void ui_tab_remove(struct ui_tab *tab) {
+  GList *cur = g_list_find(ui_tabs, tab);
+  if(cur == ui_tab_cur)
+    ui_tab_cur = cur->prev ? cur->prev : cur->next;
+  ui_tabs = g_list_delete_link(ui_tabs, cur);
 }
 
 
@@ -226,8 +307,9 @@ void ui_draw() {
 
   // first line - title
   char *title =
-    curtab->type == UIT_MAIN ? ui_main_title() :
-    curtab->type == UIT_HUB  ? ui_hub_title(curtab) : g_strdup("");
+    curtab->type == UIT_MAIN     ? ui_main_title() :
+    curtab->type == UIT_HUB      ? ui_hub_title(curtab) :
+    curtab->type == UIT_USERLIST ? ui_userlist_title(curtab) : g_strdup("");
   attron(A_REVERSE);
   mvhline(0, 0, ' ', wincols);
   mvaddstr(0, 0, title);
@@ -260,8 +342,12 @@ void ui_draw() {
   }
   attroff(A_REVERSE);
 
-  // last line - status info
-  mvaddstr(winrows-1, wincols-14, "Here be stats");
+  // last line - status info or notification
+  ui_msg_updated = FALSE;
+  if(ui_msg_text)
+    mvaddstr(winrows-1, 0, ui_msg_text);
+  else
+    mvaddstr(winrows-1, wincols-14, "Here be stats");
 
   // tab contents
   switch(curtab->type) {
@@ -275,7 +361,7 @@ void ui_draw() {
 
 gboolean ui_checkupdate() {
   struct ui_tab *cur = ui_tab_cur->data;
-  return cur->log->updated;
+  return ui_msg_updated || (cur->log && cur->log->updated);
 }
 
 

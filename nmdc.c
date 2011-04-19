@@ -590,7 +590,7 @@ static void handle_connect(GObject *src, GAsyncResult *res, gpointer dat) {
 }
 
 
-gboolean check_myinfo(gpointer data) {
+static gboolean check_myinfo(gpointer data) {
   nmdc_send_myinfo(data);
   return TRUE;
 }

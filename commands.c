@@ -134,7 +134,7 @@ static void set_userinfo(char *group, char *key, char *val) {
 
 static void set_encoding(char *group, char *key, char *val) {
   GError *err = NULL;
-  if(!val || strcasecmp(val, "UTF-8") == 0)
+  if(!val)
     UNSET(group, key);
   else if(!str_convert_check(val, &err)) {
     if(err) {

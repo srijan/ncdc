@@ -442,31 +442,25 @@ static void c_close(char *args) {
 }
 
 
+static void c_clear(char *args) {
+  if(args[0])
+    ui_logwindow_add(tab->log, "This command does not accept any arguments.");
+  else
+    ui_logwindow_clear(tab->log);
+}
+
+
 // the actual command list (cmds is an alias to this, set by cmd_handle())
 static struct cmd cmds_list[] = {
-  { "quit", c_quit,
-    NULL, "Quit ncdc.",
-    "You can also just hit ctrl+c, which is equivalent."
+  { "clear", c_clear,
+    NULL, "Clear the display\n",
+    "Clears the log displayed on the screen. Does not affect the log files in any way.\n"
+    "Ctrl+l is a shortcut for this command."
   },
-  { "say",  c_say,
-    "<message>", "Send a chat message.",
-    "You normally don't have to use the /say command explicitely, any command not staring"
-    " with '/' will automatically imply \"/say <command>\". For example, typing \"hello.\""
-    " in the command line is equivalent to \"/say hello.\".\n\n"
-    "Using the /say command explicitely may be useful to send message starting with '/' to"
-    " the chat, for example \"/say /help is what you are looking for\"."
-  },
-  { "help", c_help,
-    "[<command>]", "Request information on commands.",
-    "Use /help without arguments to list all the available commands.\n"
-    "Use /help <command> to get information about a particular command."
-  },
-  { "open", c_open,
-    "<name>", "Open a new hub tab.",
-    "Opens a new tab to use for a hub. The name is a (short) personal name you use to"
-    " identify the hub, and will be used for storing hub-specific configuration.\n\n"
-    "If you have previously connected to a hub from a tab with the same name, /open"
-    " will automatically connect to the same hub again."
+  { "close", c_close,
+    NULL, "Close the current tab.",
+    "When closing a hub tab, you will be disconnected from the hub.\n"
+    "Alt+c is a shortcut for this command."
   },
   { "connect", c_connect,
     "[<address>]", "Connect to a hub.",
@@ -483,14 +477,33 @@ static struct cmd cmds_list[] = {
     NULL, "Disconnect from a hub.",
     "Closes the connection with the hub."
   },
+  { "help", c_help,
+    "[<command>]", "Request information on commands.",
+    "Use /help without arguments to list all the available commands.\n"
+    "Use /help <command> to get information about a particular command."
+  },
+  { "open", c_open,
+    "<name>", "Open a new hub tab.",
+    "Opens a new tab to use for a hub. The name is a (short) personal name you use to"
+    " identify the hub, and will be used for storing hub-specific configuration.\n\n"
+    "If you have previously connected to a hub from a tab with the same name, /open"
+    " will automatically connect to the same hub again."
+  },
+  { "quit", c_quit,
+    NULL, "Quit ncdc.",
+    "You can also just hit ctrl+c, which is equivalent."
+  },
   { "reconnect", c_reconnect,
     NULL, "Shortcut for /disconnect and /connect",
     "When your nick or the hub encoding have been changed, the new settings will be used after the reconnect."
   },
-  { "close", c_close,
-    NULL, "Close the current tab.",
-    "When closing a hub tab, you will be disconnected from the hub.\n"
-    "Alt+c is a shortcut for this command."
+  { "say",  c_say,
+    "<message>", "Send a chat message.",
+    "You normally don't have to use the /say command explicitely, any command not staring"
+    " with '/' will automatically imply \"/say <command>\". For example, typing \"hello.\""
+    " in the command line is equivalent to \"/say hello.\".\n\n"
+    "Using the /say command explicitely may be useful to send message starting with '/' to"
+    " the chat, for example \"/say /help is what you are looking for\"."
   },
   { "set", c_set,
     "[<key> [<value>]]", "Get or set configuration variables.",

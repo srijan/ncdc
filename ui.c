@@ -315,6 +315,10 @@ void ui_input(struct input_key *key) {
   } else if(key->type == INPT_ALT && key->code == 'c') {
     cmd_handle("/close");
 
+  // ctrl+l (alias for /clear)
+  } else if(key->type == INPT_CTRL && key->code == 12) {
+    cmd_handle("/clear");
+
   // let tab handle it
   } else {
     switch(curtab->type) {

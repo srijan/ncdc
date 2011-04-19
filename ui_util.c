@@ -70,12 +70,9 @@ struct ui_logwindow *ui_logwindow_create(const char *file) {
 
 
 void ui_logwindow_free(struct ui_logwindow *lw) {
-  int i;
   if(lw->file)
     fclose(lw->file);
-  for(i=0; i<LOGWIN_BUF; i++)
-    if(lw->buf[i])
-      g_free(lw->buf[i]);
+  ui_logwindow_clear(lw);
   g_free(lw);
 }
 
@@ -129,6 +126,16 @@ void ui_logwindow_printf(struct ui_logwindow *lw, const char *fmt, ...) {
   va_end(va);
   ui_logwindow_add(lw, str);
   g_free(str);
+}
+
+
+void ui_logwindow_clear(struct ui_logwindow *lw) {
+  int i;
+  for(i=0; i<LOGWIN_BUF; i++) {
+    g_free(lw->buf[i]);
+    lw->buf[i] = NULL;
+  }
+  lw->lastlog = lw->lastvis = 0;
 }
 
 

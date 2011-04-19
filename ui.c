@@ -152,7 +152,6 @@ static void ui_hub_draw(struct ui_tab *tab) {
     mvaddstr(winrows-4, wincols-26, tmp);
     g_free(tmp);
   }
-  // TODO: display more info (nick, address?)
   attroff(A_REVERSE);
 
   mvaddstr(winrows-3, 0, tab->name);

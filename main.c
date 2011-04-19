@@ -215,7 +215,6 @@ int main(int argc, char **argv) {
   setlocale(LC_ALL, "");
 
   // TODO: check that the current locale is UTF-8. Things aren't going to work otherwise
-  // TODO: make sure that there is no other ncdc instance working with the same config directory
 
   // init stuff
   g_thread_init(NULL);

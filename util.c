@@ -29,6 +29,7 @@
 #include <errno.h>
 #include <string.h>
 #include <glib/gstdio.h>
+#include <sys/file.h>
 
 
 #if INTERFACE
@@ -86,6 +87,14 @@ void conf_init() {
   if(g_access(conf_dir, F_OK | R_OK | X_OK | W_OK) < 0)
     g_error("Directory '%s' does not exist or is not writable.", logs);
   g_free(logs);
+
+  // make sure that there is no other ncdc instance working with the same config directory
+  char *lock_file = g_build_filename(conf_dir, "lock", NULL);
+  int lock_fd = g_open(lock_file, O_WRONLY|O_CREAT, 0600);
+  if(lock_fd < 0 || flock(lock_fd, LOCK_EX|LOCK_NB))
+    g_error("Unable to open lock file. Is another instance of ncdc running with the same configuration directory?");
+  // Don't close the above file. Keep it open and let the OS close it (and free
+  // the lock) when ncdc is closed, was killed or has crashed.
 
   // load config file (or create it)
   conf_file = g_key_file_new();

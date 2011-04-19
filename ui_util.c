@@ -83,10 +83,6 @@ static void ui_logwindow_addline(struct ui_logwindow *lw, const char *msg) {
   lw->lastlog++;
   lw->updated = TRUE;
 
-  // TODO: convert invalid characters being written to the buffer
-  //  ui_logwindow_draw() really requires valid UTF-8
-  g_assert(g_utf8_validate(msg, -1, NULL));
-
   time_t tm = time(NULL);
   char ts[50];
   strftime(ts, 10, "%H:%M:%S ", localtime(&tm));

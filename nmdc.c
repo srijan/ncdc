@@ -176,6 +176,8 @@ static struct nmdc_user *user_add(struct nmdc_hub *hub, const char *name) {
   u->name_hub = g_strdup(name);
   u->name = charset_convert(hub, TRUE, name);
   g_hash_table_insert(hub->users, u->name_hub, u);
+  if((!hub->nick_valid || strcmp(hub->nick_hub, name) != 0) && conf_hub_get(boolean, hub->tab->name, "show_joinquit"))
+    ui_logwindow_printf(hub->tab->log, "%s has joined.", u->name);
   return u;
 }
 
@@ -428,6 +430,8 @@ static void handle_cmd(struct nmdc_hub *hub, const char *cmd) {
     if(u) {
       hub->sharecount--;
       hub->sharesize -= u->sharesize;
+      if(conf_hub_get(boolean, hub->tab->name, "show_joinquit"))
+        ui_logwindow_printf(hub->tab->log, "%s has quit.", u->name);
       g_hash_table_remove(hub->users, nick);
     }
     g_free(nick);

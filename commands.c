@@ -152,10 +152,9 @@ static void set_encoding(char *group, char *key, char *val) {
 }
 
 
-static void set_autoconnect(char *group, char *key, char *val) {
-  if(strcmp(group, "global") == 0 || group[0] != '#')
-    ui_logwindow_add(tab->log, "ERROR: autoconnect can only be used as hub setting.");
-  else if(!val)
+// generic set function for boolean settings that don't require any special attention
+static void set_bool(char *group, char *key, char *val) {
+  if(!val)
     UNSET(group, key);
   else {
     gboolean new = FALSE;
@@ -167,15 +166,24 @@ static void set_autoconnect(char *group, char *key, char *val) {
 }
 
 
+static void set_autoconnect(char *group, char *key, char *val) {
+  if(strcmp(group, "global") == 0 || group[0] != '#')
+    ui_logwindow_add(tab->log, "ERROR: autoconnect can only be used as hub setting.");
+  else
+    set_bool(group, key, val);
+}
+
+
 // the settings list
 // TODO: help text / documentation?
 static struct setting settings[] = {
-  { "autoconnect", NULL, get_bool,   set_autoconnect }, // may not be used in "global"
-  { "connection",  NULL, get_string, set_userinfo },
-  { "description", NULL, get_string, set_userinfo },
-  { "email",       NULL, get_string, set_userinfo },
-  { "encoding",    NULL, get_string, set_encoding },
-  { "nick",        NULL, get_string, set_nick },        // global.nick may not be /unset
+  { "autoconnect",   NULL, get_bool,   set_autoconnect }, // may not be used in "global"
+  { "connection",    NULL, get_string, set_userinfo },
+  { "description",   NULL, get_string, set_userinfo },
+  { "email",         NULL, get_string, set_userinfo },
+  { "encoding",      NULL, get_string, set_encoding },
+  { "nick",          NULL, get_string, set_nick },        // global.nick may not be /unset
+  { "show_joinquit", NULL, get_bool,   set_bool },
   { NULL }
 };
 

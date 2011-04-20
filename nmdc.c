@@ -39,6 +39,7 @@ struct nmdc_user {
   char *conn;
   char *mail;
   guint64 sharesize;
+  GSequenceIter *iter; // used by ui_userlist_*
 }
 
 
@@ -228,6 +229,8 @@ static void user_myinfo(struct nmdc_hub *hub, struct nmdc_user *u, const char *s
     u->sharesize = g_ascii_strtoull(share, NULL, 10);
     g_free(share);
     u->hasinfo = TRUE;
+    if(hub->tab->userlist_tab)
+      ui_userlist_userupdate(hub->tab->userlist_tab, u);
   } else
     g_critical("Don't understand MyINFO string: %s", str);
   g_match_info_free(nfo);

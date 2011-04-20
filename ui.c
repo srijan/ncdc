@@ -45,6 +45,8 @@ struct ui_tab {
   GSequence *users;
   GSequenceIter *user_sel;
   GSequenceIter *user_top;
+  gboolean user_reverse;
+  gboolean user_sort_share;
 };
 
 #endif
@@ -206,17 +208,23 @@ void ui_hub_joinquit(struct ui_tab *tab, gboolean join, struct nmdc_user *user) 
 
 
 
+
 // Userlist tab
 
-// This function should return 0 if and only if a is exactly equal to b
-static gint ui_userlist_sort_func(gconstpointer da, gconstpointer db, gpointer tab) {
+static gint ui_userlist_sort_func(gconstpointer da, gconstpointer db, gpointer dat) {
   const struct nmdc_user *a = da;
   const struct nmdc_user *b = db;
-  // TODO: dynamic ordering (ascending/descending, name/sharesize)
-  int o = g_utf8_collate(a->name, b->name);
+  struct ui_tab *tab = dat;
+  int o = 0;
+  if(!o && tab->user_sort_share)
+    o = a->sharesize > b->sharesize ? 1 : -1;
+  if(!o) // TODO: this is noticably slow on large hubs, cache g_utf8_collate_key()
+    o = g_utf8_collate(a->name, b->name);
   if(!o)
-    o = strcmp(a->name_hub, b->name_hub); // guaranteed to be different for different users
-  return o;
+    o = strcmp(a->name_hub, b->name_hub);
+  if(!o)
+    o = a > b ? 1 : -1;
+  return tab->user_reverse ? -1*o : o;
 }
 
 
@@ -235,7 +243,7 @@ struct ui_tab *ui_userlist_create(struct nmdc_hub *hub) {
   g_hash_table_iter_init(&iter, hub->users);
   struct nmdc_user *u;
   while(g_hash_table_iter_next(&iter, NULL, (gpointer *)&u))
-    g_sequence_insert_sorted(tab->users, u, ui_userlist_sort_func, tab);
+    u->iter = g_sequence_insert_sorted(tab->users, u, ui_userlist_sort_func, tab);
   tab->user_sel = tab->user_top = g_sequence_get_begin_iter(tab->users);
   return tab;
 }
@@ -244,6 +252,9 @@ struct ui_tab *ui_userlist_create(struct nmdc_hub *hub) {
 void ui_userlist_close(struct ui_tab *tab) {
   tab->hub->tab->userlist_tab = NULL;
   ui_tab_remove(tab);
+  // To clean things up, we should also reset all nmdc_user->iter fields. But
+  // this isn't all that necessary since they won't be used anymore until they
+  // get reset in a subsequent ui_userlist_create().
   g_sequence_free(tab->users);
   g_free(tab->name);
   g_free(tab);
@@ -298,8 +309,8 @@ static void ui_userlist_draw(struct ui_tab *tab) {
     row_top = MAX(0, row_last-height+1);
   tab->user_top = g_sequence_get_iter_at_pos(tab->users, row_top);
 
-  n = tab->user_top;
   // TODO: status indicator? (OP/connected/active/passive/whatever)
+  n = tab->user_top;
   i = 2;
   while(i <= winrows-3 && !g_sequence_iter_is_end(n)) {
     struct nmdc_user *user = g_sequence_get(n);
@@ -321,10 +332,12 @@ static void ui_userlist_draw(struct ui_tab *tab) {
     i++;
     n = g_sequence_iter_next(n);
   }
+  // TODO: display user count, share size and some percentage of where we are
 }
 
 
 static void ui_userlist_key(struct ui_tab *tab, struct input_key *key) {
+  gboolean sort = FALSE;
   // page down
   if(key->type == INPT_KEY && key->code == KEY_NPAGE) {
     tab->user_sel = g_sequence_iter_move(tab->user_sel, winrows/2);
@@ -352,6 +365,29 @@ static void ui_userlist_key(struct ui_tab *tab, struct input_key *key) {
   // end
   } else if(key->type == INPT_KEY && key->code == KEY_END) {
     tab->user_sel = g_sequence_iter_prev(g_sequence_get_end_iter(tab->users));
+  // s (order by share asc/desc)
+  } else if(key->type == INPT_CHAR && key->code == 's') {
+    if(tab->user_sort_share)
+      tab->user_reverse = !tab->user_reverse;
+    else
+      tab->user_sort_share = tab->user_reverse = TRUE;
+    sort = TRUE;
+  // n (order by nick asc/desc)
+  } else if(key->type == INPT_CHAR && key->code == 'n') {
+    if(!tab->user_sort_share)
+      tab->user_reverse = !tab->user_reverse;
+    else
+      tab->user_sort_share = tab->user_reverse = FALSE;
+    sort = TRUE;
+  }
+
+  if(sort) {
+    gboolean selisbegin = g_sequence_iter_is_begin(tab->user_sel);
+    g_sequence_sort(tab->users, ui_userlist_sort_func, tab);
+    if(selisbegin)
+      tab->user_sel = g_sequence_get_begin_iter(tab->users);
+    ui_msgf("Ordering by %s (%s)", tab->user_sort_share ? "share size" : "nick",
+      tab->user_reverse ? "descending" : "ascending");
   }
 }
 
@@ -360,27 +396,31 @@ void ui_userlist_joinquit(struct ui_tab *tab, gboolean join, struct nmdc_user *u
   if(join) {
     gboolean topisbegin = g_sequence_iter_is_begin(tab->user_top);
     gboolean selisbegin = g_sequence_iter_is_begin(tab->user_sel);
-    GSequenceIter *iter = g_sequence_insert_sorted(tab->users, user, ui_userlist_sort_func, tab);
+    user->iter = g_sequence_insert_sorted(tab->users, user, ui_userlist_sort_func, tab);
     // update top/sel in case they used to be begin but aren't anymore
     if(topisbegin != g_sequence_iter_is_begin(tab->user_top))
-      tab->user_top = iter;
+      tab->user_top = user->iter;
     if(selisbegin != g_sequence_iter_is_begin(tab->user_sel))
-      tab->user_sel = iter;
+      tab->user_sel = user->iter;
   } else {
-    // g_sequence_lookup() is what we want, but it's too new...
-    GSequenceIter *iter = g_sequence_iter_prev(g_sequence_search(tab->users, user, ui_userlist_sort_func, tab));
+    g_assert(g_sequence_get(user->iter) == (gpointer)user);
     // update top/sel in case we are removing one of them
-    if(iter == tab->user_top)
-      tab->user_top = g_sequence_iter_prev(iter);
-    if(iter == tab->user_top)
-      tab->user_top = g_sequence_iter_next(iter);
-    if(iter == tab->user_sel) {
-      tab->user_sel = g_sequence_iter_next(iter);
+    if(user->iter == tab->user_top)
+      tab->user_top = g_sequence_iter_prev(user->iter);
+    if(user->iter == tab->user_top)
+      tab->user_top = g_sequence_iter_next(user->iter);
+    if(user->iter == tab->user_sel) {
+      tab->user_sel = g_sequence_iter_next(user->iter);
       if(g_sequence_iter_is_end(tab->user_sel))
-        tab->user_sel = g_sequence_iter_prev(iter);
+        tab->user_sel = g_sequence_iter_prev(user->iter);
     }
-    g_sequence_remove(iter);
+    g_sequence_remove(user->iter);
   }
+}
+
+
+void ui_userlist_userupdate(struct ui_tab *tab, struct nmdc_user *user) {
+  g_sequence_sort_changed(user->iter, ui_userlist_sort_func, tab);
 }
 
 

@@ -42,6 +42,7 @@ struct ui_tab;
 struct ui_logwindow;
 struct ui_textinput;
 struct nmdc_hub;
+struct nmdc_user;
 
 
 // include the auto-generated header files

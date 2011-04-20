@@ -468,17 +468,11 @@ static void c_userlist(char *args) {
     ui_logwindow_add(tab->log, "This command does not accept any arguments.");
   else if(tab->type != UIT_HUB)
     ui_logwindow_add(tab->log, "This command can only be used on hub tabs.");
+  else if(tab->userlist_tab)
+    ui_tab_cur = g_list_find(ui_tabs, tab->userlist_tab);
   else {
-    GList *n;
-    for(n=ui_tabs; n; n=n->next) {
-      struct ui_tab *t = n->data;
-      if(t->type == UIT_USERLIST && t->hub == tab->hub)
-        break;
-    }
-    if(n)
-      ui_tab_cur = n;
-    else
-      ui_tab_open(ui_userlist_create(tab->hub));
+    tab->userlist_tab = ui_userlist_create(tab->hub);
+    ui_tab_open(tab->userlist_tab);
   }
 }
 

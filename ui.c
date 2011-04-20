@@ -38,8 +38,10 @@
 struct ui_tab {
   int type; // UIT_ type
   char *name;
-  struct ui_logwindow *log; // MAIN, HUB
-  struct nmdc_hub *hub;     // HUB, USERLIST
+  struct ui_logwindow *log;    // MAIN, HUB
+  struct nmdc_hub *hub;        // HUB, USERLIST
+  struct ui_tab *userlist_tab; // HUB
+  GList *users;                // USERLIST
 };
 
 #endif
@@ -118,12 +120,8 @@ struct ui_tab *ui_hub_create(const char *name) {
 
 void ui_hub_close(ui_tab *tab) {
   // also close the userlist tab, if there is one
-  GList *n;
-  for(n=ui_tabs; n; n=n->next) {
-    struct ui_tab *t = n->data;
-    if(t->type == UIT_USERLIST && t->hub == tab->hub)
-      ui_userlist_close(t);
-  }
+  if(tab->userlist_tab)
+    ui_userlist_close(tab->userlist_tab);
   ui_tab_remove(tab);
 
   nmdc_free(tab->hub);
@@ -187,21 +185,52 @@ static void ui_hub_key(struct ui_tab *tab, struct input_key *key) {
 }
 
 
+void ui_hub_joinquit(struct ui_tab *tab, gboolean join, struct nmdc_user *user) {
+  gboolean log = conf_hub_get(boolean, tab->name, "show_joinquit");
+  if(join) {
+    if(log && (!tab->hub->nick_valid || strcmp(tab->hub->nick_hub, user->name_hub) != 0))
+      ui_logwindow_printf(tab->log, "%s has joined.", user->name);
+  } else {
+    if(log)
+      ui_logwindow_printf(tab->log, "%s has quit.", user->name);
+  }
+
+  if(tab->userlist_tab)
+    ui_userlist_joinquit(tab->userlist_tab, join, user);
+}
+
+
 
 
 // Userlist tab
+
+static gint ui_userlist_sort_func(gconstpointer a, gconstpointer b) {
+  // TODO: dynamic ordering (ascending/descending, name/sharesize)
+  return g_utf8_collate(((struct nmdc_user *)a)->name, ((struct nmdc_user *)b)->name);
+}
+
+
+static void ui_userlist_populate(struct ui_tab *tab) {
+  g_list_free(tab->users);
+  tab->users = g_hash_table_get_values(tab->hub->users);
+  tab->users = g_list_sort(tab->users, ui_userlist_sort_func);
+}
+
 
 struct ui_tab *ui_userlist_create(struct nmdc_hub *hub) {
   struct ui_tab *tab = g_new0(struct ui_tab, 1);
   tab->name = g_strdup_printf("u/%s", hub->tab->name);
   tab->type = UIT_USERLIST;
   tab->hub = hub;
+  ui_userlist_populate(tab);
   return tab;
 }
 
 
 void ui_userlist_close(struct ui_tab *tab) {
+  tab->hub->tab->userlist_tab = NULL;
   ui_tab_remove(tab);
+  g_list_free(tab->users);
   g_free(tab->name);
   g_free(tab);
 }
@@ -238,15 +267,13 @@ static void ui_userlist_draw(struct ui_tab *tab) {
   DRAW_COL(1, i, cw_conn,  "Connection");
   attroff(A_BOLD);
   // rows
-  GHashTableIter iter;
-  g_hash_table_iter_init(&iter, tab->hub->users);
-  struct nmdc_user *user;
-  i = 2;
-  // TODO: dynamic sorting
   // TODO: paging
   // TODO: selecting
   // TODO: status indicator? (OP/connected/active/passive/whatever)
-  while(i <= winrows-3 && g_hash_table_iter_next(&iter, NULL, (gpointer *)&user)) {
+  GList *n = tab->users;
+  i = 2;
+  while(i <= winrows-3 && n) {
+    struct nmdc_user *user = n->data;
     char *tag = user->tag ? g_strdup_printf("<%s>", user->tag) : NULL;
     int j=0;
     DRAW_COL(i, j, cw_user,  user->name);
@@ -257,7 +284,20 @@ static void ui_userlist_draw(struct ui_tab *tab) {
     DRAW_COL(i, j, cw_conn,  user->conn?user->conn:"");
     g_free(tag);
     i++;
+    n = n->next;
   }
+}
+
+
+void ui_userlist_joinquit(struct ui_tab *tab, gboolean join, struct nmdc_user *user) {
+  // Both of these are O(n) operations. I'd rather use a O(log n) data
+  // structure, but glib doesn't provide one which has otherwise the same
+  // properties as a list. The _remove() can be made O(1) by caching its GList
+  // pointer in the nmdc_user struct, but meh... :-/
+  if(join)
+    tab->users = g_list_insert_sorted(tab->users, user, ui_userlist_sort_func);
+  else
+    tab->users = g_list_remove(tab->users, user);
 }
 
 

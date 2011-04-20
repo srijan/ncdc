@@ -244,6 +244,19 @@ int str_columns(const char *str) {
 }
 
 
+// returns the byte offset to the last character in str (UTF-8) that does not
+// fit within col columns.
+int str_offset_from_columns(const char *str, int col) {
+  const char *ostr = str;
+  int w = 0;
+  while(*str && w < col) {
+    w += gunichar_width(g_utf8_get_char(str));
+    str = g_utf8_next_char(str);
+  }
+  return str-ostr;
+}
+
+
 // Stolen from ncdu (with small modifications)
 // Result is stored in an internal buffer.
 char *str_formatsize(guint64 size) {

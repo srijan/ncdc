@@ -212,6 +212,55 @@ static char *ui_userlist_title(struct ui_tab *tab) {
 }
 
 
+#define DRAW_COL(row, colvar, width, str) do {\
+    mvaddnstr(row, colvar, str, str_offset_from_columns(str, width-1));\
+    colvar += width;\
+  } while(0)
+
+static void ui_userlist_draw(struct ui_tab *tab) {
+  // column widths
+  // TODO: dynamically show/hide columns (or change widths, but that's more work and perhaps not very intuitive)
+  int cw_user = 20;
+  int cw_share = 12;
+  int cw_conn = 15;
+  int i = wincols-cw_user-cw_share-cw_conn;
+  int cw_desc = i*3/12;
+  int cw_tag = i*6/12;
+  int cw_mail = i-cw_desc-cw_tag;
+  // header
+  i = 0;
+  attron(A_BOLD);
+  DRAW_COL(1, i, cw_user,  "Username");
+  DRAW_COL(1, i, cw_share, "Share");
+  DRAW_COL(1, i, cw_desc,  "Description");
+  DRAW_COL(1, i, cw_tag,   "Tag");
+  DRAW_COL(1, i, cw_mail,  "E-Mail");
+  DRAW_COL(1, i, cw_conn,  "Connection");
+  attroff(A_BOLD);
+  // rows
+  GHashTableIter iter;
+  g_hash_table_iter_init(&iter, tab->hub->users);
+  struct nmdc_user *user;
+  i = 2;
+  // TODO: dynamic sorting
+  // TODO: paging
+  // TODO: selecting
+  // TODO: status indicator? (OP/connected/active/passive/whatever)
+  while(i <= winrows-3 && g_hash_table_iter_next(&iter, NULL, (gpointer *)&user)) {
+    char *tag = user->tag ? g_strdup_printf("<%s>", user->tag) : NULL;
+    int j=0;
+    DRAW_COL(i, j, cw_user,  user->name);
+    DRAW_COL(i, j, cw_share, user->hasinfo ? str_formatsize(user->sharesize) : "");
+    DRAW_COL(i, j, cw_desc,  user->desc?user->desc:"");
+    DRAW_COL(i, j, cw_tag,   tag?tag:"");
+    DRAW_COL(i, j, cw_mail,  user->mail?user->mail:"");
+    DRAW_COL(i, j, cw_conn,  user->conn?user->conn:"");
+    g_free(tag);
+    i++;
+  }
+}
+
+
 
 
 // Generic message displaying thing.
@@ -351,8 +400,9 @@ void ui_draw() {
 
   // tab contents
   switch(curtab->type) {
-  case UIT_MAIN: ui_main_draw(); break;
-  case UIT_HUB:  ui_hub_draw(curtab);  break;
+  case UIT_MAIN:     ui_main_draw(); break;
+  case UIT_HUB:      ui_hub_draw(curtab);  break;
+  case UIT_USERLIST: ui_userlist_draw(curtab);  break;
   }
 
   refresh();
@@ -411,5 +461,7 @@ void ui_input(struct input_key *key) {
     case UIT_HUB:  ui_hub_key(curtab, key); break;
     }
   }
+
+  // TODO: some user feedback on invalid key
 }
 

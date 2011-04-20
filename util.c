@@ -93,6 +93,7 @@ void conf_init() {
   int lock_fd = g_open(lock_file, O_WRONLY|O_CREAT, 0600);
   if(lock_fd < 0 || flock(lock_fd, LOCK_EX|LOCK_NB))
     g_error("Unable to open lock file. Is another instance of ncdc running with the same configuration directory?");
+  g_free(lock_file);
   // Don't close the above file. Keep it open and let the OS close it (and free
   // the lock) when ncdc is closed, was killed or has crashed.
 

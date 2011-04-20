@@ -189,7 +189,7 @@ static struct setting settings[] = {
 
 
 // get a setting by name
-static inline struct setting *getsetting(const char *name) {
+static struct setting *getsetting(const char *name) {
   struct setting *s;
   for(s=settings; s->name; s++)
     if(strcmp(s->name, name) == 0)
@@ -198,7 +198,7 @@ static inline struct setting *getsetting(const char *name) {
 }
 
 
-static inline gboolean parsesetting(char *name, char **group, char **key, struct setting **s, gboolean *checkalt) {
+static gboolean parsesetting(char *name, char **group, char **key, struct setting **s, gboolean *checkalt) {
   char *sep;
 
   *key = name;
@@ -308,7 +308,7 @@ static void c_unset(char *args) {
 
 // get a command by name. performs a linear search. can be rewritten to use a
 // binary search, but I doubt the performance difference really matters.
-static inline struct cmd *getcmd(const char *name) {
+static struct cmd *getcmd(const char *name) {
   struct cmd *c;
   for(c=cmds; c->f; c++)
     if(strcmp(c->name, name) == 0)

@@ -41,7 +41,10 @@ struct ui_tab {
   struct ui_logwindow *log;    // MAIN, HUB
   struct nmdc_hub *hub;        // HUB, USERLIST
   struct ui_tab *userlist_tab; // HUB
-  GSequence *users;            // USERLIST
+  // USERLIST
+  GSequence *users;
+  GSequenceIter *user_sel;
+  GSequenceIter *user_top;
 };
 
 #endif
@@ -233,6 +236,7 @@ struct ui_tab *ui_userlist_create(struct nmdc_hub *hub) {
   struct nmdc_user *u;
   while(g_hash_table_iter_next(&iter, NULL, (gpointer *)&u))
     g_sequence_insert_sorted(tab->users, u, ui_userlist_sort_func, tab);
+  tab->user_sel = tab->user_top = g_sequence_get_begin_iter(tab->users);
   return tab;
 }
 
@@ -276,22 +280,43 @@ static void ui_userlist_draw(struct ui_tab *tab) {
   DRAW_COL(1, i, cw_mail,  "E-Mail");
   DRAW_COL(1, i, cw_conn,  "Connection");
   attroff(A_BOLD);
-  // rows
-  // TODO: paging
-  // TODO: selecting
+
+  // get or update the top row to make sure sel is visible
+  GSequenceIter *n;
+  int height = winrows-4;
+  int row_last = g_sequence_iter_get_position(g_sequence_get_end_iter(tab->users))-1;
+  int row_top = g_sequence_iter_get_position(tab->user_top);
+  int row_sel = g_sequence_iter_get_position(tab->user_sel);
+  // sel is before top? top = sel!
+  if(row_top > row_sel)
+    row_top = row_sel;
+  // otherwise, is it out of the screen? top = sel - height
+  else if(row_top <= row_sel-height)
+    row_top = row_sel-height+1;
+  // make sure there are no empty lines when len > height
+  if(row_top && row_top+height+1 > row_last)
+    row_top = MAX(0, row_last-height+1);
+  tab->user_top = g_sequence_get_iter_at_pos(tab->users, row_top);
+
+  n = tab->user_top;
   // TODO: status indicator? (OP/connected/active/passive/whatever)
-  GSequenceIter *n = g_sequence_get_begin_iter(tab->users);
   i = 2;
   while(i <= winrows-3 && !g_sequence_iter_is_end(n)) {
     struct nmdc_user *user = g_sequence_get(n);
     char *tag = user->tag ? g_strdup_printf("<%s>", user->tag) : NULL;
     int j=0;
+    if(n == tab->user_sel) {
+      attron(A_REVERSE);
+      mvhline(i, 0, ' ', wincols);
+    }
     DRAW_COL(i, j, cw_user,  user->name);
     DRAW_COL(i, j, cw_share, user->hasinfo ? str_formatsize(user->sharesize) : "");
     DRAW_COL(i, j, cw_desc,  user->desc?user->desc:"");
     DRAW_COL(i, j, cw_tag,   tag?tag:"");
     DRAW_COL(i, j, cw_mail,  user->mail?user->mail:"");
     DRAW_COL(i, j, cw_conn,  user->conn?user->conn:"");
+    if(n == tab->user_sel)
+      attroff(A_REVERSE);
     g_free(tag);
     i++;
     n = g_sequence_iter_next(n);
@@ -299,13 +324,65 @@ static void ui_userlist_draw(struct ui_tab *tab) {
 }
 
 
-void ui_userlist_joinquit(struct ui_tab *tab, gboolean join, struct nmdc_user *user) {
-  if(join)
-    g_sequence_insert_sorted(tab->users, user, ui_userlist_sort_func, tab);
-  else
-    // g_sequence_lookup() is what we want, but it's too new...
-    g_sequence_remove(g_sequence_iter_prev(g_sequence_search(tab->users, user, ui_userlist_sort_func, tab)));
+static void ui_userlist_key(struct ui_tab *tab, struct input_key *key) {
+  // page down
+  if(key->type == INPT_KEY && key->code == KEY_NPAGE) {
+    tab->user_sel = g_sequence_iter_move(tab->user_sel, winrows/2);
+    if(g_sequence_iter_is_end(tab->user_sel))
+      tab->user_sel = g_sequence_iter_prev(tab->user_sel);
+  // page up
+  } else if(key->type == INPT_KEY && key->code == KEY_PPAGE) {
+    tab->user_sel = g_sequence_iter_move(tab->user_sel, -winrows/2);
+    // workaround for https://bugzilla.gnome.org/show_bug.cgi?id=648313
+    if(g_sequence_iter_is_end(tab->user_sel))
+      tab->user_sel = g_sequence_get_begin_iter(tab->users);
+  // item down
+  } else if((key->type == INPT_KEY && key->code == KEY_DOWN)
+      || (key->type == INPT_CHAR && key->code == 'j')) {
+    tab->user_sel = g_sequence_iter_next(tab->user_sel);
+    if(g_sequence_iter_is_end(tab->user_sel))
+      tab->user_sel = g_sequence_iter_prev(tab->user_sel);
+  // item up
+  } else if((key->type == INPT_KEY && key->code == KEY_UP)
+      || (key->type == INPT_CHAR && key->code == 'k')) {
+    tab->user_sel = g_sequence_iter_prev(tab->user_sel);
+  // home
+  } else if(key->type == INPT_KEY && key->code == KEY_HOME) {
+    tab->user_sel = g_sequence_get_begin_iter(tab->users);
+  // end
+  } else if(key->type == INPT_KEY && key->code == KEY_END) {
+    tab->user_sel = g_sequence_iter_prev(g_sequence_get_end_iter(tab->users));
+  }
 }
+
+
+void ui_userlist_joinquit(struct ui_tab *tab, gboolean join, struct nmdc_user *user) {
+  if(join) {
+    gboolean topisbegin = g_sequence_iter_is_begin(tab->user_top);
+    gboolean selisbegin = g_sequence_iter_is_begin(tab->user_sel);
+    GSequenceIter *iter = g_sequence_insert_sorted(tab->users, user, ui_userlist_sort_func, tab);
+    // update top/sel in case they used to be begin but aren't anymore
+    if(topisbegin != g_sequence_iter_is_begin(tab->user_top))
+      tab->user_top = iter;
+    if(selisbegin != g_sequence_iter_is_begin(tab->user_sel))
+      tab->user_sel = iter;
+  } else {
+    // g_sequence_lookup() is what we want, but it's too new...
+    GSequenceIter *iter = g_sequence_iter_prev(g_sequence_search(tab->users, user, ui_userlist_sort_func, tab));
+    // update top/sel in case we are removing one of them
+    if(iter == tab->user_top)
+      tab->user_top = g_sequence_iter_prev(iter);
+    if(iter == tab->user_top)
+      tab->user_top = g_sequence_iter_next(iter);
+    if(iter == tab->user_sel) {
+      tab->user_sel = g_sequence_iter_next(iter);
+      if(g_sequence_iter_is_end(tab->user_sel))
+        tab->user_sel = g_sequence_iter_prev(iter);
+    }
+    g_sequence_remove(iter);
+  }
+}
+
 
 
 
@@ -504,8 +581,9 @@ void ui_input(struct input_key *key) {
   // let tab handle it
   } else {
     switch(curtab->type) {
-    case UIT_MAIN: ui_main_key(key); break;
-    case UIT_HUB:  ui_hub_key(curtab, key); break;
+    case UIT_MAIN:     ui_main_key(key); break;
+    case UIT_HUB:      ui_hub_key(curtab, key); break;
+    case UIT_USERLIST: ui_userlist_key(curtab, key); break;
     }
   }
 

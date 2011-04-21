@@ -47,6 +47,10 @@ struct ui_tab {
   GSequenceIter *user_top;
   gboolean user_reverse;
   gboolean user_sort_share;
+  gboolean user_hide_desc;
+  gboolean user_hide_tag;
+  gboolean user_hide_mail;
+  gboolean user_hide_conn;
 };
 
 #endif
@@ -211,6 +215,7 @@ void ui_hub_joinquit(struct ui_tab *tab, gboolean join, struct nmdc_user *user) 
 
 // Userlist tab
 
+// TODO: sort OPs before normal users?
 static gint ui_userlist_sort_func(gconstpointer da, gconstpointer db, gpointer dat) {
   const struct nmdc_user *a = da;
   const struct nmdc_user *b = db;
@@ -267,20 +272,23 @@ static char *ui_userlist_title(struct ui_tab *tab) {
 
 
 #define DRAW_COL(row, colvar, width, str) do {\
-    mvaddnstr(row, colvar, str, str_offset_from_columns(str, width-1));\
+    if(width > 1)\
+      mvaddnstr(row, colvar, str, str_offset_from_columns(str, width-1));\
     colvar += width;\
   } while(0)
 
+// TODO: some way of letting the user know what keys can be pressed
 static void ui_userlist_draw(struct ui_tab *tab) {
-  // column widths
-  // TODO: dynamically show/hide columns (or change widths, but that's more work and perhaps not very intuitive)
-  int cw_user = 20;
+  // column widths (this is a trial-and-error-whatever-looks-right algorithm)
+  int num = 2 + (tab->user_hide_conn?0:1) + (tab->user_hide_desc?0:1) + (tab->user_hide_tag?0:1) + (tab->user_hide_mail?0:1);
+  int cw_user = MAX(20, (wincols*6)/(num*10));
   int cw_share = 12;
-  int cw_conn = 15;
-  int i = wincols-cw_user-cw_share-cw_conn;
-  int cw_desc = i*3/12;
-  int cw_tag = i*6/12;
-  int cw_mail = i-cw_desc-cw_tag;
+  int i = wincols-cw_user-cw_share; num -= 2; // remaining number of columns
+  int cw_conn = tab->user_hide_conn ? 0 : (i*6)/(num*10);
+  int cw_desc = tab->user_hide_desc ? 0 : (i*10)/(num*10);
+  int cw_mail = tab->user_hide_mail ? 0 : (i*7)/(num*10);
+  int cw_tag  = tab->user_hide_tag  ? 0 : i-cw_conn-cw_desc-cw_mail;
+
   // header
   i = 0;
   attron(A_BOLD);
@@ -384,14 +392,28 @@ static void ui_userlist_key(struct ui_tab *tab, struct input_key *key) {
     else
       tab->user_sort_share = tab->user_reverse = TRUE;
     sort = TRUE;
-  // n (order by nick asc/desc)
-  } else if(key->type == INPT_CHAR && key->code == 'n') {
+  // u (order by username asc/desc)
+  } else if(key->type == INPT_CHAR && key->code == 'u') {
     if(!tab->user_sort_share)
       tab->user_reverse = !tab->user_reverse;
     else
       tab->user_sort_share = tab->user_reverse = FALSE;
     sort = TRUE;
+  // d (toggle description visibility)
+  } else if(key->type == INPT_CHAR && key->code == 'd') {
+    tab->user_hide_desc = !tab->user_hide_desc;
+  // t (toggle tag visibility)
+  } else if(key->type == INPT_CHAR && key->code == 't') {
+    tab->user_hide_tag = !tab->user_hide_tag;
+  // e (toggle e-mail visibility)
+  } else if(key->type == INPT_CHAR && key->code == 'e') {
+    tab->user_hide_mail = !tab->user_hide_mail;
+  // c (toggle connection visibility)
+  } else if(key->type == INPT_CHAR && key->code == 'c') {
+    tab->user_hide_conn = !tab->user_hide_conn;
   }
+
+  // TODO: some way to save the column visibility? per hub? global default?
 
   if(sort) {
     gboolean selisbegin = g_sequence_iter_is_begin(tab->user_sel);

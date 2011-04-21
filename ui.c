@@ -294,8 +294,8 @@ static void ui_userlist_draw(struct ui_tab *tab) {
 
   // get or update the top row to make sure sel is visible
   GSequenceIter *n;
-  int height = winrows-4;
-  int row_last = g_sequence_iter_get_position(g_sequence_get_end_iter(tab->users))-1;
+  int height = winrows-5;
+  int row_last = g_sequence_iter_get_position(g_sequence_get_end_iter(tab->users));
   int row_top = g_sequence_iter_get_position(tab->user_top);
   int row_sel = g_sequence_iter_get_position(tab->user_sel);
   // sel is before top? top = sel!
@@ -305,14 +305,14 @@ static void ui_userlist_draw(struct ui_tab *tab) {
   else if(row_top <= row_sel-height)
     row_top = row_sel-height+1;
   // make sure there are no empty lines when len > height
-  if(row_top && row_top+height+1 > row_last)
-    row_top = MAX(0, row_last-height+1);
+  if(row_top && row_top+height > row_last)
+    row_top = MAX(0, row_last-height);
   tab->user_top = g_sequence_get_iter_at_pos(tab->users, row_top);
 
   // TODO: status indicator? (OP/connected/active/passive/whatever)
   n = tab->user_top;
   i = 2;
-  while(i <= winrows-3 && !g_sequence_iter_is_end(n)) {
+  while(i <= winrows-4 && !g_sequence_iter_is_end(n)) {
     struct nmdc_user *user = g_sequence_get(n);
     char *tag = user->tag ? g_strdup_printf("<%s>", user->tag) : NULL;
     int j=0;
@@ -332,7 +332,19 @@ static void ui_userlist_draw(struct ui_tab *tab) {
     i++;
     n = g_sequence_iter_next(n);
   }
-  // TODO: display user count, share size and some percentage of where we are
+
+  // footer
+  attron(A_BOLD);
+  int count = g_hash_table_size(tab->hub->users);
+  mvaddstr(winrows-3, 0, "Totals:");
+  char *tmp = g_strdup_printf("%s%c   %d users",
+    str_formatsize(tab->hub->sharesize), tab->hub->sharecount == count ? ' ' : '+', count);
+  mvaddstr(winrows-3, cw_user, tmp);
+  g_free(tmp);
+  tmp = g_strdup_printf("%3d%%", MIN(100, (row_top+height)*100/row_last));
+  mvaddstr(winrows-3, wincols-6, tmp);
+  g_free(tmp);
+  attroff(A_BOLD);
 }
 
 

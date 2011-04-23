@@ -38,6 +38,7 @@
 // forward declaration for data types
 // (some of these remain incomplete, others are defined in interfaces)
 struct input_key;
+struct fl_list;
 struct ui_tab;
 struct ui_logwindow;
 struct ui_textinput;
@@ -48,6 +49,7 @@ struct nmdc_user;
 // include the auto-generated header files
 #include "main.h"
 #include "commands.h"
+#include "filelist.h"
 #include "util.h"
 #include "ui.h"
 #include "ui_util.h"

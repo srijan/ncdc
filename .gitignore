@@ -15,6 +15,7 @@ stamp-h1
 *.o
 main.h
 commands.h
+filelist.h
 util.h
 ui.h
 ui_util.h

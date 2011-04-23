@@ -274,3 +274,37 @@ char *str_formatsize(guint64 size) {
   return dat;
 }
 
+
+
+
+// from[24] (binary) -> to[39] (ascii - no padding zero will be added)
+void base32_encode(const char *from, char *to) {
+  static char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  int i, bits = 0, idx = 0, value = 0;
+  for(i=0; i<24; i++) {
+    value = (value << 8) | from[i];
+    bits += 8;
+    while(bits > 5) {
+      to[idx++] = alphabet[(value >> (bits-5)) & 0x1F];
+      bits -= 5;
+    }
+  }
+  if(bits > 0)
+    to[idx++] = alphabet[(value << (5-bits)) & 0x1F];
+}
+
+
+// from[39] (ascii) -> to[24] (binary)
+void base32_decode(const char *from, char *to) {
+  int i, bits = 0, idx = 0, value = 0;
+  for(i=0; i<39; i++) {
+    value = (value << 5) | (from[i] <= '9' ? (26+(from[i]-'2')) : from[i]-'A');
+    bits += 5;
+    while(bits > 8) {
+      to[idx++] = (value >> (bits-8)) & 0xFF;
+      value >>= 8;
+      bits -= 8;
+    }
+  }
+}
+

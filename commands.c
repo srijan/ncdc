@@ -480,7 +480,7 @@ static void c_userlist(char *args) {
 // the actual command list (cmds is an alias to this, set by cmd_handle())
 static struct cmd cmds_list[] = {
   { "clear", c_clear,
-    NULL, "Clear the display\n",
+    NULL, "Clear the display",
     "Clears the log displayed on the screen. Does not affect the log files in any way.\n"
     "Ctrl+l is a shortcut for this command."
   },

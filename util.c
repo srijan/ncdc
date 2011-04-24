@@ -282,7 +282,7 @@ void base32_encode(const char *from, char *to) {
   static char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
   int i, bits = 0, idx = 0, value = 0;
   for(i=0; i<24; i++) {
-    value = (value << 8) | from[i];
+    value = (value << 8) | (unsigned char)from[i];
     bits += 8;
     while(bits > 5) {
       to[idx++] = alphabet[(value >> (bits-5)) & 0x1F];
@@ -302,7 +302,6 @@ void base32_decode(const char *from, char *to) {
     bits += 5;
     while(bits > 8) {
       to[idx++] = (value >> (bits-8)) & 0xFF;
-      value >>= 8;
       bits -= 8;
     }
   }

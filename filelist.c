@@ -31,6 +31,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <libxml/xmlreader.h>
+#include <libxml/xmlwriter.h>
 #include <bzlib.h>
 
 
@@ -59,7 +60,7 @@ struct fl_list {
   struct fl_list *parent;
   GSequence *sub;
   guint64 size;   // including sub-items
-  time_t lastmod; // only used for own list. for dirs: lastmod = min(sub->lastmod)
+  time_t lastmod; // only used for own list. for dirs: lastmod = max(sub->lastmod)
   gboolean isfile : 1;
   gboolean hastth : 1; // "iscomplete" for directories
   char tth[24];
@@ -85,7 +86,7 @@ void fl_list_free(gpointer dat) {
 
 // Read filelist from an xml file
 
-struct fl_load_context {
+struct fl_loadsave_context {
   char *file;
   BZFILE *fh_bz;
   FILE *fh_f;
@@ -95,7 +96,7 @@ struct fl_load_context {
 
 
 static int fl_load_input(void *context, char *buf, int len) {
-  struct fl_load_context *xc = context;
+  struct fl_loadsave_context *xc = context;
   if(xc->stream_end)
     return 0;
   int bzerr;
@@ -111,7 +112,7 @@ static int fl_load_input(void *context, char *buf, int len) {
 
 
 static int fl_load_close(void *context) {
-  struct fl_load_context *xc = context;
+  struct fl_loadsave_context *xc = context;
   int bzerr;
   BZ2_bzReadClose(&bzerr, xc->fh_bz);
   fclose(xc->fh_f);
@@ -120,7 +121,7 @@ static int fl_load_close(void *context) {
 
 
 static void fl_load_error(void *arg, const char *msg, xmlParserSeverities severity, xmlTextReaderLocatorPtr locator) {
-  struct fl_load_context *xc = arg;
+  struct fl_loadsave_context *xc = arg;
   if(severity == XML_PARSER_SEVERITY_VALIDITY_WARNING || severity == XML_PARSER_SEVERITY_WARNING)
     g_warning("XML parse warning in %s line %d: %s", xc->file, xmlTextReaderLocatorLineNumber(locator), msg);
   else if(xc->err && !*(xc->err))
@@ -182,7 +183,7 @@ static int fl_load_handle(xmlTextReaderPtr reader, gboolean *havefl, gboolean *n
         return -1;
       }
       tmp = g_new0(struct fl_list, 1);
-      tmp->name = g_strdup(attr[0]);
+      tmp->name = g_strdup(attr[0]); // TODO: check for UTF-8? or does libxml2 already do this?
       tmp->isfile = TRUE;
       tmp->size = g_ascii_strtoull(attr[1], NULL, 10);
       tmp->hastth = TRUE;
@@ -223,7 +224,7 @@ struct fl_list *fl_load(const char *file, GError **err) {
   gboolean isbz2 = strlen(file) > 4 && strcmp(file+(strlen(file)-4), ".bz2") == 0;
   xmlTextReaderPtr reader;
 
-  struct fl_load_context xc;
+  struct fl_loadsave_context xc;
   xc.stream_end = FALSE;
   xc.err = err;
 
@@ -269,8 +270,127 @@ struct fl_list *fl_load(const char *file, GError **err) {
 
   // close (ignoring errors)
   xmlTextReaderClose(reader);
+  // TODO: check whether we need to free() something as well. Documentation is unclear on this.
 
   return root;
+}
+
+
+
+
+
+// Save a filelist to a .xml(.bz?) file
+
+static int fl_save_write(void *context, const char *buf, int len) {
+  struct fl_loadsave_context *xc = context;
+  int bzerr;
+  BZ2_bzWrite(&bzerr, xc->fh_bz, (char *)buf, len);
+  if(bzerr == BZ_OK)
+    return len;
+  if(bzerr == BZ_IO_ERROR) {
+    g_set_error_literal(xc->err, 1, 0, "bzip2 write error.");
+    return -1;
+  }
+  g_return_val_if_reached(-1);
+}
+
+
+static int fl_save_close(void *context) {
+  struct fl_loadsave_context *xc = context;
+  int bzerr;
+  BZ2_bzWriteClose(&bzerr, xc->fh_bz, 0, NULL, NULL);
+  fclose(xc->fh_f);
+  return 0;
+}
+
+
+// recursive
+static gboolean fl_save_childs(xmlTextWriterPtr writer, struct fl_list *fl) {
+  GSequenceIter *iter;
+  for(iter=g_sequence_get_begin_iter(fl->sub); !g_sequence_iter_is_end(iter); iter=g_sequence_iter_next(iter)) {
+    struct fl_list *cur = g_sequence_get(iter);
+#define CHECKFAIL(f) if(f < 0) return FALSE
+    if(cur->isfile && cur->hastth) {
+      char tth[40];
+      base32_encode(cur->tth, tth);
+      tth[39] = 0;
+      CHECKFAIL(xmlTextWriterStartElement(writer, (xmlChar *)"File"));
+      CHECKFAIL(xmlTextWriterWriteAttribute(writer, (xmlChar *)"Name", (xmlChar *)cur->name));
+      CHECKFAIL(xmlTextWriterWriteFormatAttribute(writer, (xmlChar *)"Size", "%"G_GUINT64_FORMAT, cur->size));
+      CHECKFAIL(xmlTextWriterWriteAttribute(writer, (xmlChar *)"TTH", (xmlChar *)tth));
+      CHECKFAIL(xmlTextWriterEndElement(writer));
+    }
+    if(!cur->isfile) {
+      CHECKFAIL(xmlTextWriterStartElement(writer, (xmlChar *)"Directory"));
+      CHECKFAIL(xmlTextWriterWriteAttribute(writer, (xmlChar *)"Name", (xmlChar *)cur->name));
+      if(!cur->hastth)
+        CHECKFAIL(xmlTextWriterWriteAttribute(writer, (xmlChar *)"Incomplete", (xmlChar *)"1"));
+      fl_save_childs(writer, cur);
+      CHECKFAIL(xmlTextWriterEndElement(writer));
+    }
+#undef CHECKFAIL
+  }
+  return TRUE;
+}
+
+
+gboolean fl_save(struct fl_list *fl, const char *file, GError **err) {
+  g_return_val_if_fail(err == NULL || *err == NULL, FALSE);
+
+  // open the file
+  gboolean isbz2 = strlen(file) > 4 && strcmp(file+(strlen(file)-4), ".bz2") == 0;
+  xmlTextWriterPtr writer;
+
+  struct fl_loadsave_context xc;
+  xc.err = err;
+
+  if(isbz2) {
+    xc.fh_f = fopen(file, "w");
+    if(!xc.fh_f) {
+      g_set_error_literal(err, 0, 0, g_strerror(errno));
+      return FALSE;
+    }
+    int bzerr;
+    xc.fh_bz = BZ2_bzWriteOpen(&bzerr, xc.fh_f, 7, 0, 0);
+    g_return_val_if_fail(bzerr == BZ_OK, FALSE);
+    writer = xmlNewTextWriter(xmlOutputBufferCreateIO(fl_save_write, fl_save_close, &xc, NULL));
+  } else
+    writer = xmlNewTextWriterFilename(file, 0);
+
+  if(!writer) {
+    if(err && !*err)
+      g_set_error_literal(err, 1, 0, "Failed to open file.");
+    return FALSE;
+  }
+
+  // write
+  gboolean success = TRUE;
+#define CHECKFAIL(f) if((f) < 0) { success = FALSE; goto fl_save_error; }
+  CHECKFAIL(xmlTextWriterSetIndent(writer, 1));
+  CHECKFAIL(xmlTextWriterSetIndentString(writer, (xmlChar *)"\t"));
+  // <FileListing ..>
+  CHECKFAIL(xmlTextWriterStartDocument(writer, NULL, "utf-8", "yes"));
+  CHECKFAIL(xmlTextWriterStartElement(writer, (xmlChar *)"FileListing"));
+  CHECKFAIL(xmlTextWriterWriteAttribute(writer, (xmlChar *)"Version", (xmlChar *)"1"));
+  CHECKFAIL(xmlTextWriterWriteAttribute(writer, (xmlChar *)"Generator", (xmlChar *)PACKAGE_STRING));
+  CHECKFAIL(xmlTextWriterWriteAttribute(writer, (xmlChar *)"Base", (xmlChar *)"/"));
+  // TODO: generate a proper CID
+  CHECKFAIL(xmlTextWriterWriteAttribute(writer, (xmlChar *)"CID", (xmlChar *)"NCDCDOESNOTHAVECIDSUPPORTYET12345678912"));
+
+  // all <Directory ..> elements
+  if(!fl_save_childs(writer, fl)) {
+    success = FALSE;
+    goto fl_save_error;
+  }
+
+  CHECKFAIL(xmlTextWriterEndElement(writer));
+
+  // close
+fl_save_error:
+  xmlTextWriterEndDocument(writer);
+  xmlFreeTextWriter(writer);
+
+  return success;
 }
 
 

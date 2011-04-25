@@ -26,6 +26,9 @@
 
 #include "ncdc.h"
 #include <string.h>
+#include <limits.h>
+#include <stdlib.h>
+#include <errno.h>
 
 
 // currently opened tab, see cmd_handle()
@@ -477,6 +480,92 @@ static void c_userlist(char *args) {
 }
 
 
+static void c_share(char *args) {
+  g_return_if_fail(tab->log);
+  // No arguments: list currently shared dirs
+  if(!args[0]) {
+    gsize len;
+    char **dirs = g_key_file_get_keys(conf_file, "share", &len, NULL);
+    if(!dirs || len == 0)
+      ui_logwindow_add(tab->log, "Nothing shared.");
+    else {
+      ui_logwindow_add(tab->log, "");
+      char **cur;
+      for(cur=dirs; *cur; cur++) {
+        // TODO: display size (and hash status?)
+        char *d = g_key_file_get_string(conf_file, "share", *cur, NULL);
+        ui_logwindow_printf(tab->log, " /%s -> %s", *cur, d);
+        g_free(d);
+      }
+      ui_logwindow_add(tab->log, "");
+      g_strfreev(dirs);
+    }
+    return;
+  }
+  // use g_shell_parse_argv() to allow the name to contain a space. (e.g. /share "Kewl Share!" ~/blah)
+  // TODO: only use that quoting stuff for the first argument, and allow the second argument to be unquoted?
+  GError *err = NULL;
+  int argc;
+  char **argv;
+  if(!g_shell_parse_argv(args, &argc, &argv, &err)) {
+    ui_logwindow_printf(tab->log, "Unable to parse arguments: %s", err->message);
+    g_error_free(err);
+    return;
+  }
+  if(argc != 2)
+    ui_logwindow_add(tab->log, "This command requires two arguments. See \"/help share\" for details.");
+  else if(g_key_file_has_key(conf_file, "share", argv[0], NULL))
+    ui_logwindow_add(tab->log, "You have already shared a directory with that name.");
+  else {
+    // TODO: ~ substitution with $HOME?
+    char *path = realpath(argv[1], NULL); // TODO: how many systems support this?
+    if(!path)
+      ui_logwindow_printf(tab->log, "Error obtaining absolute path: %s", g_strerror(errno));
+    else if(!g_file_test(path, G_FILE_TEST_IS_DIR))
+      ui_logwindow_add(tab->log, "Not a directory.");
+    else {
+      // Check whether it (or a subdirectory) is already shared
+      char **dirs = g_key_file_get_keys(conf_file, "share", NULL, NULL);
+      char **dir;
+      for(dir=dirs; *dir; dir++) {
+        char *d = g_key_file_get_string(conf_file, "share", *dir, NULL);
+        if(strncmp(d, path, MIN(strlen(d), strlen(path))) == 0) {
+          g_free(d);
+          break;
+        }
+        g_free(d);
+      }
+      if(*dir)
+        ui_logwindow_printf(tab->log, "Directory already (partly) sbared in /%s", *dir);
+      else {
+        g_key_file_set_string(conf_file, "share", argv[0], path);
+        conf_save();
+        // TODO: scan dir and update share
+        ui_logwindow_printf(tab->log, "Added to share: /%s -> %s", argv[0], path);
+      }
+      g_strfreev(dirs);
+      free(path);
+    }
+  }
+  g_strfreev(argv);
+}
+
+
+static void c_unshare(char *args) {
+  g_return_if_fail(tab->log);
+  if(!args[0])
+    c_share("");
+  else if(!g_key_file_has_key(conf_file, "share", args, NULL))
+    ui_logwindow_add(tab->log, "No shared directory with that name.");
+  else {
+    g_key_file_remove_key(conf_file, "share", args, NULL);
+    conf_save();
+    ui_logwindow_printf(tab->log, "Directory unshared: /%s", args);
+    // TODO: update share
+  }
+}
+
+
 // the actual command list (cmds is an alias to this, set by cmd_handle())
 static struct cmd cmds_list[] = {
   { "clear", c_clear,
@@ -537,10 +626,18 @@ static struct cmd cmds_list[] = {
     "Use /set without arguments to get a list of configuration variables.\n"
     "/set <key> without value will print out the current value."
   },
+  { "share", c_share,
+    "[<name> <directory>]", "Add a directory to your share.",
+    "" // TOOD
+  },
   { "unset", c_unset,
     "<key>", "Unset a configuration variable.",
     "This command will remove any value set with the specified variable.\n"
     "Can be useful to reset a variable back to its global or default value."
+  },
+  { "unshare", c_unshare,
+    "[<name>]", "Remove a directory from your share.",
+    "" // TODO
   },
   { "userlist", c_userlist,
     NULL, "Open the user list.",

@@ -375,7 +375,7 @@ gboolean fl_save(struct fl_list *fl, const char *file, GError **err) {
   CHECKFAIL(xmlTextWriterWriteAttribute(writer, (xmlChar *)"Generator", (xmlChar *)PACKAGE_STRING));
   CHECKFAIL(xmlTextWriterWriteAttribute(writer, (xmlChar *)"Base", (xmlChar *)"/"));
   // TODO: generate a proper CID
-  CHECKFAIL(xmlTextWriterWriteAttribute(writer, (xmlChar *)"CID", (xmlChar *)"NCDCDOESNOTHAVECIDSUPPORTYET12345678912"));
+  CHECKFAIL(xmlTextWriterWriteAttribute(writer, (xmlChar *)"CID", (xmlChar *)"NCDCDOESNOTHAVECIDSUPPORTYET23456723456"));
 
   // all <Directory ..> elements
   if(!fl_save_childs(writer, fl)) {

@@ -420,7 +420,7 @@ static void ui_userlist_key(struct ui_tab *tab, struct input_key *key) {
     g_sequence_sort(tab->users, ui_userlist_sort_func, tab);
     if(selisbegin)
       tab->user_sel = g_sequence_get_begin_iter(tab->users);
-    ui_msgf("Ordering by %s (%s)", tab->user_sort_share ? "share size" : "nick",
+    ui_msgf(FALSE, "Ordering by %s (%s)", tab->user_sort_share ? "share size" : "nick",
       tab->user_reverse ? "descending" : "ascending");
   }
 }
@@ -469,7 +469,7 @@ static gboolean ui_msg_updated = FALSE;
 
 
 static gboolean ui_msg_timeout(gpointer data) {
-  ui_msg(NULL);
+  ui_msg(FALSE, NULL);
   return FALSE;
 }
 
@@ -477,7 +477,7 @@ static gboolean ui_msg_timeout(gpointer data) {
 // a notication message, either displayed in the log of the current tab or, if
 // the hub has no tab, in the "status bar". Calling this function with NULL
 // will reset the status bar message.
-void ui_msg(char *msg) {
+void ui_msg(gboolean global, char *msg) {
   struct ui_tab *tab = ui_tab_cur->data;
   if(ui_msg_text) {
     g_free(ui_msg_text);
@@ -485,9 +485,13 @@ void ui_msg(char *msg) {
     g_source_remove(ui_msg_timer);
     ui_msg_updated = TRUE;
   }
-  if(msg && tab->log)
+  if(!msg)
+    return;
+  if(!global && tab->log)
     ui_logwindow_add(tab->log, msg);
-  else if(msg) {
+  if(global)
+    ui_logwindow_add(ui_main->log, msg);
+  if(global || !tab->log) {
     ui_msg_text = g_strdup(msg);
     ui_msg_timer = g_timeout_add(3000, ui_msg_timeout, NULL);
     ui_msg_updated = TRUE;
@@ -495,12 +499,12 @@ void ui_msg(char *msg) {
 }
 
 
-void ui_msgf(const char *fmt, ...) {
+void ui_msgf(gboolean global, const char *fmt, ...) {
   va_list va;
   va_start(va, fmt);
   char *str = g_strdup_vprintf(fmt, va);
   va_end(va);
-  ui_msg(str);
+  ui_msg(global, str);
   g_free(str);
 }
 

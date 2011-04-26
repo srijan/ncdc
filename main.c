@@ -243,6 +243,7 @@ int main(int argc, char **argv) {
   if(sigaction(SIGWINCH, &act, NULL) < 0)
     g_error("Can't setup SIGWINCH: %s", g_strerror(errno));
 
+  fl_init();
   open_autoconnect();
 
   // init and start main loop

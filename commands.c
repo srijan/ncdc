@@ -321,7 +321,7 @@ static struct cmd *getcmd(const char *name) {
 
 
 static void c_quit(char *args) {
-  ui_msg("Closing ncdc...");
+  ui_msg(FALSE, "Closing ncdc...");
   g_main_loop_quit(main_loop);
 }
 
@@ -447,9 +447,9 @@ static void c_reconnect(char *args) {
 
 static void c_close(char *args) {
   if(args[0])
-    ui_msg("This command does not accept any arguments.");
+    ui_msg(FALSE, "This command does not accept any arguments.");
   else if(tab->type == UIT_MAIN)
-    ui_msg("Main tab cannot be closed.");
+    ui_msg(FALSE, "Main tab cannot be closed.");
   else if(tab->type == UIT_HUB)
     ui_hub_close(tab);
   else if(tab->type == UIT_USERLIST)
@@ -459,7 +459,7 @@ static void c_close(char *args) {
 
 static void c_clear(char *args) {
   if(args[0])
-    ui_msg("This command does not accept any arguments.");
+    ui_msg(FALSE, "This command does not accept any arguments.");
   else if(tab->log)
     ui_logwindow_clear(tab->log);
 }
@@ -527,7 +527,7 @@ static void c_share(char *args) {
       // Check whether it (or a subdirectory) is already shared
       char **dirs = g_key_file_get_keys(conf_file, "share", NULL, NULL);
       char **dir;
-      for(dir=dirs; *dir; dir++) {
+      for(dir=dirs; dirs && *dir; dir++) {
         char *d = g_key_file_get_string(conf_file, "share", *dir, NULL);
         if(strncmp(d, path, MIN(strlen(d), strlen(path))) == 0) {
           g_free(d);
@@ -535,15 +535,16 @@ static void c_share(char *args) {
         }
         g_free(d);
       }
-      if(*dir)
-        ui_logwindow_printf(tab->log, "Directory already (partly) sbared in /%s", *dir);
+      if(dirs && *dir)
+        ui_logwindow_printf(tab->log, "Directory already (partly) shared in /%s", *dir);
       else {
         g_key_file_set_string(conf_file, "share", argv[0], path);
         conf_save();
-        // TODO: scan dir and update share
+        fl_refresh(argv[0]);
         ui_logwindow_printf(tab->log, "Added to share: /%s -> %s", argv[0], path);
       }
-      g_strfreev(dirs);
+      if(dirs)
+        g_strfreev(dirs);
       free(path);
     }
   }
@@ -562,6 +563,20 @@ static void c_unshare(char *args) {
     conf_save();
     ui_logwindow_printf(tab->log, "Directory unshared: /%s", args);
     // TODO: update share
+  }
+}
+
+
+// TODO: refresh a single shared dir (fl_refresh() supports that...)
+// The ability to refresh a single deep subdirectory would be awesome as well,
+// but probably less easy.
+static void c_refresh(char *args) {
+  g_return_if_fail(tab->log);
+  if(args[0])
+    ui_logwindow_add(tab->log, "This command does not accept any arguments.");
+  else {
+    ui_logwindow_add(tab->log, "Refreshing file list...");
+    fl_refresh(NULL);
   }
 }
 
@@ -613,6 +628,10 @@ static struct cmd cmds_list[] = {
     NULL, "Shortcut for /disconnect and /connect",
     "When your nick or the hub encoding have been changed, the new settings will be used after the reconnect."
   },
+  { "refresh", c_refresh,
+    NULL, "Refresh file list.",
+    "" // TODO
+  },
   { "say",  c_say,
     "<message>", "Send a chat message.",
     "You normally don't have to use the /say command explicitely, any command not staring"
@@ -628,7 +647,7 @@ static struct cmd cmds_list[] = {
   },
   { "share", c_share,
     "[<name> <directory>]", "Add a directory to your share.",
-    "" // TOOD
+    "" // TODO
   },
   { "unset", c_unset,
     "<key>", "Unset a configuration variable.",

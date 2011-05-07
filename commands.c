@@ -41,8 +41,8 @@ struct cmd {
   char *sum;
   char *desc;
 };
-// alias to cmd_list, needed to handle the recursive dependency for c_help()
-static struct cmd *cmds;
+// tentative definition of the cmd list
+static struct cmd cmds[];
 
 
 
@@ -581,8 +581,8 @@ static void c_refresh(char *args) {
 }
 
 
-// the actual command list (cmds is an alias to this, set by cmd_handle())
-static struct cmd cmds_list[] = {
+// definition of the command list
+static struct cmd cmds[] = {
   { "clear", c_clear,
     NULL, "Clear the display",
     "Clears the log displayed on the screen. Does not affect the log files in any way.\n"
@@ -679,7 +679,6 @@ void cmd_handle(char *ostr) {
   // "replies" should be sent back to. (This tab is assumed to have a logwindow
   // object - though this assumption can be relaxed in the future)
   tab = ui_tab_cur->data;
-  cmds = cmds_list;
 
   // extract the command from the string
   char *cmd, *args;

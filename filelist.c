@@ -45,19 +45,23 @@ struct fl_list {
   struct fl_list *parent;
   GSequence *sub;
   guint64 size;   // including sub-items
-  time_t lastmod; // only used for own list. for dirs: lastmod = max(sub->lastmod)
-  gboolean isfile : 1;
-  gboolean hastth : 1; // "iscomplete" for directories
   char tth[24];
+  time_t lastmod; // only used for files in own list
+  int hastth;     // for files: 1/0, directories: (number of directories) + (number of files with hastth==1)
+  gboolean isfile : 1;
+  gboolean incomplete : 1; // when a directory is missing files
 };
 
 #endif
 
 // own list
 char *fl_own_list_file;
-struct fl_list *fl_own_list;
+struct fl_list *fl_own_list = NULL;
 
 static GThreadPool *fl_scan_pool;
+static GThreadPool *fl_hash_pool;
+static GSList *fl_hash_queue = NULL; // more like a stack, but hashing order doesn't matter anyway
+static int     fl_hash_reset = 0; // increased every time fl_hash_queue is re-generated
 
 
 
@@ -77,6 +81,9 @@ static void fl_list_free(gpointer dat) {
 }
 
 
+// Must return 0 if and only if a and b are equal, assuming they do reside in
+// the same directory. A name comparison is enough for this. It is assumed that
+// names are case-sensitive.
 static gint fl_list_cmp(gconstpointer a, gconstpointer b, gpointer dat) {
   return strcmp(((struct fl_list *)a)->name, ((struct fl_list *)b)->name);
 }
@@ -85,14 +92,37 @@ static gint fl_list_cmp(gconstpointer a, gconstpointer b, gpointer dat) {
 static void fl_list_add(struct fl_list *parent, struct fl_list *cur) {
   cur->parent = parent;
   g_sequence_insert_sorted(parent->sub, cur, fl_list_cmp, NULL);
-  if(cur->isfile && parent->hastth && !cur->hastth)
-    parent->hastth = FALSE;
-  // update parents size & lastmod
+  if(!cur->isfile || (cur->isfile && cur->hastth))
+    parent->hastth++;
+  // update parents size
   while(parent) {
     parent->size += cur->size;
-    parent->lastmod = MAX(parent->lastmod, cur->lastmod);
     parent = parent->parent;
   }
+}
+
+
+// Removes an item from the file list, making sure to update the parents.
+static void fl_list_remove(struct fl_list *fl) {
+  struct fl_list *par = fl->parent;
+  if(par) {
+    // can't use _lookup(), too new (2.28)
+    GSequenceIter *iter = g_sequence_iter_prev(g_sequence_search(par->sub, fl, fl_list_cmp, NULL));
+    g_assert(!g_sequence_iter_is_end(iter));
+    g_assert(g_sequence_get(iter) == fl);
+    g_sequence_remove(iter);
+
+    // update parent->hastth
+    if(!fl->isfile || (fl->isfile && fl->hastth))
+      par->hastth--;
+  }
+  // update parents size
+  while(par) {
+    par->size -= fl->size;
+    par = par->parent;
+  }
+  // and free
+  fl_list_free(fl);
 }
 
 
@@ -100,12 +130,46 @@ static gboolean fl_has_incomplete(struct fl_list *fl) {
   GSequenceIter *iter;
   for(iter=g_sequence_get_begin_iter(fl->sub); !g_sequence_iter_is_end(iter); iter=g_sequence_iter_next(iter)) {
     struct fl_list *c = g_sequence_get(iter);
-    if(!c->isfile && !c->hastth)
+    if(!c->isfile && (c->incomplete || fl_has_incomplete(c)))
       return TRUE;
-    if(!c->isfile)
-      fl_has_incomplete(c);
   }
   return FALSE;
+}
+
+
+static fl_list *fl_list_copy(struct fl_list *fl) {
+  struct fl_list *cur = g_memdup(fl, sizeof(struct fl_list));
+  cur->name = g_strdup(fl->name);
+  cur->parent = NULL;
+  if(fl->sub) {
+    cur->sub = g_sequence_new(fl_list_free);
+    GSequenceIter *iter;
+    // No need to use _insert_sorted() here, since we walk through the list in
+    // the correct order already.
+    for(iter=g_sequence_get_begin_iter(fl->sub); !g_sequence_iter_is_end(iter); iter=g_sequence_iter_next(iter))
+      g_sequence_append(cur->sub, fl_list_copy(g_sequence_get(iter)));
+  }
+  return cur;
+}
+
+
+// Get full path to an item in our list. Result should be free'd. This function
+// isn't particularly fast.
+static char *fl_own_path(struct fl_list *fl) {
+  char *tmp, *root, *path = g_strdup(fl->name);
+  struct fl_list *cur = fl->parent;
+  while(cur->parent && cur->parent->parent) {
+    tmp = path;
+    path = g_build_filename(cur->name, path, NULL);
+    g_free(tmp);
+    cur = cur->parent;
+  }
+  root = g_key_file_get_string(conf_file, "share", cur->name, NULL);
+  tmp = path;
+  path = g_build_filename(root, path, NULL);
+  g_free(root);
+  g_free(tmp);
+  return path;
 }
 
 
@@ -190,7 +254,7 @@ static int fl_load_handle(xmlTextReaderPtr reader, gboolean *havefl, gboolean *n
       tmp = g_new0(struct fl_list, 1);
       tmp->name = g_strdup(attr[0]);
       tmp->isfile = FALSE;
-      tmp->hastth = !attr[1] || attr[1][0] == '0';
+      tmp->incomplete = attr[1] && attr[1][0] == '1';
       tmp->sub = g_sequence_new(fl_list_free);
       fl_list_add(*newdir ? *cur : (*cur)->parent, tmp);
       *cur = tmp;
@@ -218,7 +282,7 @@ static int fl_load_handle(xmlTextReaderPtr reader, gboolean *havefl, gboolean *n
       tmp->name = g_strdup(attr[0]); // TODO: check for UTF-8? or does libxml2 already do this?
       tmp->isfile = TRUE;
       tmp->size = g_ascii_strtoull(attr[1], NULL, 10);
-      tmp->hastth = TRUE;
+      tmp->hastth = 1;
       base32_decode(attr[2], tmp->tth);
       fl_list_add(*newdir ? *cur : (*cur)->parent, tmp);
       *newdir = FALSE;
@@ -294,7 +358,7 @@ struct fl_list *fl_load(const char *file, GError **err) {
     if(err && !*err) // rather uninformative error message as fallback
       g_set_error_literal(err, 1, 0, "Error parsing or validating XML.");
     fl_list_free(root);
-    return NULL;
+    root = NULL;
   }
 
   // close (ignoring errors)
@@ -352,7 +416,7 @@ static gboolean fl_save_childs(xmlTextWriterPtr writer, struct fl_list *fl) {
     if(!cur->isfile) {
       CHECKFAIL(xmlTextWriterStartElement(writer, (xmlChar *)"Directory"));
       CHECKFAIL(xmlTextWriterWriteAttribute(writer, (xmlChar *)"Name", (xmlChar *)cur->name));
-      if(!cur->hastth)
+      if(cur->incomplete || cur->hastth != g_sequence_iter_get_position(g_sequence_get_end_iter(cur->sub)))
         CHECKFAIL(xmlTextWriterWriteAttribute(writer, (xmlChar *)"Incomplete", (xmlChar *)"1"));
       fl_save_childs(writer, cur);
       CHECKFAIL(xmlTextWriterEndElement(writer));
@@ -529,6 +593,131 @@ static void fl_scan_thread(gpointer data, gpointer udata) {
 
 
 
+// Hashing files
+
+
+// This struct is passed from the main thread to the hasher and back with modifications.
+struct fl_hash_args {
+  struct fl_list *file; // only accessed from main thread
+  char *path;        // owned by main thread, read from hash thread
+  guint64 filesize;  // set by main thread
+  guint64 blocksize; // set by hash thread
+  char root[24];     // set by hash thread
+  char *blocks;      // allocated by hash thread, ownership passed to main
+  GError *err;       // set by hash thread
+  time_t lastmod;    // set by hash thread
+  int resetnum;      // used by main thread to validate that *file is still alive (results are discarded otherwise)
+};
+
+static gboolean fl_hash_done(gpointer dat);
+
+static void fl_hash_thread(gpointer data, gpointer udata) {
+  struct fl_hash_args *args = data;
+  // static, since only one hash thread is allowed and this saves stack space
+  static struct tth_ctx tth;
+  static char buf[10240];
+
+  time(&(args->lastmod));
+
+  FILE *f = NULL;
+  if(!(f = fopen(args->path, "r"))) {
+    g_set_error(&(args->err), 1, 0, "Error reading file: %s", g_strerror(errno));
+    goto fl_hash_finish;
+  }
+
+  tth_init(&tth, args->filesize);
+  int r;
+  // TODO: compare resetnum with fl_hash_reset and back out? otherwise we
+  // may be wasting CPU cycles on hashing data we're only going to discard
+  // anyway.
+  while((r = fread(buf, 1, 10240, f)) > 0) {
+    // file has been modified. time to back out
+    if(tth.totalsize+(guint64)r > args->filesize) {
+      g_set_error_literal(&(args->err), 1, 0, "File has been modified.");
+      goto fl_hash_finish;
+    }
+    tth_update(&tth, buf, r);
+  }
+  if(ferror(f)) {
+    g_set_error(&(args->err), 1, 0, "Error reading file: %s", g_strerror(errno));
+    goto fl_hash_finish;
+  }
+  if(tth.totalsize != args->filesize) {
+    g_set_error_literal(&(args->err), 1, 0, "File has been modified.");
+    goto fl_hash_finish;
+  }
+
+  tth_final(&tth, args->root);
+  args->blocksize = tth.blocksize;
+  g_assert(tth.lastblock == tth_num_blocks(args->filesize, tth.blocksize));
+  args->blocks = g_memdup(tth.blocks, tth.lastblock*24);
+
+fl_hash_finish:
+  if(f)
+    fclose(f);
+  g_idle_add_full(G_PRIORITY_HIGH_IDLE, fl_hash_done, args, NULL);
+}
+
+
+static void fl_hash_process() {
+  if(!fl_hash_queue)
+    return;
+  struct fl_list *file = fl_hash_queue->data;
+  fl_hash_queue = g_slist_remove_link(fl_hash_queue, fl_hash_queue);
+
+  struct fl_hash_args *args = g_new0(struct fl_hash_args, 1);
+  args->file = file;
+  args->path = fl_own_path(file);
+  args->filesize = file->size;
+  args->resetnum = fl_hash_reset;
+  g_thread_pool_push(fl_hash_pool, args, NULL);
+}
+
+
+static gboolean fl_hash_done(gpointer dat) {
+  struct fl_hash_args *args = dat;
+
+  // discard this hash if the queue/filelist has been modified
+  if(fl_hash_reset != args->resetnum)
+    goto fl_hash_done_f;
+
+  if(args->err) {
+    ui_msgf(TRUE, "Error hashing \"%s\": %s", args->path, args->err->message);
+    g_error_free(args->err);
+    goto fl_hash_done_f;
+  }
+
+  // update file info
+  memcpy(args->file->tth, args->root, 24);
+  if(!args->file->hastth)
+    args->file->parent->hastth++;
+  args->file->hastth = 1;
+  args->file->lastmod = args->lastmod;
+  // TODO: save hash data somewhere
+  g_free(args->blocks);
+
+  ui_msgf(TRUE, "Finished hashing %s.", args->file->name); // TODO: display hashing speed
+
+  // TODO: Don't write filelist every time...
+  GError *err = NULL;
+  if(!fl_save(fl_own_list, fl_own_list_file, &err)) {
+    ui_msgf(TRUE, "Error saving file list: %s", err->message);
+    g_error_free(err);
+  }
+
+  // Hash next file in the queue
+  fl_hash_process();
+
+fl_hash_done_f:
+  g_free(args->path);
+  g_free(args);
+  return FALSE;
+}
+
+
+
+
+
 // Own file list management
 
 void fl_init() {
@@ -539,6 +728,7 @@ void fl_init() {
   fl_own_list = NULL;
   fl_own_list_file = g_build_filename(conf_dir, "files.xml.bz2", NULL);
   fl_scan_pool = g_thread_pool_new(fl_scan_thread, NULL, 1, FALSE, NULL);
+  fl_hash_pool = g_thread_pool_new(fl_hash_thread, NULL, 1, FALSE, NULL);
 
   // read config
   char **shares = g_key_file_get_keys(conf_file, "share", NULL, NULL);
@@ -572,16 +762,95 @@ void fl_init() {
 }
 
 
+static void fl_refresh_addhash(struct fl_list *cur) {
+  GSequenceIter *i;
+  for(i=g_sequence_get_begin_iter(cur->sub); !g_sequence_iter_is_end(i); i=g_sequence_iter_next(i)) {
+    struct fl_list *l = g_sequence_get(i);
+    if(l->isfile)
+      fl_hash_queue = g_slist_prepend(fl_hash_queue, l);
+    else
+      fl_refresh_addhash(l);
+  }
+}
+
+
+static void fl_refresh_compare(struct fl_list *own, struct fl_list *new) {
+  GSequenceIter *owni = g_sequence_get_begin_iter(own->sub);
+  GSequenceIter *newi = g_sequence_get_begin_iter(new->sub);
+  while(!g_sequence_iter_is_end(owni) || !g_sequence_iter_is_end(newi)) {
+    struct fl_list *ownl = g_sequence_iter_is_end(owni) ? NULL : g_sequence_get(owni);
+    struct fl_list *newl = g_sequence_iter_is_end(newi) ? NULL : g_sequence_get(newi);
+    int cmp = !ownl ? 1 : !newl ? -1 : fl_list_cmp(ownl, newl, NULL);
+
+    // own == new: same
+    if(cmp == 0) {
+      g_assert(ownl->isfile == newl->isfile); // TODO: handle this case
+      if(ownl->isfile && (!ownl->hastth || newl->lastmod > ownl->lastmod || newl->size != ownl->size))
+        fl_hash_queue = g_slist_prepend(fl_hash_queue, ownl);
+      if(!ownl->isfile)
+        fl_refresh_compare(ownl, newl);
+      owni = g_sequence_iter_next(owni);
+      newi = g_sequence_iter_next(newi);
+
+    // own > new: insert new
+    } else if(cmp > 0) {
+      struct fl_list *tmp = fl_list_copy(newl);
+      fl_list_add(own, tmp);
+      if(tmp->isfile)
+        fl_hash_queue = g_slist_prepend(fl_hash_queue, tmp);
+      else
+        fl_refresh_addhash(tmp);
+      newi = g_sequence_iter_next(newi);
+
+    // new > own: delete own
+    } else {
+      owni = g_sequence_iter_next(owni);
+      if(ownl->isfile && ownl->hastth) {
+        // TODO: remove hash from hash data
+      }
+      fl_list_remove(ownl);
+    }
+  }
+  own->incomplete = FALSE;
+}
+
+/* A visual explanation of the above algorithm:
+ * own new
+ *  a  a  same (new == own; new++, own++)
+ *  b  b  same
+ *  d  c  insert c (!own || new < own; new++, own stays)
+ *  d  d  same
+ *  e  f  delete e (!new || new > own; new stays, own++)
+ *  f  f  same
+ *
+ * More advanced example:
+ *  a  c  delete a
+ *  b  c  delete b
+ *  e  c  insert c
+ *  e  d  insert d
+ *  e  e  same
+ *  f  -  delete f
+ */
+
+
 static gboolean fl_refresh_scanned(gpointer dat) {
   struct fl_list *list = dat;
 
+  fl_hash_reset++;
+  g_slist_free(fl_hash_queue);
+  fl_hash_queue = NULL;
+
   if(!fl_own_list) {
     fl_own_list = list;
-    // TODO: all files have to be hashed
+    fl_refresh_addhash(list);
   } else {
-    // TODO: compare list with fl_own_list and determine which files need to be added/removed/rehashed
+    // TODO: handle partial refreshes
+    fl_refresh_compare(fl_own_list, list);
     fl_list_free(list);
   }
+
+  // initiate hashing (if necessary)
+  fl_hash_process();
 
   // TODO: only save when something changed
   GError *err = NULL;
@@ -595,6 +864,7 @@ static gboolean fl_refresh_scanned(gpointer dat) {
 }
 
 
+// TODO: specifying a dir does not really work yet.
 void fl_refresh(const char *dir) {
   // TODO: allow only one refresh at a time?
 

@@ -540,8 +540,9 @@ static void c_share(char *args) {
       else {
         g_key_file_set_string(conf_file, "share", argv[0], path);
         conf_save();
-        fl_refresh(argv[0]);
+        //TODO: fl_refresh(argv[0]);
         ui_logwindow_printf(tab->log, "Added to share: /%s -> %s", argv[0], path);
+        ui_logwindow_add(tab->log, "Note: Your file list is not refreshed automatically. Use /refresh to update your list after you are done.");
       }
       if(dirs)
         g_strfreev(dirs);
@@ -562,12 +563,13 @@ static void c_unshare(char *args) {
     g_key_file_remove_key(conf_file, "share", args, NULL);
     conf_save();
     ui_logwindow_printf(tab->log, "Directory unshared: /%s", args);
+    ui_logwindow_add(tab->log, "Note: Your file list is not refreshed automatically. Use /refresh to update your list after you are done.");
     // TODO: update share
   }
 }
 
 
-// TODO: refresh a single shared dir (fl_refresh() supports that...)
+// TODO: refresh a single shared dir
 // The ability to refresh a single deep subdirectory would be awesome as well,
 // but probably less easy.
 static void c_refresh(char *args) {

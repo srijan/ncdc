@@ -467,6 +467,8 @@ static char *ui_msg_text = NULL;
 static guint ui_msg_timer;
 static gboolean ui_msg_updated = FALSE;
 
+struct ui_msg_dat { char *msg; gboolean global; };
+
 
 static gboolean ui_msg_timeout(gpointer data) {
   ui_msg(FALSE, NULL);
@@ -474,10 +476,8 @@ static gboolean ui_msg_timeout(gpointer data) {
 }
 
 
-// a notication message, either displayed in the log of the current tab or, if
-// the hub has no tab, in the "status bar". Calling this function with NULL
-// will reset the status bar message.
-void ui_msg(gboolean global, char *msg) {
+static gboolean ui_msg_mainthread(gpointer dat) {
+  struct ui_msg_dat *msg = dat;
   struct ui_tab *tab = ui_tab_cur->data;
   if(ui_msg_text) {
     g_free(ui_msg_text);
@@ -485,17 +485,32 @@ void ui_msg(gboolean global, char *msg) {
     g_source_remove(ui_msg_timer);
     ui_msg_updated = TRUE;
   }
-  if(!msg)
-    return;
-  if(!global && tab->log)
-    ui_logwindow_add(tab->log, msg);
-  if(global)
-    ui_logwindow_add(ui_main->log, msg);
-  if(global || !tab->log) {
-    ui_msg_text = g_strdup(msg);
-    ui_msg_timer = g_timeout_add(3000, ui_msg_timeout, NULL);
-    ui_msg_updated = TRUE;
+  if(msg->msg) {
+    if(!msg->global && tab->log)
+      ui_logwindow_add(tab->log, msg->msg);
+    if(msg->global)
+      ui_logwindow_add(ui_main->log, msg->msg);
+    if(msg->global || !tab->log) {
+      ui_msg_text = g_strdup(msg->msg);
+      ui_msg_timer = g_timeout_add(3000, ui_msg_timeout, NULL);
+      ui_msg_updated = TRUE;
+    }
   }
+  g_free(msg->msg);
+  g_free(msg);
+  return FALSE;
+}
+
+
+// a notication message, either displayed in the log of the current tab or, if
+// the hub has no tab, in the "status bar". Calling this function with NULL
+// will reset the status bar message. Unlike everything else, this function can
+// be called from any thread. (It will queue an idle function, after all)
+void ui_msg(gboolean global, char *msg) {
+  struct ui_msg_dat *dat = g_new0(struct ui_msg_dat, 1);
+  dat->msg = g_strdup(msg);
+  dat->global = global;
+  g_idle_add_full(G_PRIORITY_HIGH_IDLE, ui_msg_mainthread, dat, NULL);
 }
 
 
@@ -507,6 +522,9 @@ void ui_msgf(gboolean global, const char *fmt, ...) {
   ui_msg(global, str);
   g_free(str);
 }
+
+
+
 
 
 

@@ -77,9 +77,14 @@ static void fl_list_free(gpointer dat) {
 }
 
 
+static gint fl_list_cmp(gconstpointer a, gconstpointer b, gpointer dat) {
+  return strcmp(((struct fl_list *)a)->name, ((struct fl_list *)b)->name);
+}
+
+
 static void fl_list_add(struct fl_list *parent, struct fl_list *cur) {
   cur->parent = parent;
-  g_sequence_append(parent->sub, cur); // TODO: sorted
+  g_sequence_insert_sorted(parent->sub, cur, fl_list_cmp, NULL);
   if(cur->isfile && parent->hastth && !cur->hastth)
     parent->hastth = FALSE;
   // update parents size & lastmod
@@ -155,7 +160,12 @@ static void fl_load_error(void *arg, const char *msg, xmlParserSeverities severi
 static int fl_load_handle(xmlTextReaderPtr reader, gboolean *havefl, gboolean *newdir, struct fl_list **cur) {
   struct fl_list *tmp;
   char *attr[3];
-  char *name = (char *)xmlTextReaderName(reader);
+  char name[50], *tmpname;
+
+  tmpname = (char *)xmlTextReaderName(reader);
+  strncpy(name, tmpname, 50);
+  name[49] = 0;
+  free(tmpname);
 
   switch(xmlTextReaderNodeType(reader)) {
 
@@ -289,7 +299,7 @@ struct fl_list *fl_load(const char *file, GError **err) {
 
   // close (ignoring errors)
   xmlTextReaderClose(reader);
-  // TODO: check whether we need to free() something as well. Documentation is unclear on this.
+  xmlFreeTextReader(reader);
 
   return root;
 }
@@ -298,7 +308,7 @@ struct fl_list *fl_load(const char *file, GError **err) {
 
 
 
-// Save a filelist to a .xml(.bz?) file
+// Save a filelist to a .xml file
 
 static int fl_save_write(void *context, const char *buf, int len) {
   struct fl_loadsave_context *xc = context;
@@ -429,7 +439,7 @@ static void fl_scan_dir(struct fl_list *parent, const char *path) {
   GError *err = NULL;
   GDir *dir = g_dir_open(path, 0, &err);
   if(!dir) {
-    // TODO: report error
+    ui_msgf(TRUE, "Error reading directory \"%s\": %s", path, g_strerror(errno));
     g_error_free(err);
     return;
   }
@@ -444,7 +454,8 @@ static void fl_scan_dir(struct fl_list *parent, const char *path) {
     if(!confname)
       confname = g_filename_display_name(name);
     char *encname = g_filename_from_utf8(confname, -1, NULL, NULL, NULL);
-    if(!encname) { // TODO: report error
+    if(!encname) {
+      ui_msgf(TRUE, "Error reading directory entry in \"%s\": Invalid encoding.");
       g_free(confname);
       continue;
     }
@@ -454,13 +465,17 @@ static void fl_scan_dir(struct fl_list *parent, const char *path) {
     int r = g_stat(cpath, &dat);
     g_free(encname);
     g_free(cpath);
-    if(r < 0 || !(S_ISREG(dat.st_mode) || S_ISDIR(dat.st_mode))) {// TODO: report error
+    if(r < 0 || !(S_ISREG(dat.st_mode) || S_ISDIR(dat.st_mode))) {
+      if(r < 0)
+        ui_msgf(TRUE, "Error stat'ing \"%s\": %s", cpath, g_strerror(errno));
+      else
+        ui_msgf(TRUE, "Not sharing \"%s\": Neither file nor directory.", cpath);
       g_free(confname);
       continue;
     }
     // and create the node
     struct fl_list *cur = g_new0(struct fl_list, 1);
-    cur->name = g_filename_display_name(confname);
+    cur->name = confname;
     if(S_ISREG(dat.st_mode)) {
       cur->isfile = TRUE;
       cur->size = dat.st_size;
@@ -476,10 +491,12 @@ static void fl_scan_dir(struct fl_list *parent, const char *path) {
   for(iter=g_sequence_get_begin_iter(parent->sub); !g_sequence_iter_is_end(iter); iter=g_sequence_iter_next(iter)) {
     struct fl_list *cur = g_sequence_get(iter);
     g_assert(cur);
-    char *cpath = g_build_filename(path, cur->name, NULL);
-    cur->sub = g_sequence_new(fl_list_free);
-    fl_scan_dir(cur, cpath);
-    g_free(cpath);
+    if(!cur->isfile) {
+      char *cpath = g_build_filename(path, cur->name, NULL);
+      cur->sub = g_sequence_new(fl_list_free);
+      fl_scan_dir(cur, cpath);
+      g_free(cpath);
+    }
   }
 }
 

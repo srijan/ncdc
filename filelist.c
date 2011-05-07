@@ -33,7 +33,6 @@
 #include <libxml/xmlreader.h>
 #include <libxml/xmlwriter.h>
 #include <bzlib.h>
-#include <glib/gstdio.h>
 
 
 #if INTERFACE
@@ -524,9 +523,9 @@ static void fl_scan_dir(struct fl_list *parent, const char *path) {
       continue;
     }
     char *cpath = g_build_filename(path, encname, NULL);
-    GStatBuf dat;
+    struct stat dat;
     // we're currently following symlinks, but I'm not sure whether that's a good idea yet
-    int r = g_stat(cpath, &dat);
+    int r = stat(cpath, &dat);
     g_free(encname);
     g_free(cpath);
     if(r < 0 || !(S_ISREG(dat.st_mode) || S_ISDIR(dat.st_mode))) {

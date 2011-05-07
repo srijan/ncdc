@@ -33,6 +33,7 @@
 #include <libxml/xmlreader.h>
 #include <libxml/xmlwriter.h>
 #include <bzlib.h>
+#include <gdbm.h>
 
 
 #if INTERFACE
@@ -54,8 +55,10 @@ struct fl_list {
 #endif
 
 // own list
-char *fl_own_list_file;
-struct fl_list *fl_own_list = NULL;
+char           *fl_own_list_file;
+struct fl_list *fl_own_list  = NULL;
+static char      *fl_hashdat_file;
+static GDBM_FILE  fl_hashdat;
 
 static GThreadPool *fl_scan_pool;
 static GThreadPool *fl_hash_pool;
@@ -125,17 +128,6 @@ static void fl_list_remove(struct fl_list *fl) {
 }
 
 
-static gboolean fl_has_incomplete(struct fl_list *fl) {
-  GSequenceIter *iter;
-  for(iter=g_sequence_get_begin_iter(fl->sub); !g_sequence_iter_is_end(iter); iter=g_sequence_iter_next(iter)) {
-    struct fl_list *c = g_sequence_get(iter);
-    if(!c->isfile && (c->incomplete || fl_has_incomplete(c)))
-      return TRUE;
-  }
-  return FALSE;
-}
-
-
 static fl_list *fl_list_copy(struct fl_list *fl) {
   struct fl_list *cur = g_memdup(fl, sizeof(struct fl_list));
   cur->name = g_strdup(fl->name);
@@ -169,6 +161,64 @@ static char *fl_own_path(struct fl_list *fl) {
   g_free(root);
   g_free(tmp);
   return path;
+}
+
+
+
+
+// Hash data file interface
+
+#define HASHDAT_INFO 0
+#define HASHDAT_TTHL 1
+
+struct fl_hashdat_info {
+  time_t lastmod;
+  guint64 filesize;
+  guint64 blocksize;
+};
+
+
+static gboolean fl_hashdat_getinfo(const char *tth, struct fl_hashdat_info *nfo) {
+  char key[25];
+  datum keydat = { key, 25 };
+  key[0] = HASHDAT_INFO;
+  memcpy(key+1, tth, 24);
+  datum res = gdbm_fetch(fl_hashdat, keydat);
+  if(res.dsize <= 0)
+    return FALSE;
+  g_assert(res.dsize >= 3*8);
+  guint64 *r = (guint64 *)res.dptr;
+  nfo->lastmod = GINT64_FROM_LE(r[0]);
+  nfo->filesize = GINT64_FROM_LE(r[1]);
+  nfo->blocksize = GINT64_FROM_LE(r[2]);
+  free(res.dptr);
+  return TRUE;
+}
+
+
+static void fl_hashdat_set(const char *tth, const struct fl_hashdat_info *nfo, const char *blocks) {
+  char key[25];
+  guint64 info[3] = { GINT64_TO_LE(nfo->lastmod), GINT64_TO_LE(nfo->filesize), GINT64_TO_LE(nfo->blocksize) };
+  datum val = { (char *)info, 3*8 };
+  datum keydat = { key, 25 };
+  memcpy(key+1, tth, 24);
+  key[0] = HASHDAT_INFO;
+  gdbm_store(fl_hashdat, keydat, val, GDBM_REPLACE);
+  key[0] = HASHDAT_TTHL;
+  val.dptr = (char *)blocks;
+  val.dsize = 24*tth_num_blocks(nfo->filesize, nfo->blocksize);
+  gdbm_store(fl_hashdat, keydat, val, GDBM_REPLACE);
+}
+
+
+static void fl_hashdat_del(const char *tth) {
+  char key[25];
+  datum keydat = { key, 25 };
+  key[0] = HASHDAT_INFO;
+  memcpy(key+1, tth, 24);
+  gdbm_delete(fl_hashdat, keydat);
+  key[0] = HASHDAT_TTHL;
+  gdbm_delete(fl_hashdat, keydat);
 }
 
 
@@ -278,7 +328,7 @@ static int fl_load_handle(xmlTextReaderPtr reader, gboolean *havefl, gboolean *n
         return -1;
       }
       tmp = g_new0(struct fl_list, 1);
-      tmp->name = g_strdup(attr[0]); // TODO: check for UTF-8? or does libxml2 already do this?
+      tmp->name = g_strdup(attr[0]);
       tmp->isfile = TRUE;
       tmp->size = g_ascii_strtoull(attr[1], NULL, 10);
       tmp->hastth = 1;
@@ -675,6 +725,7 @@ static void fl_hash_process() {
 
 static gboolean fl_hash_done(gpointer dat) {
   struct fl_hash_args *args = dat;
+  struct fl_list *fl;
 
   // discard this hash if the queue/filelist has been modified
   if(fl_hash_reset != args->resetnum)
@@ -687,12 +738,19 @@ static gboolean fl_hash_done(gpointer dat) {
   }
 
   // update file info
-  memcpy(args->file->tth, args->root, 24);
-  if(!args->file->hastth)
-    args->file->parent->hastth++;
-  args->file->hastth = 1;
-  args->file->lastmod = args->lastmod;
-  // TODO: save hash data somewhere
+  fl = args->file;
+  memcpy(fl->tth, args->root, 24);
+  if(!fl->hastth)
+    fl->parent->hastth++;
+  fl->hastth = 1;
+  fl->lastmod = args->lastmod;
+
+  // save to hashdata file
+  struct fl_hashdat_info nfo;
+  nfo.lastmod = fl->lastmod;
+  nfo.filesize = fl->size;
+  nfo.blocksize = args->blocksize;
+  fl_hashdat_set(fl->tth, &nfo, args->blocks);
   g_free(args->blocks);
 
   ui_msgf(TRUE, "Finished hashing %s.", args->file->name); // TODO: display hashing speed
@@ -719,13 +777,33 @@ fl_hash_done_f:
 
 // Own file list management
 
+
+// fetches the last modification times from the hashdata file and checks
+// whether we have any incomplete directories.
+static gboolean fl_init_getlastmod(struct fl_list *fl) {
+  struct fl_hashdat_info nfo = {};
+  GSequenceIter *iter;
+  gboolean incomplete = FALSE;
+  for(iter=g_sequence_get_begin_iter(fl->sub); !g_sequence_iter_is_end(iter); iter=g_sequence_iter_next(iter)) {
+    struct fl_list *c = g_sequence_get(iter);
+    if(c->isfile && c->hastth && fl_hashdat_getinfo(c->tth, &nfo))
+      c->lastmod = nfo.lastmod;
+    if(!c->isfile && (c->incomplete || fl_init_getlastmod(c)))
+      incomplete = TRUE;
+  }
+  return incomplete;
+}
+
+
 void fl_init() {
   GError *err = NULL;
   gboolean dorefresh = FALSE;
+  gboolean trashhashdata = FALSE;
 
   // init stuff
   fl_own_list = NULL;
   fl_own_list_file = g_build_filename(conf_dir, "files.xml.bz2", NULL);
+  fl_hashdat_file = g_build_filename(conf_dir, "hashdata.dat", NULL);
   fl_scan_pool = g_thread_pool_new(fl_scan_thread, NULL, 1, FALSE, NULL);
   fl_hash_pool = g_thread_pool_new(fl_hash_thread, NULL, 1, FALSE, NULL);
 
@@ -740,16 +818,21 @@ void fl_init() {
     g_assert(err);
     ui_msgf(FALSE, "Error loading own filelist: %s. Re-building list.", err->message);
     g_error_free(err);
-    dorefresh = TRUE;
+    trashhashdata = dorefresh = TRUE;
   }
 
-  // TODO: load the "lastmod" info from a hash data file
+  // open hash data file and get last modification times
+  fl_hashdat = gdbm_open(fl_hashdat_file, 0, trashhashdata ? GDBM_NEWDB : GDBM_WRCREAT, 0600, NULL);
+  // this is a bit extreme, but I have no idea what else to do
+  if(!fl_hashdat)
+    g_error("Unable to open hashdata.dat.");
 
-  // Check for any incomplete directories and initiate a refresh if there is
-  // one.  (If there is an incomplete directory, it means that ncdc was closed
-  // while it was hashing files, a refresh will continue where it left off)
-  if(!dorefresh) {
-    dorefresh = fl_has_incomplete(fl_own_list);
+  // Get last modification times, check for any incomplete directories and
+  // initiate a refresh if there is one.  (If there is an incomplete directory,
+  // it means that ncdc was closed while it was hashing files, a refresh will
+  // continue where it left off)
+  if(fl_own_list) {
+    dorefresh = fl_init_getlastmod(fl_own_list);
     if(dorefresh)
       ui_msg(TRUE, "File list incomplete, refreshing...");
   }
@@ -758,6 +841,11 @@ void fl_init() {
     fl_refresh(NULL);
 
   g_strfreev(shares);
+}
+
+
+void fl_close() {
+  gdbm_close(fl_hashdat);
 }
 
 
@@ -805,7 +893,10 @@ static void fl_refresh_compare(struct fl_list *own, struct fl_list *new) {
     } else {
       owni = g_sequence_iter_next(owni);
       if(ownl->isfile && ownl->hastth) {
-        // TODO: remove hash from hash data
+        // TODO: don't delete the hash data when we have another file with the
+        // same hash in our filelist. (Either that, or we should disallow
+        // sharing the same file more than once).
+        fl_hashdat_del(ownl->tth);
       }
       fl_list_remove(ownl);
     }

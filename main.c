@@ -260,6 +260,7 @@ int main(int argc, char **argv) {
 
   // cleanup
   ui_cmdhist_close();
+  fl_close();
   erase();
   refresh();
   endwin();

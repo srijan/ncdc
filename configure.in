@@ -23,7 +23,7 @@ fi
 
 # Check for header files.
 AC_CHECK_HEADERS(
-  [wchar.h locale.h signal.h bzlib.h],[],
+  [wchar.h locale.h signal.h bzlib.h gdbm.h],[],
   AC_MSG_ERROR([Required header file not found]))
 
 have_nch=no
@@ -51,6 +51,11 @@ AC_CHECK_LIB([bz2],
              [LIBS="$LIBS -lbz2"],
              [AC_MSG_ERROR(bzip2 library is required)])
 
+# Check for gdbm
+AC_CHECK_LIB([gdbm],
+             [gdbm_open],
+             [LIBS="$LIBS -lgdbm"],
+             [AC_MSG_ERROR(gdbm library is required)])
 
 # Check for modules (We assume gthread and gio come from the same glib version)
 PKG_CHECK_MODULES([DEPS], [

@@ -13,6 +13,7 @@ REQUIREMENTS
 
   ncursesw
   bzip
+  gdbm
   glib2
   libxml2
 
@@ -27,8 +28,7 @@ BUILDING
   - A C compiler, obviously
   - ncurses & glib development files
   - The 'makeheaders' program, which is assumed to be in your $PATH
-    (Get it from http://www.hwaci.com/sw/mkhdr/index.html - In future versions
-    I'll probably include that program in repo, it's only a single C file.)
+    (Get it from http://www.hwaci.com/sw/mkhdr/index.html)
 
   If you have all that, run:
 

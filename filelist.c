@@ -57,13 +57,14 @@ struct fl_list {
 // own list
 char           *fl_own_list_file;
 struct fl_list *fl_own_list  = NULL;
-static char      *fl_hashdat_file;
-static GDBM_FILE  fl_hashdat;
+static gboolean fl_own_needflush = FALSE;
 
 static GThreadPool *fl_scan_pool;
 static GThreadPool *fl_hash_pool;
 static GSList *fl_hash_queue = NULL; // more like a stack, but hashing order doesn't matter anyway
 static int     fl_hash_reset = 0; // increased every time fl_hash_queue is re-generated
+static char      *fl_hashdat_file;
+static GDBM_FILE  fl_hashdat;
 
 
 
@@ -198,15 +199,17 @@ static gboolean fl_hashdat_getinfo(const char *tth, struct fl_hashdat_info *nfo)
 
 static void fl_hashdat_set(const char *tth, const struct fl_hashdat_info *nfo, const char *blocks) {
   char key[25];
-  guint64 info[3] = { GINT64_TO_LE(nfo->lastmod), GINT64_TO_LE(nfo->filesize), GINT64_TO_LE(nfo->blocksize) };
-  datum val = { (char *)info, 3*8 };
   datum keydat = { key, 25 };
+
+  datum val = { (char *)blocks, 24*tth_num_blocks(nfo->filesize, nfo->blocksize) };
   memcpy(key+1, tth, 24);
-  key[0] = HASHDAT_INFO;
-  gdbm_store(fl_hashdat, keydat, val, GDBM_REPLACE);
   key[0] = HASHDAT_TTHL;
-  val.dptr = (char *)blocks;
-  val.dsize = 24*tth_num_blocks(nfo->filesize, nfo->blocksize);
+  gdbm_store(fl_hashdat, keydat, val, GDBM_REPLACE);
+
+  key[0] = HASHDAT_INFO;
+  guint64 info[3] = { GINT64_TO_LE(nfo->lastmod), GINT64_TO_LE(nfo->filesize), GINT64_TO_LE(nfo->blocksize) };
+  val.dptr = (char *)info;
+  val.dsize = 3*8;
   gdbm_store(fl_hashdat, keydat, val, GDBM_REPLACE);
 }
 
@@ -655,6 +658,7 @@ struct fl_hash_args {
   char *blocks;      // allocated by hash thread, ownership passed to main
   GError *err;       // set by hash thread
   time_t lastmod;    // set by hash thread
+  gdouble time;      // set by hash thread
   int resetnum;      // used by main thread to validate that *file is still alive (results are discarded otherwise)
 };
 
@@ -667,6 +671,7 @@ static void fl_hash_thread(gpointer data, gpointer udata) {
   static char buf[10240];
 
   time(&(args->lastmod));
+  GTimer *tm = g_timer_new();
 
   FILE *f = NULL;
   if(!(f = fopen(args->path, "r"))) {
@@ -704,6 +709,8 @@ static void fl_hash_thread(gpointer data, gpointer udata) {
 fl_hash_finish:
   if(f)
     fclose(f);
+  args->time = g_timer_elapsed(tm, NULL);
+  g_timer_destroy(tm);
   g_idle_add_full(G_PRIORITY_HIGH_IDLE, fl_hash_done, args, NULL);
 }
 
@@ -753,14 +760,20 @@ static gboolean fl_hash_done(gpointer dat) {
   fl_hashdat_set(fl->tth, &nfo, args->blocks);
   g_free(args->blocks);
 
-  ui_msgf(TRUE, "Finished hashing %s.", args->file->name); // TODO: display hashing speed
+  ui_msgf(TRUE, "Finished hashing %s. [%.2f MiB/s]", fl->name, ((double)fl->size)/(1024.0*1024.0)/args->time);
 
-  // TODO: Don't write filelist every time...
-  GError *err = NULL;
-  if(!fl_save(fl_own_list, fl_own_list_file, &err)) {
-    ui_msgf(TRUE, "Error saving file list: %s", err->message);
-    g_error_free(err);
-  }
+  // Note: because the writes to the hash data file are done immediately (well,
+  // not really, but they might as well get flushed immediately), and because
+  // we delay the writes to the file list, the following sequence of events
+  // will cause "memory leaks" in our data file:
+  // - Hash data is added to hash file (above)
+  // - ncdc closes before the filelist has been flushed
+  // - ncdc starts, a /refresh is done at some point
+  // - when the file we previously added to the hash file has been removed or
+  //   has been modified, we won't generate the same TTH again, resulting in the
+  //   hash data for that file to remain in the hash file, without ncdc ever
+  //   accessing it.
+  fl_own_needflush = TRUE;
 
   // Hash next file in the queue
   fl_hash_process();
@@ -776,6 +789,25 @@ fl_hash_done_f:
 
 
 // Own file list management
+
+
+// should be run from a timer. periodically flushes all unsaved data to disk.
+static gboolean fl_flush(gpointer dat) {
+  if(fl_own_needflush && fl_own_list) {
+    // save our file list
+    GError *err = NULL;
+    if(!fl_save(fl_own_list, fl_own_list_file, &err)) {
+      // this is a pretty fatal error... oh well, better luck next time
+      ui_msgf(TRUE, "Error saving file list: %s", err->message);
+      g_error_free(err);
+    }
+
+    // sync the hash data
+    gdbm_sync(fl_hashdat);
+  }
+  fl_own_needflush = FALSE;
+  return TRUE;
+}
 
 
 // fetches the last modification times from the hashdata file and checks
@@ -837,8 +869,14 @@ void fl_init() {
       ui_msg(TRUE, "File list incomplete, refreshing...");
   }
 
+  // Note: LinuxDC++ (and without a doubt other clients as well) force a
+  // refresh on startup. I can't say I'm a huge fan of that, but maybe it
+  // should be an option?
   if(dorefresh)
     fl_refresh(NULL);
+
+  // flush unsaved data to disk every 60 seconds
+  g_timeout_add_seconds_full(G_PRIORITY_LOW, 60, fl_flush, NULL, NULL);
 
   g_strfreev(shares);
 }
@@ -942,14 +980,10 @@ static gboolean fl_refresh_scanned(gpointer dat) {
   // initiate hashing (if necessary)
   fl_hash_process();
 
-  // TODO: only save when something changed
-  GError *err = NULL;
-  if(!fl_save(fl_own_list, fl_own_list_file, &err)) {
-    // this is a pretty fatal error...
-    ui_msgf(TRUE, "Error saving file list: %s", err->message);
-    g_error_free(err);
-  } else
-    ui_msgf(TRUE, "File list refresh finished.");
+  // Force a flush
+  fl_own_needflush = TRUE;
+  fl_flush(NULL);
+  ui_msgf(TRUE, "File list refresh finished.");
   return FALSE;
 }
 

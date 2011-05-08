@@ -650,7 +650,7 @@ void ui_input(guint64 key) {
   struct ui_tab *curtab = ui_tab_cur->data;
 
   switch(key) {
-  case INPT_CTRL(3): // ctrl+c
+  case INPT_CTRL('c'): // ctrl+c
     g_main_loop_quit(main_loop);
     break;
   case INPT_ALT('j'): // alt+j (previous tab)
@@ -674,7 +674,7 @@ void ui_input(guint64 key) {
   case INPT_ALT('c'): // alt+c (alias for /close)
     cmd_handle("/close");
     break;
-  case INPT_CTRL(12): // ctrl+l (alias for /close)
+  case INPT_CTRL('l'): // ctrl+l (alias for /close)
     cmd_handle("/clear");
     break;
   default:

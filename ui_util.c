@@ -477,7 +477,7 @@ gboolean ui_textinput_key(struct ui_textinput *ti, guint64 key, char **str) {
     else
       return FALSE;
     break;
-  case INPT_CTRL('\n'):
+  case INPT_CTRL('j'): // newline
     *str = ui_textinput_reset(ti);
     break;
   default:

@@ -57,6 +57,7 @@ GMainLoop *main_loop;
 
 #endif
 
+#define ctrl_to_ascii(x) ((x) == 127 ? '?' : g_ascii_tolower((x)+64))
 
 static void handle_input() {
   /* Mapping from get_wch() to struct input_key:
@@ -105,7 +106,7 @@ static void handle_input() {
       r = KEY_CODE_YES;
       code = KEY_BACKSPACE;
     }
-    key = r == KEY_CODE_YES ? INPT_KEY(code) : code == 27 ? INPT_ALT(0) : code <= 31 ? INPT_CTRL(code) : INPT_CHAR(code);
+    key = r == KEY_CODE_YES ? INPT_KEY(code) : code == 27 ? INPT_ALT(0) : code <= 31 ? INPT_CTRL(ctrl_to_ascii(code)) : INPT_CHAR(code);
     // convert wchar_t into gunichar
     if(INPT_TYPE(key) == 1) {
       if((r = wctomb(buf, code)) < 0)

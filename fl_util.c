@@ -64,7 +64,7 @@ void fl_list_free(gpointer dat) {
   g_free(fl->name);
   if(fl->sub)
     g_sequence_free(fl->sub);
-  g_free(fl);
+  g_slice_free(struct fl_list, fl);
 }
 
 
@@ -214,7 +214,7 @@ static int fl_load_handle(xmlTextReaderPtr reader, gboolean *havefl, gboolean *n
         free(attr[0]);
         return -1;
       }
-      tmp = g_new0(struct fl_list, 1);
+      tmp = g_slice_new0(struct fl_list);
       tmp->name = g_strdup(attr[0]);
       tmp->isfile = FALSE;
       tmp->incomplete = attr[1] && attr[1][0] == '1';
@@ -241,7 +241,7 @@ static int fl_load_handle(xmlTextReaderPtr reader, gboolean *havefl, gboolean *n
         free(attr[1]);
         return -1;
       }
-      tmp = g_new0(struct fl_list, 1);
+      tmp = g_slice_new0(struct fl_list);
       tmp->name = g_strdup(attr[0]);
       tmp->isfile = TRUE;
       tmp->size = g_ascii_strtoull(attr[1], NULL, 10);
@@ -309,7 +309,7 @@ struct fl_list *fl_load(const char *file, GError **err) {
   gboolean havefl = FALSE, newdir = TRUE;
   int ret;
 
-  root = g_new0(struct fl_list, 1);
+  root = g_slice_new0(struct fl_list);
   root->sub = g_sequence_new(fl_list_free);
   cur = root;
 

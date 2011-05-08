@@ -173,7 +173,7 @@ static struct nmdc_user *user_add(struct nmdc_hub *hub, const char *name) {
   struct nmdc_user *u = g_hash_table_lookup(hub->users, name);
   if(u)
     return u;
-  u = g_new0(struct nmdc_user, 1);
+  u = g_slice_new0(struct nmdc_user);
   u->name_hub = g_strdup(name);
   u->name = charset_convert(hub, TRUE, name);
   g_hash_table_insert(hub->users, u->name_hub, u);
@@ -190,7 +190,7 @@ static void user_free(gpointer dat) {
   g_free(u->tag);
   g_free(u->conn);
   g_free(u->mail);
-  g_free(u);
+  g_slice_free(struct nmdc_user, u);
 }
 
 

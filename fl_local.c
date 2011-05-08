@@ -292,7 +292,7 @@ static void fl_scan_dir(struct fl_list *parent, const char *path) {
       continue;
     }
     // and create the node
-    struct fl_list *cur = g_new0(struct fl_list, 1);
+    struct fl_list *cur = g_slice_new0(struct fl_list);
     cur->name = confname;
     if(S_ISREG(dat.st_mode)) {
       cur->isfile = TRUE;
@@ -325,12 +325,12 @@ static void fl_scan_dir(struct fl_list *parent, const char *path) {
 static void fl_scan_thread(gpointer data, gpointer udata) {
   struct fl_scan_args *args = data;
 
-  struct fl_list *root = g_new0(struct fl_list, 1);
+  struct fl_list *root = g_slice_new0(struct fl_list);
   root->sub = g_sequence_new(fl_list_free);
 
   int i, len = g_strv_length(args->name);
   for(i=0; i<len; i++) {
-    struct fl_list *cur = g_new0(struct fl_list, 1);
+    struct fl_list *cur = g_slice_new0(struct fl_list);
     char *tmp = g_filename_from_utf8(args->path[i], -1, NULL, NULL, NULL);
     cur->sub = g_sequence_new(fl_list_free);
     cur->name = g_strdup(args->name[i]);

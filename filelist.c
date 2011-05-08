@@ -185,6 +185,14 @@ struct fl_hashdat_info {
 };
 
 
+static void fl_hashdat_open(gboolean trash) {
+  fl_hashdat = gdbm_open(fl_hashdat_file, 0, trash ? GDBM_NEWDB : GDBM_WRCREAT, 0600, NULL);
+  // this is a bit extreme, but I have no idea what else to do
+  if(!fl_hashdat)
+    g_error("Unable to open hashdata.dat.");
+}
+
+
 static gboolean fl_hashdat_getinfo(const char *tth, struct fl_hashdat_info *nfo) {
   char key[25];
   datum keydat = { key, 25 };
@@ -828,7 +836,6 @@ static gboolean fl_init_getlastmod(struct fl_list *fl) {
 void fl_init() {
   GError *err = NULL;
   gboolean dorefresh = FALSE;
-  gboolean trashhashdata = FALSE;
 
   // init stuff
   fl_own_list = NULL;
@@ -839,9 +846,8 @@ void fl_init() {
 
   // read config
   char **shares = g_key_file_get_keys(conf_file, "share", NULL, NULL);
-  if(!shares)
-    return;
-  if(!g_strv_length(shares)) {
+  if(!shares || !g_strv_length(shares)) {
+    fl_hashdat_open(TRUE);
     g_strfreev(shares);
     return;
   }
@@ -852,14 +858,10 @@ void fl_init() {
     g_assert(err);
     ui_msgf(FALSE, "Error loading own filelist: %s. Re-building list.", err->message);
     g_error_free(err);
-    trashhashdata = dorefresh = TRUE;
-  }
-
-  // open hash data file and get last modification times
-  fl_hashdat = gdbm_open(fl_hashdat_file, 0, trashhashdata ? GDBM_NEWDB : GDBM_WRCREAT, 0600, NULL);
-  // this is a bit extreme, but I have no idea what else to do
-  if(!fl_hashdat)
-    g_error("Unable to open hashdata.dat.");
+    dorefresh = TRUE;
+    fl_hashdat_open(TRUE);
+  } else
+    fl_hashdat_open(FALSE);
 
   // Get last modification times, check for any incomplete directories and
   // initiate a refresh if there is one.  (If there is an incomplete directory,

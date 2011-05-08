@@ -321,7 +321,6 @@ static struct cmd *getcmd(const char *name) {
 
 
 static void c_quit(char *args) {
-  ui_msg(FALSE, "Closing ncdc...");
   g_main_loop_quit(main_loop);
 }
 
@@ -447,9 +446,9 @@ static void c_reconnect(char *args) {
 
 static void c_close(char *args) {
   if(args[0])
-    ui_msg(FALSE, "This command does not accept any arguments.");
+    ui_msg(UIMSG_TAB, "This command does not accept any arguments.");
   else if(tab->type == UIT_MAIN)
-    ui_msg(FALSE, "Main tab cannot be closed.");
+    ui_msg(UIMSG_TAB, "Main tab cannot be closed.");
   else if(tab->type == UIT_HUB)
     ui_hub_close(tab);
   else if(tab->type == UIT_USERLIST)
@@ -459,7 +458,7 @@ static void c_close(char *args) {
 
 static void c_clear(char *args) {
   if(args[0])
-    ui_msg(FALSE, "This command does not accept any arguments.");
+    ui_msg(UIMSG_TAB, "This command does not accept any arguments.");
   else if(tab->log)
     ui_logwindow_clear(tab->log);
 }

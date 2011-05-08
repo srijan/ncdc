@@ -431,7 +431,7 @@ static void ui_userlist_key(struct ui_tab *tab, guint64 key) {
     g_sequence_sort(tab->users, ui_userlist_sort_func, tab);
     if(selisbegin)
       tab->user_sel = g_sequence_get_begin_iter(tab->users);
-    ui_msgf(FALSE, "Ordering by %s (%s)", tab->user_sort_share ? "share size" : "nick",
+    ui_msgf(UIMSG_TAB, "Ordering by %s (%s)", tab->user_sort_share ? "share size" : "nick",
       tab->user_reverse ? "descending" : "ascending");
   }
 }
@@ -474,15 +474,26 @@ void ui_userlist_userupdate(struct ui_tab *tab, struct nmdc_user *user) {
 
 // Generic message displaying thing.
 
+#if INTERFACE
+
+#define UIMSG_MAIN   0 // default, mutually exclusive with UIMSG_TAB
+#define UIMSG_TAB    1 // message should go to the current tab instead of main tab
+// message should be notified in status bar (implied automatically if UIMSG_TAB
+// is specified and current tab has no log window)
+#define UIMSG_NOTIFY 2
+
+#endif
+
+
 static char *ui_msg_text = NULL;
 static guint ui_msg_timer;
 static gboolean ui_msg_updated = FALSE;
 
-struct ui_msg_dat { char *msg; gboolean global; };
+struct ui_msg_dat { char *msg; int flags; };
 
 
 static gboolean ui_msg_timeout(gpointer data) {
-  ui_msg(FALSE, NULL);
+  ui_msg(0, NULL);
   return FALSE;
 }
 
@@ -497,11 +508,11 @@ static gboolean ui_msg_mainthread(gpointer dat) {
     ui_msg_updated = TRUE;
   }
   if(msg->msg) {
-    if(!msg->global && tab->log)
+    if(msg->flags & UIMSG_TAB && tab->log)
       ui_logwindow_add(tab->log, msg->msg);
-    if(msg->global)
+    if(!(msg->flags & UIMSG_TAB))
       ui_logwindow_add(ui_main->log, msg->msg);
-    if(msg->global || !tab->log) {
+    if((msg->flags & UIMSG_NOTIFY && tab->type != UIT_MAIN) || (msg->flags & UIMSG_TAB && !tab->log)) {
       ui_msg_text = g_strdup(msg->msg);
       ui_msg_timer = g_timeout_add(3000, ui_msg_timeout, NULL);
       ui_msg_updated = TRUE;
@@ -517,20 +528,20 @@ static gboolean ui_msg_mainthread(gpointer dat) {
 // the hub has no tab, in the "status bar". Calling this function with NULL
 // will reset the status bar message. Unlike everything else, this function can
 // be called from any thread. (It will queue an idle function, after all)
-void ui_msg(gboolean global, char *msg) {
+void ui_msg(int flags, char *msg) {
   struct ui_msg_dat *dat = g_new0(struct ui_msg_dat, 1);
   dat->msg = g_strdup(msg);
-  dat->global = global;
+  dat->flags = flags;
   g_idle_add_full(G_PRIORITY_HIGH_IDLE, ui_msg_mainthread, dat, NULL);
 }
 
 
-void ui_msgf(gboolean global, const char *fmt, ...) {
+void ui_msgf(int flags, const char *fmt, ...) {
   va_list va;
   va_start(va, fmt);
   char *str = g_strdup_vprintf(fmt, va);
   va_end(va);
-  ui_msg(global, str);
+  ui_msg(flags, str);
   g_free(str);
 }
 

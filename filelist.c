@@ -569,7 +569,7 @@ static void fl_scan_dir(struct fl_list *parent, const char *path) {
   GError *err = NULL;
   GDir *dir = g_dir_open(path, 0, &err);
   if(!dir) {
-    ui_msgf(TRUE, "Error reading directory \"%s\": %s", path, g_strerror(errno));
+    ui_msgf(UIMSG_MAIN, "Error reading directory \"%s\": %s", path, g_strerror(errno));
     g_error_free(err);
     return;
   }
@@ -585,7 +585,7 @@ static void fl_scan_dir(struct fl_list *parent, const char *path) {
       confname = g_filename_display_name(name);
     char *encname = g_filename_from_utf8(confname, -1, NULL, NULL, NULL);
     if(!encname) {
-      ui_msgf(TRUE, "Error reading directory entry in \"%s\": Invalid encoding.");
+      ui_msgf(UIMSG_MAIN, "Error reading directory entry in \"%s\": Invalid encoding.");
       g_free(confname);
       continue;
     }
@@ -597,9 +597,9 @@ static void fl_scan_dir(struct fl_list *parent, const char *path) {
     g_free(cpath);
     if(r < 0 || !(S_ISREG(dat.st_mode) || S_ISDIR(dat.st_mode))) {
       if(r < 0)
-        ui_msgf(TRUE, "Error stat'ing \"%s\": %s", cpath, g_strerror(errno));
+        ui_msgf(UIMSG_MAIN, "Error stat'ing \"%s\": %s", cpath, g_strerror(errno));
       else
-        ui_msgf(TRUE, "Not sharing \"%s\": Neither file nor directory.", cpath);
+        ui_msgf(UIMSG_MAIN, "Not sharing \"%s\": Neither file nor directory.", cpath);
       g_free(confname);
       continue;
     }
@@ -757,7 +757,7 @@ static gboolean fl_hash_done(gpointer dat) {
     goto fl_hash_done_f;
 
   if(args->err) {
-    ui_msgf(TRUE, "Error hashing \"%s\": %s", args->path, args->err->message);
+    ui_msgf(UIMSG_MAIN, "Error hashing \"%s\": %s", args->path, args->err->message);
     g_error_free(args->err);
     goto fl_hash_done_f;
   }
@@ -778,7 +778,7 @@ static gboolean fl_hash_done(gpointer dat) {
   fl_hashdat_set(fl->tth, &nfo, args->blocks);
   g_free(args->blocks);
 
-  ui_msgf(TRUE, "Finished hashing %s. [%.2f MiB/s]", fl->name, ((double)fl->size)/(1024.0*1024.0)/args->time);
+  ui_msgf(UIMSG_MAIN, "Finished hashing %s. [%.2f MiB/s]", fl->name, ((double)fl->size)/(1024.0*1024.0)/args->time);
   fl_own_needflush = TRUE;
 
   // Hash next file in the queue
@@ -804,7 +804,7 @@ static gboolean fl_flush(gpointer dat) {
     GError *err = NULL;
     if(!fl_save(fl_own_list, fl_own_list_file, &err)) {
       // this is a pretty fatal error... oh well, better luck next time
-      ui_msgf(TRUE, "Error saving file list: %s", err->message);
+      ui_msgf(UIMSG_MAIN, "Error saving file list: %s", err->message);
       g_error_free(err);
     }
 
@@ -826,7 +826,7 @@ static gboolean fl_init_getlastmod(struct fl_list *fl) {
     struct fl_list *c = g_sequence_get(iter);
     if(c->isfile && c->hastth && fl_hashdat_getinfo(c->tth, &nfo))
       c->lastmod = nfo.lastmod;
-    if(!c->isfile && (c->incomplete || fl_init_getlastmod(c)))
+    if(!c->isfile && (fl_init_getlastmod(c) || c->incomplete))
       incomplete = TRUE;
   }
   return incomplete;
@@ -856,7 +856,7 @@ void fl_init() {
   fl_own_list = fl_load(fl_own_list_file, &err);
   if(!fl_own_list) {
     g_assert(err);
-    ui_msgf(FALSE, "Error loading own filelist: %s. Re-building list.", err->message);
+    ui_msgf(UIMSG_MAIN, "Error loading own filelist: %s. Re-building list.", err->message);
     g_error_free(err);
     dorefresh = TRUE;
     fl_hashdat_open(TRUE);
@@ -870,7 +870,7 @@ void fl_init() {
   if(fl_own_list) {
     dorefresh = fl_init_getlastmod(fl_own_list);
     if(dorefresh)
-      ui_msg(TRUE, "File list incomplete, refreshing...");
+      ui_msg(UIMSG_NOTIFY, "File list incomplete, refreshing...");
   }
 
   // Note: LinuxDC++ (and without a doubt other clients as well) force a
@@ -1002,7 +1002,7 @@ static gboolean fl_refresh_scanned(gpointer dat) {
   // Force a flush
   fl_own_needflush = TRUE;
   fl_flush(NULL);
-  ui_msgf(TRUE, "File list refresh finished.");
+  ui_msgf(UIMSG_NOTIFY, "File list refresh finished.");
   return FALSE;
 }
 

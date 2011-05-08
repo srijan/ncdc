@@ -48,7 +48,8 @@ struct ui_textinput;
 
 // include the auto-generated header files
 #include "commands.h"
-#include "filelist.h"
+#include "fl_local.h"
+#include "fl_util.h"
 #include "main.h"
 #include "nmdc.h"
 #include "tth.h"

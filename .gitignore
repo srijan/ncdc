@@ -14,7 +14,8 @@ missing
 stamp-h1
 *.o
 commands.h
-filelist.h
+fl_local.h
+fl_util.h
 main.h
 nmdc.h
 tth.h

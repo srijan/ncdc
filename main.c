@@ -248,11 +248,15 @@ int main(int argc, char **argv) {
   g_main_loop_run(main_loop);
 
   // cleanup
-  ui_cmdhist_close();
-  fl_close();
   erase();
   refresh();
   endwin();
+
+  printf("Flushing unsaved data to disk...");
+  fflush(stdout);
+  ui_cmdhist_close();
+  fl_close();
+  printf(" Done!\n");
 
   return 0;
 }

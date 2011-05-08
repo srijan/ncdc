@@ -44,32 +44,31 @@ GMainLoop *main_loop;
 
 #if INTERFACE
 
-#define KEY_ESCAPE (KEY_MAX+1)
-#define INPT_KEY  0
-#define INPT_CHAR 1
-#define INPT_CTRL 2
-#define INPT_ALT  4
+// macros to operate on key values
+#define INPT_KEY(code)  (((guint64)0<<32) + (guint64)(code))
+#define INPT_CHAR(code) (((guint64)1<<32) + (guint64)(code))
+#define INPT_CTRL(code) (((guint64)2<<32) + (guint64)(code))
+#define INPT_ALT(code)  (((guint64)3<<32) + (guint64)(code))
 
-struct input_key {
-  gunichar code;   // character code (as given by get_wch() - but re-encoded)
-  char type;       // INPT_ type
-  char encoded[7]; // UTF-8 encoded character string (if type != key)
-};
+#define INPT_CODE(key)  ((gunichar)((key)&G_GUINT64_CONSTANT(0xFFFFFFFF)))
+#define INPT_TYPE(key)  ((char)((key)>>32))
+
+#define KEY_ESCAPE (KEY_MAX+1)
 
 #endif
 
 
 static void handle_input() {
   /* Mapping from get_wch() to struct input_key:
-   *  KEY_CODE_YES -> KEY
+   *  KEY_CODE_YES -> KEY(code)
    *  KEY_CODE_NO:
-   *    char == 127           -> KEY = KEY_BACKSPACE
-   *    char <= 31            -> CTRL
-   *    !'^['                 -> CHAR
-   *    ('^[', !)             -> KEY = KEY_ESCAPE
+   *    char == 127           -> KEY(KEY_BACKSPACE)
+   *    char <= 31            -> CTRL(char)
+   *    !'^['                 -> CHAR(char)
+   *    ('^[', !)             -> KEY(KEY_ESCAPE)
    *    ('^[', !CHAR)         -> ignore both characters (1)
    *    ('^[', CHAR && '[')   -> ignore both characters and the character after that (2)
-   *    ('^[', CHAR && !'[')  -> ALT = second char
+   *    ('^[', CHAR && !'[')  -> ALT(second char)
    *
    * 1. this is something like ctrl+alt+X, which we won't use
    * 2. these codes indicate a 'Key' that somehow wasn't captured with
@@ -88,7 +87,8 @@ static void handle_input() {
    *   reading termcap entries on our own?)
    */
 
-  struct input_key key;
+  guint64 key;
+  char buf[9];
   int r;
   wint_t code;
   int lastesc = 0, curignore = 0;
@@ -105,51 +105,39 @@ static void handle_input() {
       r = KEY_CODE_YES;
       code = KEY_BACKSPACE;
     }
-    key.type = r == KEY_CODE_YES ? INPT_KEY : code == 27 ? INPT_ALT : code <= 31 ? INPT_CTRL : INPT_CHAR;
-    key.code = code;
-    // do something with key.code and key.encoded
-    if(key.type == INPT_CHAR) {
-      if((r = wctomb(key.encoded, code)) < 0)
+    key = r == KEY_CODE_YES ? INPT_KEY(code) : code == 27 ? INPT_ALT(0) : code <= 31 ? INPT_CTRL(code) : INPT_CHAR(code);
+    // convert wchar_t into gunichar
+    if(INPT_TYPE(key) == 1) {
+      if((r = wctomb(buf, code)) < 0)
         g_warning("Cannot encode character 0x%X", code);
-      key.encoded[r] = 0;
-      key.code = g_utf8_get_char_validated(key.encoded, -1);
-      if(key.code == (gunichar)-1 || key.code == (gunichar)-2) {
+      buf[r] = 0;
+      key = INPT_CHAR(g_utf8_get_char_validated(buf, -1));
+      if(INPT_CODE(key) == (gunichar)-1 || INPT_CODE(key) == (gunichar)-2) {
         g_warning("Invalid UTF-8 sequence in keyboard input. Are you sure you are running a UTF-8 locale?");
         continue;
       }
-    } else if(key.type != INPT_KEY) {
-      // if it's not a "character" nor a key, then it very likely fits in a single byte
-      key.encoded[0] = key.code;
-      key.encoded[1] = 0;
     }
     // check for escape sequence
     if(lastesc) {
       lastesc = 0;
-      if(key.type != INPT_CHAR)
+      if(INPT_TYPE(key) != 1)
         continue;
-      if(key.code == '[') {
+      if(INPT_CODE(key) == '[') {
         curignore = 0;
         continue;
       }
-      key.type = INPT_ALT;
-      ui_input(&key);
+      key |= (guint64)3<<32; // a not very nice way of saying "turn this key into a INPT_ALT"
+      ui_input(key);
       continue;
     }
-    if(key.type == INPT_ALT) {
+    if(INPT_TYPE(key) == 3) {
       lastesc = 1;
       continue;
     }
-    // no escape sequence? just insert it into the array
-    if(key.type == INPT_CHAR || key.type == INPT_KEY)
-      ui_input(&key);
-    if(key.type == INPT_CTRL)
-      ui_input(&key); // TODO: control code to printable char?
+    ui_input(key);
   }
-  if(lastesc) {
-    key.type = INPT_KEY;
-    key.code = KEY_ESCAPE;
-    ui_input(&key);
-  }
+  if(lastesc)
+    ui_input(INPT_KEY(KEY_ESCAPE));
 
   ui_draw();
 }

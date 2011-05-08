@@ -38,7 +38,6 @@
 // forward declaration for data types
 // (some of these remain incomplete, others are defined in interfaces)
 struct fl_list;
-struct input_key;
 struct nmdc_hub;
 struct nmdc_user;
 struct tth_ctx;

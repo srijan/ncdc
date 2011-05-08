@@ -96,15 +96,20 @@ static char *ui_main_title() {
 }
 
 
-static void ui_main_key(struct input_key *key) {
+static void ui_main_key(guint64 key) {
   char *str = NULL;
-  if(key->type == INPT_KEY && key->code == KEY_NPAGE)
+  switch(key) {
+  case INPT_KEY(KEY_NPAGE):
     ui_logwindow_scroll(ui_main->log, winrows/2);
-  else if(key->type == INPT_KEY && key->code == KEY_PPAGE)
+    break;
+  case INPT_KEY(KEY_PPAGE):
     ui_logwindow_scroll(ui_main->log, -winrows/2);
-  else if(ui_textinput_key(ui_global_textinput, key, &str) && str) {
-    cmd_handle(str);
-    g_free(str);
+    break;
+  default:
+    if(ui_textinput_key(ui_global_textinput, key, &str) && str) {
+      cmd_handle(str);
+      g_free(str);
+    }
   }
 }
 
@@ -181,15 +186,20 @@ static char *ui_hub_title(struct ui_tab *tab) {
 }
 
 
-static void ui_hub_key(struct ui_tab *tab, struct input_key *key) {
+static void ui_hub_key(struct ui_tab *tab, guint64 key) {
   char *str = NULL;
-  if(key->type == INPT_KEY && key->code == KEY_NPAGE)
+  switch(key) {
+  case INPT_KEY(KEY_NPAGE):
     ui_logwindow_scroll(tab->log, winrows/2);
-  else if(key->type == INPT_KEY && key->code == KEY_PPAGE)
+    break;
+  case INPT_KEY(KEY_PPAGE):
     ui_logwindow_scroll(tab->log, -winrows/2);
-  else if(ui_textinput_key(ui_global_textinput, key, &str) && str) {
-    cmd_handle(str);
-    g_free(str);
+    break;
+  default:
+    if(ui_textinput_key(ui_global_textinput, key, &str) && str) {
+      cmd_handle(str);
+      g_free(str);
+    }
   }
 }
 
@@ -356,61 +366,62 @@ static void ui_userlist_draw(struct ui_tab *tab) {
 }
 
 
-static void ui_userlist_key(struct ui_tab *tab, struct input_key *key) {
+static void ui_userlist_key(struct ui_tab *tab, guint64 key) {
   gboolean sort = FALSE;
-  // page down
-  if(key->type == INPT_KEY && key->code == KEY_NPAGE) {
+  switch(key) {
+  case INPT_KEY(KEY_NPAGE): // page down
     tab->user_sel = g_sequence_iter_move(tab->user_sel, winrows/2);
     if(g_sequence_iter_is_end(tab->user_sel))
       tab->user_sel = g_sequence_iter_prev(tab->user_sel);
-  // page up
-  } else if(key->type == INPT_KEY && key->code == KEY_PPAGE) {
+    break;
+  case INPT_KEY(KEY_PPAGE): // page up
     tab->user_sel = g_sequence_iter_move(tab->user_sel, -winrows/2);
     // workaround for https://bugzilla.gnome.org/show_bug.cgi?id=648313
     if(g_sequence_iter_is_end(tab->user_sel))
       tab->user_sel = g_sequence_get_begin_iter(tab->users);
-  // item down
-  } else if((key->type == INPT_KEY && key->code == KEY_DOWN)
-      || (key->type == INPT_CHAR && key->code == 'j')) {
+    break;
+  case INPT_KEY(KEY_DOWN): // item down
+  case INPT_CHAR('j'):
     tab->user_sel = g_sequence_iter_next(tab->user_sel);
     if(g_sequence_iter_is_end(tab->user_sel))
       tab->user_sel = g_sequence_iter_prev(tab->user_sel);
-  // item up
-  } else if((key->type == INPT_KEY && key->code == KEY_UP)
-      || (key->type == INPT_CHAR && key->code == 'k')) {
+    break;
+  case INPT_KEY(KEY_UP): // item up
+  case INPT_CHAR('k'):
     tab->user_sel = g_sequence_iter_prev(tab->user_sel);
-  // home
-  } else if(key->type == INPT_KEY && key->code == KEY_HOME) {
+    break;
+  case INPT_KEY(KEY_HOME): // home
     tab->user_sel = g_sequence_get_begin_iter(tab->users);
-  // end
-  } else if(key->type == INPT_KEY && key->code == KEY_END) {
+    break;
+  case INPT_KEY(KEY_END): // end
     tab->user_sel = g_sequence_iter_prev(g_sequence_get_end_iter(tab->users));
-  // s (order by share asc/desc)
-  } else if(key->type == INPT_CHAR && key->code == 's') {
+    break;
+  case INPT_CHAR('s'): // s (order by share asc/desc)
     if(tab->user_sort_share)
       tab->user_reverse = !tab->user_reverse;
     else
       tab->user_sort_share = tab->user_reverse = TRUE;
     sort = TRUE;
-  // u (order by username asc/desc)
-  } else if(key->type == INPT_CHAR && key->code == 'u') {
+    break;
+  case INPT_CHAR('u'): // u (order by username asc/desc)
     if(!tab->user_sort_share)
       tab->user_reverse = !tab->user_reverse;
     else
       tab->user_sort_share = tab->user_reverse = FALSE;
     sort = TRUE;
-  // d (toggle description visibility)
-  } else if(key->type == INPT_CHAR && key->code == 'd') {
+    break;
+  case INPT_CHAR('d'): // d (toggle description visibility)
     tab->user_hide_desc = !tab->user_hide_desc;
-  // t (toggle tag visibility)
-  } else if(key->type == INPT_CHAR && key->code == 't') {
+    break;
+  case INPT_CHAR('t'): // t (toggle tag visibility)
     tab->user_hide_tag = !tab->user_hide_tag;
-  // e (toggle e-mail visibility)
-  } else if(key->type == INPT_CHAR && key->code == 'e') {
+    break;
+  case INPT_CHAR('e'): // e (toggle e-mail visibility)
     tab->user_hide_mail = !tab->user_hide_mail;
-  // c (toggle connection visibility)
-  } else if(key->type == INPT_CHAR && key->code == 'c') {
+    break;
+  case INPT_CHAR('c'): // c (toggle connection visibility)
     tab->user_hide_conn = !tab->user_hide_conn;
+    break;
   }
 
   // TODO: some way to save the column visibility? per hub? global default?
@@ -635,54 +646,52 @@ gboolean ui_checkupdate() {
 }
 
 
-void ui_input(struct input_key *key) {
+void ui_input(guint64 key) {
   struct ui_tab *curtab = ui_tab_cur->data;
 
-  // ctrl+c
-  if(key->type == INPT_CTRL && key->code == 3)
+  switch(key) {
+  case INPT_CTRL(3): // ctrl+c
     g_main_loop_quit(main_loop);
-
-  // alt+num (switch tab)
-  else if(key->type == INPT_ALT && key->code >= '0' && key->code <= '9') {
-    GList *n = g_list_nth(ui_tabs, key->code == '0' ? 9 : key->code-'1');
-    if(n)
-      ui_tab_cur = n;
-
-  // alt+j and alt+k (previous/next tab)
-  } else if(key->type == INPT_ALT && key->code == 'j') {
+    break;
+  case INPT_ALT('j'): // alt+j (previous tab)
     ui_tab_cur = ui_tab_cur->prev ? ui_tab_cur->prev : g_list_last(ui_tabs);
-  } else if(key->type == INPT_ALT && key->code == 'k') {
+    break;
+  case INPT_ALT('k'): // alt+k (next tab)
     ui_tab_cur = ui_tab_cur->next ? ui_tab_cur->next : ui_tabs;
-
-  // alt+h and alt+l (swap tab with left/right)
-  } else if(key->type == INPT_ALT && key->code == 'h' && ui_tab_cur->prev) {
+    break;
+  case INPT_ALT('h'): ; // alt+h (swap tab with leff)
     GList *prev = ui_tab_cur->prev;
     ui_tabs = g_list_delete_link(ui_tabs, ui_tab_cur);
     ui_tabs = g_list_insert_before(ui_tabs, prev, curtab);
     ui_tab_cur = prev->prev;
-  } else if(key->type == INPT_ALT && key->code == 'l' && ui_tab_cur->next) {
+    break;
+  case INPT_ALT('l'): ; // alt+l (swap tab with right)
     GList *next = ui_tab_cur->next;
     ui_tabs = g_list_delete_link(ui_tabs, ui_tab_cur);
     ui_tabs = g_list_insert_before(ui_tabs, next->next, curtab);
     ui_tab_cur = next->next;
-
-  // alt+c (alias for /close)
-  } else if(key->type == INPT_ALT && key->code == 'c') {
+    break;
+  case INPT_ALT('c'): // alt+c (alias for /close)
     cmd_handle("/close");
-
-  // ctrl+l (alias for /clear)
-  } else if(key->type == INPT_CTRL && key->code == 12) {
+    break;
+  case INPT_CTRL(12): // ctrl+l (alias for /close)
     cmd_handle("/clear");
-
-  // let tab handle it
-  } else {
-    switch(curtab->type) {
-    case UIT_MAIN:     ui_main_key(key); break;
-    case UIT_HUB:      ui_hub_key(curtab, key); break;
-    case UIT_USERLIST: ui_userlist_key(curtab, key); break;
+    break;
+  default:
+    // alt+num (switch tab)
+    if(key >= INPT_ALT('0') && key <= INPT_ALT('9')) {
+      GList *n = g_list_nth(ui_tabs, INPT_CODE(key) == '0' ? 9 : INPT_CODE(key)-'1');
+      if(n)
+        ui_tab_cur = n;
+    // let tab handle it
+    } else {
+      switch(curtab->type) {
+      case UIT_MAIN:     ui_main_key(key); break;
+      case UIT_HUB:      ui_hub_key(curtab, key); break;
+      case UIT_USERLIST: ui_userlist_key(curtab, key); break;
+      }
     }
+    // TODO: some user feedback on invalid key
   }
-
-  // TODO: some user feedback on invalid key
 }
 

@@ -443,56 +443,55 @@ static void ui_textinput_search(struct ui_textinput *ti, gboolean backwards) {
 }
 
 
-gboolean ui_textinput_key(struct ui_textinput *ti, struct input_key *key, char **str) {
-  if(key->type == INPT_KEY) {
-    switch(key->code) {
-    case KEY_LEFT:
-      if(ti->pos > 0) ti->pos--;
-      break;
-    case KEY_RIGHT:
-      if(ti->pos < ti->len) ti->pos++;
-      break;
-    case KEY_END:
-      ti->pos = ti->len;
-      break;
-    case KEY_HOME:
-      ti->pos = 0;
-      break;
-    case KEY_BACKSPACE:
-      if(ti->pos > 0) {
-        memmove(ti->str + ti->pos - 1, ti->str + ti->pos, (ti->len - ti->pos + 1) * sizeof(gunichar));
-        ti->pos--;
-        ti->len--;
-      }
-      break;
-    case KEY_DC:
-      if(ti->pos < ti->len) {
-        memmove(ti->str + ti->pos, ti->str + ti->pos + 1, (ti->len - ti->pos) * sizeof(gunichar));
-        ti->len--;
-      }
-      break;
-    case KEY_UP:
-    case KEY_DOWN:
-      if(ti->usehist) {
-        ui_textinput_search(ti, key->code == KEY_UP);
-        return TRUE;
-      } else
-        return FALSE;
-    default:
-      return FALSE;
+gboolean ui_textinput_key(struct ui_textinput *ti, guint64 key, char **str) {
+  switch(key) {
+  case INPT_KEY(KEY_LEFT):
+    if(ti->pos > 0) ti->pos--;
+    break;
+  case INPT_KEY(KEY_RIGHT):
+    if(ti->pos < ti->len) ti->pos++;
+    break;
+  case INPT_KEY(KEY_END):
+    ti->pos = ti->len;
+    break;
+  case INPT_KEY(KEY_HOME):
+    ti->pos = 0;
+    break;
+  case INPT_KEY(KEY_BACKSPACE):
+    if(ti->pos > 0) {
+      memmove(ti->str + ti->pos - 1, ti->str + ti->pos, (ti->len - ti->pos + 1) * sizeof(gunichar));
+      ti->pos--;
+      ti->len--;
     }
-  } else if(key->type == INPT_CHAR) {
-    // increase string size by one (not *very* efficient...)
-    ti->len++;
-    ti->str = g_renew(gunichar, ti->str, ti->len+1);
-    // insert character
-    memmove(ti->str + ti->pos + 1, ti->str + ti->pos, (ti->len - ti->pos) * sizeof(gunichar));
-    ti->str[ti->pos] = key->code;
-    ti->pos++;
-  } else if(key->type == INPT_CTRL && key->code == '\n') {
+    break;
+  case INPT_KEY(KEY_DC):
+    if(ti->pos < ti->len) {
+      memmove(ti->str + ti->pos, ti->str + ti->pos + 1, (ti->len - ti->pos) * sizeof(gunichar));
+      ti->len--;
+    }
+    break;
+  case INPT_KEY(KEY_UP):
+  case INPT_KEY(KEY_DOWN):
+    if(ti->usehist)
+      ui_textinput_search(ti, key == INPT_KEY(KEY_UP));
+    else
+      return FALSE;
+    break;
+  case INPT_CTRL('\n'):
     *str = ui_textinput_reset(ti);
-  } else
-    return FALSE;
+    break;
+  default:
+    if(INPT_TYPE(key) == 1) { // char
+      // increase string size by one (not *very* efficient...)
+      ti->len++;
+      ti->str = g_renew(gunichar, ti->str, ti->len+1);
+      // insert character
+      memmove(ti->str + ti->pos + 1, ti->str + ti->pos, (ti->len - ti->pos) * sizeof(gunichar));
+      ti->str[ti->pos] = INPT_CODE(key);
+      ti->pos++;
+    } else
+      return FALSE;
+  }
   return TRUE;
 }
 

@@ -566,7 +566,7 @@ static void fl_scan_dir(struct fl_list *parent, const char *path) {
     // Try to get a UTF-8 filename which can be converted back.  If it can't be
     // converted back, we won't share the file at all. Keeping track of a
     // raw-to-UTF-8 filename lookup table isn't worth the effort.
-    char *confname = g_filename_from_utf8(name, -1, NULL, NULL, NULL);
+    char *confname = g_filename_to_utf8(name, -1, NULL, NULL, NULL);
     if(!confname)
       confname = g_filename_display_name(name);
     char *encname = g_filename_from_utf8(confname, -1, NULL, NULL, NULL);
@@ -629,9 +629,11 @@ static void fl_scan_thread(gpointer data, gpointer udata) {
   int i, len = g_strv_length(args->name);
   for(i=0; i<len; i++) {
     struct fl_list *cur = g_new0(struct fl_list, 1);
+    char *tmp = g_filename_from_utf8(args->path[i], -1, NULL, NULL, NULL);
     cur->sub = g_sequence_new(fl_list_free);
     cur->name = g_strdup(args->name[i]);
-    fl_scan_dir(cur, args->path[i]);
+    fl_scan_dir(cur, tmp);
+    g_free(tmp);
     fl_list_add(root, cur);
   }
 
@@ -723,7 +725,9 @@ static void fl_hash_process() {
 
   struct fl_hash_args *args = g_new0(struct fl_hash_args, 1);
   args->file = file;
-  args->path = fl_own_path(file);
+  char *tmp = fl_own_path(file);
+  args->path = g_filename_from_utf8(tmp, -1, NULL, NULL, NULL);
+  g_free(tmp);
   args->filesize = file->size;
   args->resetnum = fl_hash_reset;
   g_thread_pool_push(fl_hash_pool, args, NULL);

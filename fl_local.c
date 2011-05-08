@@ -33,19 +33,23 @@
 #include <gdbm.h>
 
 
-char           *fl_own_list_file;
-struct fl_list *fl_own_list  = NULL;
+char           *fl_local_list_file;
+struct fl_list *fl_local_list  = NULL;
 gboolean        fl_is_refreshing = FALSE;
-static gboolean fl_own_needflush = FALSE;
+static gboolean fl_needflush = FALSE;
+// index of the files in fl_local_list. Key = TTH root, value = GSList of files
+static GHashTable *fl_hash_index;
 
 static GThreadPool *fl_scan_pool;
 static GThreadPool *fl_hash_pool;
+
 static GSList *fl_hash_queue = NULL; // more like a stack, but hashing order doesn't matter anyway
 static int     fl_hash_reset = 0;    // increased every time fl_hash_queue is re-generated
 int            fl_hash_queue_length = 0;
 guint64        fl_hash_queue_size = 0;
-static char      *fl_hashdat_file;
-static GDBM_FILE  fl_hashdat;
+
+static char       *fl_hashdat_file;
+static GDBM_FILE   fl_hashdat;
 
 
 
@@ -53,7 +57,7 @@ static GDBM_FILE  fl_hashdat;
 
 // Get full path to an item in our list. Result should be free'd. This function
 // isn't particularly fast.
-static char *fl_own_path(struct fl_list *fl) {
+static char *fl_local_path(struct fl_list *fl) {
   char *tmp, *root, *path = g_strdup(fl->name);
   struct fl_list *cur = fl->parent;
   while(cur->parent && cur->parent->parent) {
@@ -73,10 +77,10 @@ static char *fl_own_path(struct fl_list *fl) {
 
 // should be run from a timer. periodically flushes all unsaved data to disk.
 static gboolean fl_flush(gpointer dat) {
-  if(fl_own_needflush && fl_own_list) {
+  if(fl_needflush && fl_local_list) {
     // save our file list
     GError *err = NULL;
-    if(!fl_save(fl_own_list, fl_own_list_file, &err)) {
+    if(!fl_save(fl_local_list, fl_local_list_file, &err)) {
       // this is a pretty fatal error... oh well, better luck next time
       ui_msgf(UIMSG_MAIN, "Error saving file list: %s", err->message);
       g_error_free(err);
@@ -85,22 +89,15 @@ static gboolean fl_flush(gpointer dat) {
     // sync the hash data
     gdbm_sync(fl_hashdat);
   }
-  fl_own_needflush = FALSE;
+  fl_needflush = FALSE;
   return TRUE;
 }
 
 
-// flush and close
-void fl_close() {
-  fl_flush(NULL);
-  gdbm_close(fl_hashdat);
-}
 
 
 
-
-
-// Hash data file interface
+// Hash data file interface (these operate on hashdata.dat)
 
 #define HASHDAT_INFO 0
 #define HASHDAT_TTHL 1
@@ -141,14 +138,14 @@ static gboolean fl_hashdat_getinfo(const char *tth, struct fl_hashdat_info *nfo)
 static void fl_hashdat_set(const char *tth, const struct fl_hashdat_info *nfo, const char *blocks) {
   char key[25];
   datum keydat = { key, 25 };
-
-  datum val = { (char *)blocks, 24*tth_num_blocks(nfo->filesize, nfo->blocksize) };
   memcpy(key+1, tth, 24);
+
   key[0] = HASHDAT_TTHL;
+  datum val = { (char *)blocks, 24*tth_num_blocks(nfo->filesize, nfo->blocksize) };
   gdbm_store(fl_hashdat, keydat, val, GDBM_REPLACE);
 
   key[0] = HASHDAT_INFO;
-  guint64 info[3] = { GINT64_TO_LE(nfo->lastmod), GINT64_TO_LE(nfo->filesize), GINT64_TO_LE(nfo->blocksize) };
+  guint64 info[] = { GINT64_TO_LE(nfo->lastmod), GINT64_TO_LE(nfo->filesize), GINT64_TO_LE(nfo->blocksize) };
   val.dptr = (char *)info;
   val.dsize = 3*8;
   gdbm_store(fl_hashdat, keydat, val, GDBM_REPLACE);
@@ -163,6 +160,84 @@ static void fl_hashdat_del(const char *tth) {
   gdbm_delete(fl_hashdat, keydat);
   key[0] = HASHDAT_TTHL;
   gdbm_delete(fl_hashdat, keydat);
+}
+
+
+
+
+
+// Hash index interface (these operate on both fl_hash_index and the above hashdata.dat)
+
+// low-level insert-into-index function
+static void fl_hashindex_insert(struct fl_list *fl) {
+  GSList *cur = g_hash_table_lookup(fl_hash_index, fl->tth);
+  if(cur) {
+    g_assert(cur == g_slist_insert(cur, fl, 1)); // insert item without modifying the pointer
+  } else {
+    cur = g_slist_prepend(cur, fl);
+    g_hash_table_insert(fl_hash_index, fl->tth, cur);
+  }
+}
+
+
+// Load a file entry that was loaded from our local filelist (files.xml.bz2)
+// Cross-checks with hashdata.dat, sets lastmod field and adds it to the index.
+// Returns true if hash data was not found.
+static gboolean fl_hashindex_load(struct fl_list *fl) {
+  if(!fl->hastth)
+    return TRUE;
+
+  struct fl_hashdat_info nfo = {};
+  if(!fl_hashdat_getinfo(fl->tth, &nfo)) {
+    fl->hastth = FALSE;
+    return TRUE;
+  }
+  fl->lastmod = nfo.lastmod;
+
+  fl_hashindex_insert(fl);
+  return FALSE;
+}
+
+
+// Should be called when a file is removed from our list. Removes the item from
+// the index and removes, when necessary, the associated hash data.
+static void fl_hashindex_del(struct fl_list *fl) {
+  if(!fl->hastth)
+    return;
+  GSList *cur = g_hash_table_lookup(fl_hash_index, fl->tth);
+  if(!cur) {
+    fl_hashdat_del(fl->tth);
+    return;
+  }
+
+  cur = g_slist_remove(cur, fl);
+  if(!cur) {
+    fl_hashdat_del(fl->tth);
+    g_hash_table_remove(fl_hash_index, fl->tth);
+  // there's another file with the same TTH.
+  } else
+    g_hash_table_replace(fl_hash_index, ((struct fl_list *)cur->data)->tth, cur);
+}
+
+
+// update hash info for a file.
+static void fl_hashindex_sethash(struct fl_list *fl, char *tth, time_t lastmod, guint64 blocksize, char *blocks) {
+  fl_hashindex_del(fl);
+
+  // update file
+  memcpy(fl->tth, tth, 24);
+  if(!fl->hastth)
+    fl->parent->hastth++;
+  fl->hastth = 1;
+  fl->lastmod = lastmod;
+  fl_hashindex_insert(fl);
+
+  // save to hashdata file
+  struct fl_hashdat_info nfo;
+  nfo.lastmod = fl->lastmod;
+  nfo.filesize = fl->size;
+  nfo.blocksize = blocksize;
+  fl_hashdat_set(fl->tth, &nfo, blocks);
 }
 
 
@@ -353,6 +428,15 @@ static void fl_hash_queue_append(struct fl_list *fl) {
 }
 
 
+static void fl_hash_queue_reset() {
+  g_atomic_int_inc(&fl_hash_reset);
+  g_slist_free(fl_hash_queue);
+  fl_hash_queue = NULL;
+  fl_hash_queue_length = 0;
+  fl_hash_queue_size = 0;
+}
+
+
 static void fl_hash_process() {
   if(!fl_hash_queue)
     return;
@@ -361,7 +445,7 @@ static void fl_hash_process() {
 
   struct fl_hash_args *args = g_new0(struct fl_hash_args, 1);
   args->file = file;
-  char *tmp = fl_own_path(file);
+  char *tmp = fl_local_path(file);
   args->path = g_filename_from_utf8(tmp, -1, NULL, NULL, NULL);
   g_free(tmp);
   args->filesize = file->size;
@@ -388,23 +472,12 @@ static gboolean fl_hash_done(gpointer dat) {
     goto fl_hash_done_f;
   }
 
-  // update file info
-  memcpy(fl->tth, args->root, 24);
-  if(!fl->hastth)
-    fl->parent->hastth++;
-  fl->hastth = 1;
-  fl->lastmod = args->lastmod;
-
-  // save to hashdata file
-  struct fl_hashdat_info nfo;
-  nfo.lastmod = fl->lastmod;
-  nfo.filesize = fl->size;
-  nfo.blocksize = args->blocksize;
-  fl_hashdat_set(fl->tth, &nfo, args->blocks);
+  // update file and hash info
+  fl_hashindex_sethash(fl, args->root, args->lastmod, args->blocksize, args->blocks);
   g_free(args->blocks);
 
   ui_msgf(UIMSG_MAIN, "Finished hashing %s. [%.2f MiB/s]", fl->name, ((double)fl->size)/(1024.0*1024.0)/args->time);
-  fl_own_needflush = TRUE;
+  fl_needflush = TRUE;
 
   // Hash next file in the queue
   fl_hash_process();
@@ -434,12 +507,9 @@ static void fl_refresh_addhash(struct fl_list *cur) {
 
 
 static void fl_refresh_delhash(struct fl_list *cur) {
-  if(cur->isfile && cur->hastth) {
-    // TODO: don't delete the hash data when we have another file with the
-    // same hash in our filelist. (Either that, or we should disallow
-    // sharing the same file more than once).
-    fl_hashdat_del(cur->tth);
-  } else if(!cur->isfile) {
+  if(cur->isfile && cur->hastth)
+    fl_hashindex_del(cur);
+  else if(!cur->isfile) {
     GSequenceIter *i;
     for(i=g_sequence_get_begin_iter(cur->sub); !g_sequence_iter_is_end(i); i=g_sequence_iter_next(i))
       fl_refresh_delhash(g_sequence_get(i));
@@ -447,51 +517,51 @@ static void fl_refresh_delhash(struct fl_list *cur) {
 }
 
 
-static void fl_refresh_compare(struct fl_list *own, struct fl_list *new) {
-  GSequenceIter *owni = g_sequence_get_begin_iter(own->sub);
+static void fl_refresh_compare(struct fl_list *old, struct fl_list *new) {
+  GSequenceIter *oldi = g_sequence_get_begin_iter(old->sub);
   GSequenceIter *newi = g_sequence_get_begin_iter(new->sub);
-  while(!g_sequence_iter_is_end(owni) || !g_sequence_iter_is_end(newi)) {
-    struct fl_list *ownl = g_sequence_iter_is_end(owni) ? NULL : g_sequence_get(owni);
+  while(!g_sequence_iter_is_end(oldi) || !g_sequence_iter_is_end(newi)) {
+    struct fl_list *oldl = g_sequence_iter_is_end(oldi) ? NULL : g_sequence_get(oldi);
     struct fl_list *newl = g_sequence_iter_is_end(newi) ? NULL : g_sequence_get(newi);
-    int cmp = !ownl ? 1 : !newl ? -1 : fl_list_cmp(ownl, newl, NULL);
+    int cmp = !oldl ? 1 : !newl ? -1 : fl_list_cmp(oldl, newl, NULL);
 
-    // own == new: same
+    // old == new: same
     if(cmp == 0) {
-      g_assert(ownl->isfile == newl->isfile); // TODO: handle this case
-      if(ownl->isfile && (!ownl->hastth || newl->lastmod > ownl->lastmod || newl->size != ownl->size))
-        fl_hash_queue_append(ownl);
-      if(!ownl->isfile)
-        fl_refresh_compare(ownl, newl);
-      owni = g_sequence_iter_next(owni);
+      g_assert(oldl->isfile == newl->isfile); // TODO: handle this case
+      if(oldl->isfile && (!oldl->hastth || newl->lastmod > oldl->lastmod || newl->size != oldl->size))
+        fl_hash_queue_append(oldl);
+      if(!oldl->isfile)
+        fl_refresh_compare(oldl, newl);
+      oldi = g_sequence_iter_next(oldi);
       newi = g_sequence_iter_next(newi);
 
-    // own > new: insert new
+    // old > new: insert new
     } else if(cmp > 0) {
       struct fl_list *tmp = fl_list_copy(newl);
-      fl_list_add(own, tmp);
+      fl_list_add(old, tmp);
       if(tmp->isfile)
         fl_hash_queue_append(tmp);
       else
         fl_refresh_addhash(tmp);
       newi = g_sequence_iter_next(newi);
 
-    // new > own: delete own
+    // new > old: delete old
     } else {
-      owni = g_sequence_iter_next(owni);
-      fl_refresh_delhash(ownl);
-      fl_list_remove(ownl);
+      oldi = g_sequence_iter_next(oldi);
+      fl_refresh_delhash(oldl);
+      fl_list_remove(oldl);
     }
   }
-  own->incomplete = FALSE;
+  old->incomplete = FALSE;
 }
 
 /* A visual explanation of the above algorithm:
- * own new
- *  a  a  same (new == own; new++, own++)
+ * old new
+ *  a  a  same (new == old; new++, old++)
  *  b  b  same
- *  d  c  insert c (!own || new < own; new++, own stays)
+ *  d  c  insert c (!old || new < old; new++, old stays)
  *  d  d  same
- *  e  f  delete e (!new || new > own; new stays, own++)
+ *  e  f  delete e (!new || new > old; new stays, old++)
  *  f  f  same
  *
  * More advanced example:
@@ -513,18 +583,14 @@ static gboolean fl_refresh_scanned(gpointer dat) {
   // huge. It may be a better idea to put a maximum on it and check the actual
   // file list for more to-be-hashed files each time the queue has been
   // depleted. This probably requires a "needsrehash" flag in struct fl_list.
-  g_atomic_int_inc(&fl_hash_reset);
-  g_slist_free(fl_hash_queue);
-  fl_hash_queue = NULL;
-  fl_hash_queue_length = 0;
-  fl_hash_queue_size = 0;
+  fl_hash_queue_reset();
 
-  if(!fl_own_list) {
-    fl_own_list = list;
+  if(!fl_local_list) {
+    fl_local_list = list;
     fl_refresh_addhash(list);
   } else {
     // TODO: handle partial refreshes
-    fl_refresh_compare(fl_own_list, list);
+    fl_refresh_compare(fl_local_list, list);
     fl_list_free(list);
   }
 
@@ -532,7 +598,7 @@ static gboolean fl_refresh_scanned(gpointer dat) {
   fl_hash_process();
 
   // Force a flush
-  fl_own_needflush = TRUE;
+  fl_needflush = TRUE;
   fl_flush(NULL);
   ui_msgf(UIMSG_NOTIFY, "File list refresh finished.");
   return FALSE;
@@ -574,18 +640,22 @@ void fl_refresh(const char *dir) {
 
 // fetches the last modification times from the hashdata file and checks
 // whether we have any incomplete directories.
-static gboolean fl_init_getlastmod(struct fl_list *fl) {
-  struct fl_hashdat_info nfo = {};
+static gboolean fl_init_list(struct fl_list *fl) {
   GSequenceIter *iter;
   gboolean incomplete = FALSE;
   for(iter=g_sequence_get_begin_iter(fl->sub); !g_sequence_iter_is_end(iter); iter=g_sequence_iter_next(iter)) {
     struct fl_list *c = g_sequence_get(iter);
-    if(c->isfile && c->hastth && fl_hashdat_getinfo(c->tth, &nfo))
-      c->lastmod = nfo.lastmod;
-    if(!c->isfile && (fl_init_getlastmod(c) || c->incomplete))
+    if(c->isfile && fl_hashindex_load(c))
+      incomplete = TRUE;
+    if(!c->isfile && (fl_init_list(c) || c->incomplete))
       incomplete = TRUE;
   }
   return incomplete;
+}
+
+
+static gboolean fl_init_hash_equal(gconstpointer a, gconstpointer b) {
+  return memcmp(a, b, 24) == 0;
 }
 
 
@@ -594,11 +664,17 @@ void fl_init() {
   gboolean dorefresh = FALSE;
 
   // init stuff
-  fl_own_list = NULL;
-  fl_own_list_file = g_build_filename(conf_dir, "files.xml.bz2", NULL);
+  fl_local_list = NULL;
+  fl_local_list_file = g_build_filename(conf_dir, "files.xml.bz2", NULL);
   fl_hashdat_file = g_build_filename(conf_dir, "hashdata.dat", NULL);
   fl_scan_pool = g_thread_pool_new(fl_scan_thread, NULL, 1, FALSE, NULL);
   fl_hash_pool = g_thread_pool_new(fl_hash_thread, NULL, 1, FALSE, NULL);
+  // Even though the keys are the tth roots, we can just use g_int_hash. The
+  // first four bytes provide enough unique data anyway.
+  fl_hash_index = g_hash_table_new(g_int_hash, fl_init_hash_equal);
+
+  // flush unsaved data to disk every 60 seconds
+  g_timeout_add_seconds_full(G_PRIORITY_LOW, 60, fl_flush, NULL, NULL);
 
   // read config
   char **shares = g_key_file_get_keys(conf_file, "share", NULL, NULL);
@@ -607,12 +683,13 @@ void fl_init() {
     g_strfreev(shares);
     return;
   }
+  g_strfreev(shares);
 
   // load our files.xml.bz
-  fl_own_list = fl_load(fl_own_list_file, &err);
-  if(!fl_own_list) {
+  fl_local_list = fl_load(fl_local_list_file, &err);
+  if(!fl_local_list) {
     g_assert(err);
-    ui_msgf(UIMSG_MAIN, "Error loading own filelist: %s. Re-building list.", err->message);
+    ui_msgf(UIMSG_MAIN, "Error loading local filelist: %s. Re-building list.", err->message);
     g_error_free(err);
     dorefresh = TRUE;
     fl_hashdat_open(TRUE);
@@ -623,8 +700,8 @@ void fl_init() {
   // initiate a refresh if there is one.  (If there is an incomplete directory,
   // it means that ncdc was closed while it was hashing files, a refresh will
   // continue where it left off)
-  if(fl_own_list) {
-    dorefresh = fl_init_getlastmod(fl_own_list);
+  if(fl_local_list) {
+    dorefresh = fl_init_list(fl_local_list);
     if(dorefresh)
       ui_msg(UIMSG_NOTIFY, "File list incomplete, refreshing...");
   }
@@ -634,10 +711,15 @@ void fl_init() {
   // should be an option?
   if(dorefresh)
     fl_refresh(NULL);
+}
 
-  // flush unsaved data to disk every 60 seconds
-  g_timeout_add_seconds_full(G_PRIORITY_LOW, 60, fl_flush, NULL, NULL);
 
-  g_strfreev(shares);
+
+// flush and close
+void fl_close() {
+  // tell the hasher to stop
+  fl_hash_queue_reset();
+  fl_flush(NULL);
+  gdbm_close(fl_hashdat);
 }
 

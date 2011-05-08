@@ -497,8 +497,9 @@ static void c_share(char *args) {
         g_free(d);
       }
       ui_logwindow_add(tab->log, "");
-      g_strfreev(dirs);
     }
+    if(dirs)
+      g_strfreev(dirs);
     return;
   }
   // use g_shell_parse_argv() to allow the name to contain a space. (e.g. /share "Kewl Share!" ~/blah)

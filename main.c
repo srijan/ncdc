@@ -150,7 +150,8 @@ static gboolean stdin_read(GIOChannel *src, GIOCondition cond, gpointer dat) {
 }
 
 
-static gboolean screen_update_timer(gpointer dat) {
+static gboolean one_second_timer(gpointer dat) {
+  ratecalc_calc();
   ui_draw();
   return TRUE;
 }
@@ -242,7 +243,7 @@ int main(int argc, char **argv) {
   GIOChannel *in = g_io_channel_unix_new(STDIN_FILENO);
   g_io_add_watch(in, G_IO_IN, stdin_read, NULL);
 
-  g_timeout_add_seconds(1, screen_update_timer, NULL);
+  g_timeout_add_seconds(1, one_second_timer, NULL);
   g_timeout_add(100, screen_update_check, NULL);
 
   g_main_loop_run(main_loop);

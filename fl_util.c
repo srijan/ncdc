@@ -117,7 +117,7 @@ void fl_list_remove(struct fl_list *fl) {
 
 
 struct fl_list *fl_list_copy(struct fl_list *fl) {
-  struct fl_list *cur = g_memdup(fl, sizeof(struct fl_list));
+  struct fl_list *cur = g_slice_dup(struct fl_list, fl);
   cur->name = g_strdup(fl->name);
   cur->parent = NULL;
   if(fl->sub) {

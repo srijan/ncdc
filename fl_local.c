@@ -43,10 +43,11 @@ static GHashTable *fl_hash_index;
 static GThreadPool *fl_scan_pool;
 static GThreadPool *fl_hash_pool;
 
-static GSList *fl_hash_queue = NULL; // more like a stack, but hashing order doesn't matter anyway
-static int     fl_hash_reset = 0;    // increased every time fl_hash_queue is re-generated
-int            fl_hash_queue_length = 0;
-guint64        fl_hash_queue_size = 0;
+static GSList  *fl_hash_queue = NULL; // more like a stack, but hashing order doesn't matter anyway
+static int      fl_hash_reset = 0;    // increased every time fl_hash_queue is re-generated
+int             fl_hash_queue_length = 0;
+guint64         fl_hash_queue_size = 0;
+struct ratecalc fl_hash_rate;
 
 static char       *fl_hashdat_file;
 static GDBM_FILE   fl_hashdat;
@@ -396,6 +397,7 @@ static void fl_hash_thread(gpointer data, gpointer udata) {
       goto fl_hash_finish;
     }
     tth_update(&tth, buf, r);
+    ratecalc_add(&fl_hash_rate, r);
   }
   if(ferror(f)) {
     g_set_error(&(args->err), 1, 0, "Error reading file: %s", g_strerror(errno));
@@ -434,12 +436,19 @@ static void fl_hash_queue_reset() {
   fl_hash_queue = NULL;
   fl_hash_queue_length = 0;
   fl_hash_queue_size = 0;
+  ratecalc_unregister(&fl_hash_rate);
+  ratecalc_reset(&fl_hash_rate);
 }
 
 
 static void fl_hash_process() {
-  if(!fl_hash_queue)
+  if(!fl_hash_queue) {
+    ratecalc_unregister(&fl_hash_rate);
+    ratecalc_reset(&fl_hash_rate);
     return;
+  }
+  ratecalc_register(&fl_hash_rate);
+
   struct fl_list *file = fl_hash_queue->data;
   fl_hash_queue = g_slist_remove_link(fl_hash_queue, fl_hash_queue);
 
@@ -479,10 +488,9 @@ static gboolean fl_hash_done(gpointer dat) {
   ui_msgf(UIMSG_MAIN, "Finished hashing %s. [%.2f MiB/s]", fl->name, ((double)fl->size)/(1024.0*1024.0)/args->time);
   fl_needflush = TRUE;
 
+fl_hash_done_f:
   // Hash next file in the queue
   fl_hash_process();
-
-fl_hash_done_f:
   g_free(args->path);
   g_free(args);
   return FALSE;
@@ -672,6 +680,7 @@ void fl_init() {
   // Even though the keys are the tth roots, we can just use g_int_hash. The
   // first four bytes provide enough unique data anyway.
   fl_hash_index = g_hash_table_new(g_int_hash, fl_init_hash_equal);
+  ratecalc_init(&fl_hash_rate, 10);
 
   // flush unsaved data to disk every 60 seconds
   g_timeout_add_seconds_full(G_PRIORITY_LOW, 60, fl_flush, NULL, NULL);

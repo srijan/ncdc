@@ -598,9 +598,10 @@ static void ui_draw_status() {
   if(fl_is_refreshing)
     mvaddstr(winrows-1, 0, "[Refreshing share]");
   else if(fl_hash_queue_length) {
-    // TODO: display real-time hashing speed
-    char *tmp = g_strdup_printf("[Hashing: %d / %s]", fl_hash_queue_length, str_formatsize(fl_hash_queue_size));
+    char *tmp = g_strdup_printf("[Hashing: %d / %s / %.2f MiB/s]",
+      fl_hash_queue_length, str_formatsize(fl_hash_queue_size), ((float)ratecalc_get(&fl_hash_rate)/(1024*1024)));
     mvaddstr(winrows-1, 0, tmp);
+    g_free(tmp);
   }
   mvaddstr(winrows-1, wincols-14, "Here be stats");
 }

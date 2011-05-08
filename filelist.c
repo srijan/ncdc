@@ -57,12 +57,15 @@ struct fl_list {
 // own list
 char           *fl_own_list_file;
 struct fl_list *fl_own_list  = NULL;
+gboolean        fl_is_refreshing = FALSE;
 static gboolean fl_own_needflush = FALSE;
 
 static GThreadPool *fl_scan_pool;
 static GThreadPool *fl_hash_pool;
 static GSList *fl_hash_queue = NULL; // more like a stack, but hashing order doesn't matter anyway
 static int     fl_hash_reset = 0;    // increased every time fl_hash_queue is re-generated
+int            fl_hash_queue_length = 0;
+guint64        fl_hash_queue_size = 0;
 static char      *fl_hashdat_file;
 static GDBM_FILE  fl_hashdat;
 
@@ -731,6 +734,14 @@ fl_hash_finish:
 }
 
 
+// actually does a prepend, but whatever
+static void fl_hash_queue_append(struct fl_list *fl) {
+  fl_hash_queue = g_slist_prepend(fl_hash_queue, fl);
+  fl_hash_queue_length++;
+  fl_hash_queue_size += fl->size;
+}
+
+
 static void fl_hash_process() {
   if(!fl_hash_queue)
     return;
@@ -756,6 +767,10 @@ static gboolean fl_hash_done(gpointer dat) {
   if(g_atomic_int_get(&fl_hash_reset) != args->resetnum)
     goto fl_hash_done_f;
 
+  fl = args->file;
+  fl_hash_queue_length--;
+  fl_hash_queue_size -= fl->size;
+
   if(args->err) {
     ui_msgf(UIMSG_MAIN, "Error hashing \"%s\": %s", args->path, args->err->message);
     g_error_free(args->err);
@@ -763,7 +778,6 @@ static gboolean fl_hash_done(gpointer dat) {
   }
 
   // update file info
-  fl = args->file;
   memcpy(fl->tth, args->root, 24);
   if(!fl->hastth)
     fl->parent->hastth++;
@@ -898,7 +912,7 @@ static void fl_refresh_addhash(struct fl_list *cur) {
   for(i=g_sequence_get_begin_iter(cur->sub); !g_sequence_iter_is_end(i); i=g_sequence_iter_next(i)) {
     struct fl_list *l = g_sequence_get(i);
     if(l->isfile)
-      fl_hash_queue = g_slist_prepend(fl_hash_queue, l);
+      fl_hash_queue_append(l);
     else
       fl_refresh_addhash(l);
   }
@@ -931,7 +945,7 @@ static void fl_refresh_compare(struct fl_list *own, struct fl_list *new) {
     if(cmp == 0) {
       g_assert(ownl->isfile == newl->isfile); // TODO: handle this case
       if(ownl->isfile && (!ownl->hastth || newl->lastmod > ownl->lastmod || newl->size != ownl->size))
-        fl_hash_queue = g_slist_prepend(fl_hash_queue, ownl);
+        fl_hash_queue_append(ownl);
       if(!ownl->isfile)
         fl_refresh_compare(ownl, newl);
       owni = g_sequence_iter_next(owni);
@@ -942,7 +956,7 @@ static void fl_refresh_compare(struct fl_list *own, struct fl_list *new) {
       struct fl_list *tmp = fl_list_copy(newl);
       fl_list_add(own, tmp);
       if(tmp->isfile)
-        fl_hash_queue = g_slist_prepend(fl_hash_queue, tmp);
+        fl_hash_queue_append(tmp);
       else
         fl_refresh_addhash(tmp);
       newi = g_sequence_iter_next(newi);
@@ -979,6 +993,8 @@ static void fl_refresh_compare(struct fl_list *own, struct fl_list *new) {
 static gboolean fl_refresh_scanned(gpointer dat) {
   struct fl_list *list = dat;
 
+  fl_is_refreshing = FALSE;
+
   // Note: we put *all* to-be-hashed files in a queue. This queue can be pretty
   // huge. It may be a better idea to put a maximum on it and check the actual
   // file list for more to-be-hashed files each time the queue has been
@@ -986,6 +1002,8 @@ static gboolean fl_refresh_scanned(gpointer dat) {
   g_atomic_int_inc(&fl_hash_reset);
   g_slist_free(fl_hash_queue);
   fl_hash_queue = NULL;
+  fl_hash_queue_length = 0;
+  fl_hash_queue_size = 0;
 
   if(!fl_own_list) {
     fl_own_list = list;
@@ -1009,6 +1027,7 @@ static gboolean fl_refresh_scanned(gpointer dat) {
 
 // TODO: specifying a dir does not really work yet.
 void fl_refresh(const char *dir) {
+  fl_is_refreshing = TRUE;
   // TODO: allow only one refresh at a time?
 
   // construct the list of to-be-scanned directories

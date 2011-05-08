@@ -589,6 +589,23 @@ void ui_init() {
 }
 
 
+static void ui_draw_status() {
+  ui_msg_updated = FALSE;
+  if(ui_msg_text) {
+    mvaddstr(winrows-1, 0, ui_msg_text);
+    return;
+  }
+  if(fl_is_refreshing)
+    mvaddstr(winrows-1, 0, "[Refreshing share]");
+  else if(fl_hash_queue_length) {
+    // TODO: display real-time hashing speed
+    char *tmp = g_strdup_printf("[Hashing: %d / %s]", fl_hash_queue_length, str_formatsize(fl_hash_queue_size));
+    mvaddstr(winrows-1, 0, tmp);
+  }
+  mvaddstr(winrows-1, wincols-14, "Here be stats");
+}
+
+
 void ui_draw() {
   struct ui_tab *curtab = ui_tab_cur->data;
 
@@ -634,11 +651,7 @@ void ui_draw() {
   attroff(A_REVERSE);
 
   // last line - status info or notification
-  ui_msg_updated = FALSE;
-  if(ui_msg_text)
-    mvaddstr(winrows-1, 0, ui_msg_text);
-  else
-    mvaddstr(winrows-1, wincols-14, "Here be stats");
+  ui_draw_status();
 
   // tab contents
   switch(curtab->type) {

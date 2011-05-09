@@ -206,9 +206,9 @@ static void ui_hub_key(struct ui_tab *tab, guint64 key) {
 
 void ui_hub_joinquit(struct ui_tab *tab, gboolean join, struct nmdc_user *user) {
   gboolean log = conf_hub_get(boolean, tab->name, "show_joinquit");
-  // TODO: don't show joins when we're still getting the initial user list
   if(join) {
-    if(log && (!tab->hub->nick_valid || strcmp(tab->hub->nick_hub, user->name_hub) != 0))
+    if(log && tab->hub->sharecount == g_hash_table_size(tab->hub->users)
+        && (!tab->hub->nick_valid || strcmp(tab->hub->nick_hub, user->name_hub) != 0))
       ui_logwindow_printf(tab->log, "%s has joined.", user->name);
   } else {
     if(log)

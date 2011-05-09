@@ -321,7 +321,7 @@ static struct cmd *getcmd(const char *name) {
 
 
 static void c_quit(char *args) {
-  g_main_loop_quit(main_loop);
+  ncdc_quit();
 }
 
 

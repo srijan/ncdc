@@ -676,7 +676,7 @@ void ui_input(guint64 key) {
 
   switch(key) {
   case INPT_CTRL('c'): // ctrl+c
-    g_main_loop_quit(main_loop);
+    ncdc_quit();
     break;
   case INPT_ALT('j'): // alt+j (previous tab)
     ui_tab_cur = ui_tab_cur->prev ? ui_tab_cur->prev : g_list_last(ui_tabs);
@@ -699,7 +699,7 @@ void ui_input(guint64 key) {
   case INPT_ALT('c'): // alt+c (alias for /close)
     cmd_handle("/close");
     break;
-  case INPT_CTRL('l'): // ctrl+l (alias for /close)
+  case INPT_CTRL('l'): // ctrl+l (alias for /clear)
     cmd_handle("/clear");
     break;
   default:

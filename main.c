@@ -163,6 +163,16 @@ static gboolean screen_update_check(gpointer dat) {
 }
 
 
+void ncdc_quit() {
+  g_main_loop_quit(main_loop);
+}
+
+
+static void catch_sigterm(int sig) {
+  ncdc_quit();
+}
+
+
 // Fired when the screen is resized.  Normally I would check for KEY_RESIZE,
 // but that doesn't work very nicely together with select(). See
 // http://www.webservertalk.com/archive107-2005-1-896232.html
@@ -233,6 +243,11 @@ int main(int argc, char **argv) {
   act.sa_handler = catch_sigwinch;
   if(sigaction(SIGWINCH, &act, NULL) < 0)
     g_error("Can't setup SIGWINCH: %s", g_strerror(errno));
+
+  // setup SIGTERM
+  act.sa_handler = catch_sigterm;
+  if(sigaction(SIGTERM, &act, NULL) < 0)
+    g_error("Can't setup SIGTERM: %s", g_strerror(errno));
 
   fl_init();
   open_autoconnect();

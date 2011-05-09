@@ -319,13 +319,13 @@ void base32_decode(const char *from, char *to) {
  *   ratecalc_init(&thing, numsamples);
  *   ratecalc_register(&thing);
  * From any thread (usually some worker thread):
- *   ratecalc_add(&thing, bytes)
+ *   ratecalc_add(&thing, bytes);
  * From main thread:
- *   rate = ratecalc_get(&thing)
+ *   rate = ratecalc_get(&thing);
  *   ratecalc_reset(&thing);
  *   ratecalc_unregister(&thing);
  *
- * ratecalc_calc() should be called with in with regular interval
+ * ratecalc_calc() should be called with a regular interval
  */
 
 #if INTERFACE

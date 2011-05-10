@@ -562,7 +562,12 @@ static void c_unshare(char *args) {
     while(args[0] == '/')
       args++;
     char *path = g_key_file_get_string(conf_file, "share", args, NULL);
-    if(!path)
+    if(!args[0]) {
+      g_key_file_remove_group(conf_file, "share", NULL);
+      conf_save();
+      fl_unshare(NULL);
+      ui_logwindow_add(tab->log, "Removed all directories from share.");
+    } else if(!path)
       ui_logwindow_add(tab->log, "No shared directory with that name.");
     else {
       g_key_file_remove_key(conf_file, "share", args, NULL);
@@ -604,13 +609,13 @@ static struct cmd cmds[] = {
   { "connect", c_connect,
     "[<address>]", "Connect to a hub.",
     "If no address is specified, will connect to the hub you last used on the current tab.\n"
-    "The address should be in the form of \"dchub://host:port/\" or \"host:port\".\n"
-    "The \":port\" part is in both cases optional and defaults to :411.\n\n"
+    "The address should be in the form of `dchub://host:port/' or `host:port'.\n"
+    "The `:port' part is in both cases optional and defaults to :411.\n\n"
     "Note that this command can only be used on hub tabs. If you want to open a new"
     " connection to a hub, you need to use /open first. For example:\n"
     "  /open testhub\n"
     "  /connect dchub://dc.some-test-hub.com/\n"
-    "See \"/help open\" for more information."
+    "See `/help open' for more information."
   },
   { "disconnect", c_disconnect,
     NULL, "Disconnect from a hub.",
@@ -643,10 +648,10 @@ static struct cmd cmds[] = {
   { "say",  c_say,
     "<message>", "Send a chat message.",
     "You normally don't have to use the /say command explicitely, any command not staring"
-    " with '/' will automatically imply \"/say <command>\". For example, typing \"hello.\""
-    " in the command line is equivalent to \"/say hello.\".\n\n"
+    " with '/' will automatically imply `/say <command>'. For example, typing `hello.'"
+    " in the command line is equivalent to `/say hello.'.\n\n"
     "Using the /say command explicitely may be useful to send message starting with '/' to"
-    " the chat, for example \"/say /help is what you are looking for\"."
+    " the chat, for example `/say /help is what you are looking for'."
   },
   { "set", c_set,
     "[<key> [<value>]]", "Get or set configuration variables.",
@@ -664,7 +669,11 @@ static struct cmd cmds[] = {
   },
   { "unshare", c_unshare,
     "[<name>]", "Remove a directory from your share.",
-    "" // TODO
+    "Use /unshare without arguments to get a list of shared directories.\n"
+    "To remove a single directory from your share, use `/unshare <name>'.\n"
+    "To remove all directories from your share, use `/unshare /'.\n\n"
+    "Note: All hash data for the removed directories will be thrown away. All"
+    " files will be re-hashed again when the directory is later re-added."
   },
   { "userlist", c_userlist,
     NULL, "Open the user list.",

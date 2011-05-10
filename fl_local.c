@@ -78,7 +78,7 @@ static char *fl_local_path(struct fl_list *fl) {
 
 
 // should be run from a timer. periodically flushes all unsaved data to disk.
-static gboolean fl_flush(gpointer dat) {
+gboolean fl_flush(gpointer dat) {
   if(fl_needflush && fl_local_list) {
     // save our file list
     GError *err = NULL;
@@ -645,10 +645,16 @@ void fl_refresh(const char *dir) {
 // when a currently-being-hashed file is removed due to the directory not being
 // present in the config file anymore).
 void fl_unshare(const char *dir) {
-  struct fl_list *fl = fl_list_file(fl_local_list, dir);
-  g_return_if_fail(fl);
-  fl_refresh_delhash(fl);
-  fl_list_remove(fl);
+  if(dir) {
+    struct fl_list *fl = fl_list_file(fl_local_list, dir);
+    g_return_if_fail(fl);
+    fl_refresh_delhash(fl);
+    fl_list_remove(fl);
+  } else {
+    fl_refresh_delhash(fl_local_list);
+    fl_list_free(fl_local_list);
+    fl_local_list = NULL;
+  }
   // force a refresh, people may be in a hurry with removing stuff
   fl_needflush = TRUE;
   fl_flush(NULL);

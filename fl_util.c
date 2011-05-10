@@ -141,9 +141,17 @@ struct fl_list *fl_list_file(const struct fl_list *dir, const char *name) {
   struct fl_list cmp;
   cmp.name = (char *)dir;
   GSequenceIter *iter = g_sequence_iter_prev(g_sequence_search(fl_local_list->sub, &cmp, fl_list_cmp, NULL));
-  return g_sequence_iter_is_end(iter) ? NULL : g_sequence_get(iter);
+  return g_sequence_iter_is_end(iter)
+    || strcmp(name, ((struct fl_list *)g_sequence_get(iter))->name) != 0 ? NULL : g_sequence_get(iter);
 }
 
+
+gboolean fl_list_is_child(const struct fl_list *parent, const struct fl_list *child) {
+  for(child=child->parent; child; child=child->parent)
+    if(child == parent)
+      return TRUE;
+  return FALSE;
+}
 
 
 

@@ -35,7 +35,7 @@
 
 char           *fl_local_list_file;
 struct fl_list *fl_local_list  = NULL;
-gboolean        fl_is_refreshing = FALSE;
+GQueue         *fl_refresh_queue = NULL;
 static gboolean fl_needflush = FALSE;
 // index of the files in fl_local_list. Key = TTH root, value = GSList of files
 static GHashTable *fl_hash_index;
@@ -45,7 +45,6 @@ static GThreadPool *fl_hash_pool;
 
 GHashTable            *fl_hash_queue = NULL; // set of files-to-hash
 guint64                fl_hash_queue_size = 0;
-int                    fl_hash_queue_length = 0; //unused
 static struct fl_list *fl_hash_cur = NULL;   // most recent file initiated for hashing
 static int             fl_hash_reset = 0;    // increased when fl_hash_cur is removed from the queue
 struct ratecalc        fl_hash_rate;
@@ -60,6 +59,8 @@ static GDBM_FILE   fl_hashdat;
 // Get full path to an item in our list. Result should be free'd. This function
 // isn't particularly fast.
 static char *fl_local_path(struct fl_list *fl) {
+  if(!fl->parent->parent)
+    return g_key_file_get_string(conf_file, "share", fl->name, NULL);
   char *tmp, *root, *path = g_strdup(fl->name);
   struct fl_list *cur = fl->parent;
   while(cur->parent && cur->parent->parent) {
@@ -79,14 +80,17 @@ static char *fl_local_path(struct fl_list *fl) {
 
 // should be run from a timer. periodically flushes all unsaved data to disk.
 gboolean fl_flush(gpointer dat) {
-  if(fl_needflush && fl_local_list) {
+  if(fl_needflush) {
     // save our file list
-    GError *err = NULL;
-    if(!fl_save(fl_local_list, fl_local_list_file, &err)) {
-      // this is a pretty fatal error... oh well, better luck next time
-      ui_msgf(UIMSG_MAIN, "Error saving file list: %s", err->message);
-      g_error_free(err);
-    }
+    if(fl_local_list) {
+      GError *err = NULL;
+      if(!fl_save(fl_local_list, fl_local_list_file, &err)) {
+        // this is a pretty fatal error... oh well, better luck next time
+        ui_msgf(UIMSG_MAIN, "Error saving file list: %s", err->message);
+        g_error_free(err);
+      }
+    } else
+      unlink(fl_local_list_file);
 
     // sync the hash data
     gdbm_sync(fl_hashdat);
@@ -249,7 +253,8 @@ static void fl_hashindex_sethash(struct fl_list *fl, char *tth, time_t lastmod, 
 // Scanning directories
 
 struct fl_scan_args {
-  char **name, **path;
+  struct fl_list **file, **res;
+  char **path;
   gboolean (*donefun)(gpointer);
 };
 
@@ -321,30 +326,21 @@ static void fl_scan_dir(struct fl_list *parent, const char *path) {
 }
 
 
-// Must be called in a separate thread. The ownership over the first argument
-// is passed to this function, and should not be relied upon after calling
-// g_thread_pool_push().
+// Must be called in a separate thread.
 static void fl_scan_thread(gpointer data, gpointer udata) {
   struct fl_scan_args *args = data;
 
-  struct fl_list *root = g_slice_new0(struct fl_list);
-  root->sub = g_sequence_new(fl_list_free);
-
-  int i, len = g_strv_length(args->name);
+  int i, len = g_strv_length(args->path);
   for(i=0; i<len; i++) {
     struct fl_list *cur = g_slice_new0(struct fl_list);
     char *tmp = g_filename_from_utf8(args->path[i], -1, NULL, NULL, NULL);
     cur->sub = g_sequence_new(fl_list_free);
-    cur->name = g_strdup(args->name[i]);
     fl_scan_dir(cur, tmp);
     g_free(tmp);
-    fl_list_add(root, cur);
+    args->res[i] = cur;
   }
 
-  g_idle_add_full(G_PRIORITY_HIGH_IDLE, args->donefun, root, NULL);
-  g_strfreev(args->name);
-  g_strfreev(args->path);
-  g_free(args);
+  g_idle_add_full(G_PRIORITY_HIGH_IDLE, args->donefun, args, NULL);
 }
 
 
@@ -508,7 +504,28 @@ fl_hash_done_f:
 
 
 
-// Refresh filelist & unshare directories
+// Refresh filelist & (un)share directories
+
+
+// get or create a root directory
+static struct fl_list *fl_refresh_getroot(const char *name) {
+  // no root? create!
+  if(!fl_local_list) {
+    fl_local_list = g_slice_new0(struct fl_list);
+    fl_local_list->sub = g_sequence_new(fl_list_free);
+  }
+  struct fl_list *cur = fl_list_file(fl_local_list, name);
+  // dir not present yet? create a stub
+  if(!cur) {
+    cur = g_slice_new0(struct fl_list);
+    cur->name = g_strdup(name);
+    cur->incomplete = TRUE;
+    cur->sub = g_sequence_new(fl_list_free);
+    fl_list_add(fl_local_list, cur);
+  }
+  return cur;
+}
+
 
 static void fl_refresh_addhash(struct fl_list *cur) {
   GSequenceIter *i;
@@ -590,52 +607,105 @@ static void fl_refresh_compare(struct fl_list *old, struct fl_list *new) {
  *  f  -  delete f
  */
 
+static gboolean fl_refresh_scanned(gpointer dat);
 
-static gboolean fl_refresh_scanned(gpointer dat) {
-  struct fl_list *list = dat;
-
-  fl_is_refreshing = FALSE;
-
-  if(!fl_local_list) {
-    fl_local_list = list;
-    fl_refresh_addhash(list);
-  } else {
-    // TODO: handle partial refreshes
-    fl_refresh_compare(fl_local_list, list);
-    fl_list_free(list);
-  }
-
-  // Force a flush
-  fl_needflush = TRUE;
-  fl_flush(NULL);
-  ui_msgf(UIMSG_NOTIFY, "File list refresh finished.");
-  return FALSE;
-}
-
-
-// TODO: specifying a dir does not really work yet.
-void fl_refresh(const char *dir) {
-  fl_is_refreshing = TRUE;
-  // TODO: allow only one refresh at a time?
+static void fl_refresh_process() {
+  if(!fl_refresh_queue->head)
+    return;
 
   // construct the list of to-be-scanned directories
+  struct fl_list *dir = fl_refresh_queue->head->data;
   struct fl_scan_args *args = g_new0(struct fl_scan_args, 1);
   args->donefun = fl_refresh_scanned;
-  if(dir) {
-    args->name = g_new0(char *, 2);
+
+  // one dir, the simple case
+  if(dir != fl_local_list) {
+    args->file = g_new0(struct fl_list *, 2);
+    args->res = g_new0(struct fl_list *, 2);
     args->path = g_new0(char *, 2);
-    args->name[0] = g_strdup(dir);
-    args->path[0] = g_key_file_get_string(conf_file, "share", dir, NULL);
+    args->file[0] = dir;
+    args->path[0] = fl_local_path(dir);
+
+  // refresh the entire share, which consists of multiple dirs.
   } else {
-    args->name = g_key_file_get_keys(conf_file, "share", NULL, NULL);
-    int i, len = g_strv_length(args->name);
+    char **names = g_key_file_get_keys(conf_file, "share", NULL, NULL);
+    int i, len = g_strv_length(names);
+    args->file = g_new0(struct fl_list *, len+1);
+    args->res  = g_new0(struct fl_list *, len+1);
     args->path = g_new0(char *, len+1);
-    for(i=0; i<len; i++)
-      args->path[i] = g_key_file_get_string(conf_file, "share", args->name[i], NULL);
+    for(i=0; i<len; i++) {
+      args->file[i] = fl_refresh_getroot(names[i]);
+      args->path[i] = g_key_file_get_string(conf_file, "share", names[i], NULL);
+    }
+    g_strfreev(names);
   }
 
   // scan the requested directories in the background
   g_thread_pool_push(fl_scan_pool, args, NULL);
+}
+
+
+static gboolean fl_refresh_scanned(gpointer dat) {
+  struct fl_scan_args *args = dat;
+
+  // TODO: I'm assuming here that the scanned directory has not been /unshare'd
+  // in the meanwhile. In the case that did happen, we're going to crash. :-(
+  // (Note that besides /unshare it is not possible for a dir to get removed
+  // from the share while refreshing. Only one refresh is allowed to be
+  // processed at a time, so no directories could have been removed in some
+  // concurrent refresh.)
+
+  int i, len = g_strv_length(args->path);
+  for(i=0; i<len; i++) {
+    fl_refresh_compare(args->file[i], args->res[i]);
+    fl_list_free(args->res[i]);
+  }
+
+  fl_needflush = TRUE;
+  g_strfreev(args->path);
+  g_free(args->file);
+  g_free(args->res);
+  g_free(args);
+
+  g_queue_pop_head(fl_refresh_queue);
+  if(fl_refresh_queue->head)
+    fl_refresh_process();
+  else {
+    // force a flush when all queued refreshes have been processed
+    fl_flush(NULL);
+    ui_msgf(UIMSG_NOTIFY, "File list refresh finished.");
+  }
+  return FALSE;
+}
+
+
+void fl_refresh(struct fl_list *dir) {
+  if(!dir)
+    dir = fl_local_list;
+  GList *n;
+  for(n=fl_refresh_queue->head; n; n=n->next) {
+    struct fl_list *c = n->data;
+    // if current dir is part of listed dir then it's already queued
+    if(dir == c || fl_list_is_child(c, dir))
+      return;
+    // if listed dir is part of current dir, then we can remove that item (provided it's not being refreshed currently)
+    if(n->prev && (dir == fl_local_list || fl_list_is_child(c, dir))) {
+      n = n->prev;
+      g_queue_delete_link(fl_refresh_queue, n->next);
+    }
+  }
+
+  // add to queue and process
+  g_queue_push_tail(fl_refresh_queue, dir);
+  if(fl_refresh_queue->head == fl_refresh_queue->tail)
+    fl_refresh_process();
+}
+
+
+// Adds a directory to the file list and initiates a refresh on it (Assumes the
+// directory has already been added to the config file).
+void fl_share(const char *dir) {
+  fl_refresh(fl_refresh_getroot(dir));
 }
 
 
@@ -650,7 +720,7 @@ void fl_unshare(const char *dir) {
     g_return_if_fail(fl);
     fl_refresh_delhash(fl);
     fl_list_remove(fl);
-  } else {
+  } else if(fl_local_list) {
     fl_refresh_delhash(fl_local_list);
     fl_list_free(fl_local_list);
     fl_local_list = NULL;
@@ -696,6 +766,7 @@ void fl_init() {
   // init stuff
   fl_local_list = NULL;
   fl_local_list_file = g_build_filename(conf_dir, "files.xml.bz2", NULL);
+  fl_refresh_queue = g_queue_new();
   fl_hashdat_file = g_build_filename(conf_dir, "hashdata.dat", NULL);
   fl_scan_pool = g_thread_pool_new(fl_scan_thread, NULL, 1, FALSE, NULL);
   fl_hash_pool = g_thread_pool_new(fl_hash_thread, NULL, 1, FALSE, NULL);

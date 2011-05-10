@@ -541,9 +541,8 @@ static void c_share(char *args) {
       else {
         g_key_file_set_string(conf_file, "share", argv[0], path);
         conf_save();
-        //TODO: fl_refresh(argv[0]);
+        fl_share(argv[0]);
         ui_logwindow_printf(tab->log, "Added to share: /%s -> %s", argv[0], path);
-        ui_logwindow_add(tab->log, "Note: Your file list is not refreshed automatically. Use /refresh to update your list after you are done.");
       }
       if(dirs)
         g_strfreev(dirs);

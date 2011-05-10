@@ -595,7 +595,7 @@ static void ui_draw_status() {
     mvaddstr(winrows-1, 0, ui_msg_text);
     return;
   }
-  if(fl_is_refreshing)
+  if(fl_refresh_queue && fl_refresh_queue->head)
     mvaddstr(winrows-1, 0, "[Refreshing share]");
   else if(fl_hash_queue && g_hash_table_size(fl_hash_queue)) {
     char *tmp = g_strdup_printf("[Hashing: %d / %s / %.2f MiB/s]",

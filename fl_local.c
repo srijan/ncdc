@@ -43,11 +43,12 @@ static GHashTable *fl_hash_index;
 static GThreadPool *fl_scan_pool;
 static GThreadPool *fl_hash_pool;
 
-static GSList  *fl_hash_queue = NULL; // more like a stack, but hashing order doesn't matter anyway
-static int      fl_hash_reset = 0;    // increased every time fl_hash_queue is re-generated
-int             fl_hash_queue_length = 0;
-guint64         fl_hash_queue_size = 0;
-struct ratecalc fl_hash_rate;
+GHashTable            *fl_hash_queue = NULL; // set of files-to-hash
+guint64                fl_hash_queue_size = 0;
+int                    fl_hash_queue_length = 0; //unused
+static struct fl_list *fl_hash_cur = NULL;   // most recent file initiated for hashing
+static int             fl_hash_reset = 0;    // increased when fl_hash_cur is removed from the queue
+struct ratecalc        fl_hash_rate;
 
 static char       *fl_hashdat_file;
 static GDBM_FILE   fl_hashdat;
@@ -365,8 +366,29 @@ struct fl_hash_args {
   GError *err;       // set by hash thread
   time_t lastmod;    // set by hash thread
   gdouble time;      // set by hash thread
-  int resetnum;      // used by main thread to validate that *file is still alive (results are discarded otherwise)
+  int resetnum;      // used by hash thread to validate that *file is still in the queue
 };
+
+
+// adding/removing items from the files-to-be-hashed queue
+#define fl_hash_queue_append(fl) do {\
+    gboolean start = !g_hash_table_size(fl_hash_queue);\
+    g_hash_table_insert(fl_hash_queue, fl, (void *)1);\
+    fl_hash_queue_size += fl->size;\
+    if(start)\
+      fl_hash_process();\
+  } while(0)
+
+
+#define fl_hash_queue_del(fl) do {\
+    if((fl)->isfile && g_hash_table_lookup(fl_hash_queue, fl)) {\
+      fl_hash_queue_size -= fl->size;\
+      g_hash_table_remove(fl_hash_queue, fl);\
+      if((fl) == fl_hash_cur)\
+        g_atomic_int_inc(&fl_hash_reset);\
+    }\
+  } while(0)
+
 
 static gboolean fl_hash_done(gpointer dat);
 
@@ -422,36 +444,22 @@ fl_hash_finish:
 }
 
 
-// actually does a prepend, but whatever
-static void fl_hash_queue_append(struct fl_list *fl) {
-  fl_hash_queue = g_slist_prepend(fl_hash_queue, fl);
-  fl_hash_queue_length++;
-  fl_hash_queue_size += fl->size;
-}
-
-
-static void fl_hash_queue_reset() {
-  g_atomic_int_inc(&fl_hash_reset);
-  g_slist_free(fl_hash_queue);
-  fl_hash_queue = NULL;
-  fl_hash_queue_length = 0;
-  fl_hash_queue_size = 0;
-  ratecalc_unregister(&fl_hash_rate);
-  ratecalc_reset(&fl_hash_rate);
-}
-
-
 static void fl_hash_process() {
-  if(!fl_hash_queue) {
+  if(!g_hash_table_size(fl_hash_queue)) {
     ratecalc_unregister(&fl_hash_rate);
     ratecalc_reset(&fl_hash_rate);
     return;
   }
   ratecalc_register(&fl_hash_rate);
 
-  struct fl_list *file = fl_hash_queue->data;
-  fl_hash_queue = g_slist_remove_link(fl_hash_queue, fl_hash_queue);
+  // get one item from fl_hash_queue
+  GHashTableIter iter;
+  struct fl_list *file;
+  g_hash_table_iter_init(&iter, fl_hash_queue);
+  g_hash_table_iter_next(&iter, (gpointer *)&file, NULL);
+  fl_hash_cur = file;
 
+  // pass stuff to the hash thread
   struct fl_hash_args *args = g_new0(struct fl_hash_args, 1);
   args->file = file;
   char *tmp = fl_local_path(file);
@@ -465,14 +473,13 @@ static void fl_hash_process() {
 
 static gboolean fl_hash_done(gpointer dat) {
   struct fl_hash_args *args = dat;
-  struct fl_list *fl;
+  struct fl_list *fl = args->file;
 
-  // discard this hash if the queue/filelist has been modified
-  if(g_atomic_int_get(&fl_hash_reset) != args->resetnum)
+  // remove file from queue, ignore this hash if the file was already removed
+  // by some other process.
+  if(!g_hash_table_remove(fl_hash_queue, fl))
     goto fl_hash_done_f;
 
-  fl = args->file;
-  fl_hash_queue_length--;
   fl_hash_queue_size -= fl->size;
 
   if(args->err) {
@@ -483,16 +490,17 @@ static gboolean fl_hash_done(gpointer dat) {
 
   // update file and hash info
   fl_hashindex_sethash(fl, args->root, args->lastmod, args->blocksize, args->blocks);
-  g_free(args->blocks);
 
   ui_msgf(UIMSG_MAIN, "Finished hashing %s. [%.2f MiB/s]", fl->name, ((double)fl->size)/(1024.0*1024.0)/args->time);
   fl_needflush = TRUE;
 
 fl_hash_done_f:
-  // Hash next file in the queue
-  fl_hash_process();
+  if(args->blocks)
+    g_free(args->blocks);
   g_free(args->path);
   g_free(args);
+  // Hash next file in the queue
+  fl_hash_process();
   return FALSE;
 }
 
@@ -515,6 +523,7 @@ static void fl_refresh_addhash(struct fl_list *cur) {
 
 
 static void fl_refresh_delhash(struct fl_list *cur) {
+  fl_hash_queue_del(cur);
   if(cur->isfile && cur->hastth)
     fl_hashindex_del(cur);
   else if(!cur->isfile) {
@@ -587,12 +596,6 @@ static gboolean fl_refresh_scanned(gpointer dat) {
 
   fl_is_refreshing = FALSE;
 
-  // Note: we put *all* to-be-hashed files in a queue. This queue can be pretty
-  // huge. It may be a better idea to put a maximum on it and check the actual
-  // file list for more to-be-hashed files each time the queue has been
-  // depleted. This probably requires a "needsrehash" flag in struct fl_list.
-  fl_hash_queue_reset();
-
   if(!fl_local_list) {
     fl_local_list = list;
     fl_refresh_addhash(list);
@@ -601,9 +604,6 @@ static gboolean fl_refresh_scanned(gpointer dat) {
     fl_refresh_compare(fl_local_list, list);
     fl_list_free(list);
   }
-
-  // initiate hashing (if necessary)
-  fl_hash_process();
 
   // Force a flush
   fl_needflush = TRUE;
@@ -677,6 +677,7 @@ void fl_init() {
   fl_hashdat_file = g_build_filename(conf_dir, "hashdata.dat", NULL);
   fl_scan_pool = g_thread_pool_new(fl_scan_thread, NULL, 1, FALSE, NULL);
   fl_hash_pool = g_thread_pool_new(fl_hash_thread, NULL, 1, FALSE, NULL);
+  fl_hash_queue = g_hash_table_new(g_direct_hash, g_direct_equal);
   // Even though the keys are the tth roots, we can just use g_int_hash. The
   // first four bytes provide enough unique data anyway.
   fl_hash_index = g_hash_table_new(g_int_hash, fl_init_hash_equal);
@@ -727,7 +728,7 @@ void fl_init() {
 // flush and close
 void fl_close() {
   // tell the hasher to stop
-  fl_hash_queue_reset();
+  g_atomic_int_inc(&fl_hash_reset);
   fl_flush(NULL);
   gdbm_close(fl_hashdat);
 }

@@ -161,7 +161,8 @@ static void set_bool(char *group, char *key, char *val) {
     UNSET(group, key);
   else {
     gboolean new = FALSE;
-    if(strcmp(val, "1") == 0 || strcmp(val, "t") == 0 || strcmp(val, "y") == 0 || strcmp(val, "true") == 0 || strcmp(val, "yes") == 0)
+    if(strcmp(val, "1") == 0 || strcmp(val, "t") == 0 || strcmp(val, "y") == 0
+        || strcmp(val, "true") == 0 || strcmp(val, "yes") == 0 || strcmp(val, "on") == 0)
       new = TRUE;
     g_key_file_set_boolean(conf_file, group, key, new);
     get_bool(group, key);

@@ -508,7 +508,7 @@ fl_hash_done_f:
 
 
 
-// Refresh filelist
+// Refresh filelist & unshare directories
 
 static void fl_refresh_addhash(struct fl_list *cur) {
   GSequenceIter *i;
@@ -636,6 +636,22 @@ void fl_refresh(const char *dir) {
 
   // scan the requested directories in the background
   g_thread_pool_push(fl_scan_pool, args, NULL);
+}
+
+
+// Only affects the filelist and hash data, does not modify the config file.
+// This function is far more efficient than removing the dir from the config
+// and doing a /refresh. (Which may also result in some errors being displayed
+// when a currently-being-hashed file is removed due to the directory not being
+// present in the config file anymore).
+void fl_unshare(const char *dir) {
+  struct fl_list *fl = fl_list_file(fl_local_list, dir);
+  g_return_if_fail(fl);
+  fl_refresh_delhash(fl);
+  fl_list_remove(fl);
+  // force a refresh, people may be in a hurry with removing stuff
+  fl_needflush = TRUE;
+  fl_flush(NULL);
 }
 
 

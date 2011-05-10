@@ -70,7 +70,8 @@ void fl_list_free(gpointer dat) {
 
 // Must return 0 if and only if a and b are equal, assuming they do reside in
 // the same directory. A name comparison is enough for this. It is assumed that
-// names are case-sensitive.
+// names are case-sensitive.  (Actually, this function may not access other
+// members than the name, otherwise a file-by-name lookup wouldn't work.)
 gint fl_list_cmp(gconstpointer a, gconstpointer b, gpointer dat) {
   return strcmp(((struct fl_list *)a)->name, ((struct fl_list *)b)->name);
 }
@@ -116,7 +117,7 @@ void fl_list_remove(struct fl_list *fl) {
 }
 
 
-struct fl_list *fl_list_copy(struct fl_list *fl) {
+struct fl_list *fl_list_copy(const struct fl_list *fl) {
   struct fl_list *cur = g_slice_dup(struct fl_list, fl);
   cur->name = g_strdup(fl->name);
   cur->parent = NULL;
@@ -132,6 +133,15 @@ struct fl_list *fl_list_copy(struct fl_list *fl) {
     }
   }
   return cur;
+}
+
+
+// get a file by name in a directory
+struct fl_list *fl_list_file(const struct fl_list *dir, const char *name) {
+  struct fl_list cmp;
+  cmp.name = (char *)dir;
+  GSequenceIter *iter = g_sequence_iter_prev(g_sequence_search(fl_local_list->sub, &cmp, fl_list_cmp, NULL));
+  return g_sequence_iter_is_end(iter) ? NULL : g_sequence_get(iter);
 }
 
 

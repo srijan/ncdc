@@ -558,14 +558,19 @@ static void c_unshare(char *args) {
   g_return_if_fail(tab->log);
   if(!args[0])
     c_share("");
-  else if(!g_key_file_has_key(conf_file, "share", args, NULL))
-    ui_logwindow_add(tab->log, "No shared directory with that name.");
   else {
-    g_key_file_remove_key(conf_file, "share", args, NULL);
-    conf_save();
-    ui_logwindow_printf(tab->log, "Directory unshared: /%s", args);
-    ui_logwindow_add(tab->log, "Note: Your file list is not refreshed automatically. Use /refresh to update your list after you are done.");
-    // TODO: update share
+    while(args[0] == '/')
+      args++;
+    char *path = g_key_file_get_string(conf_file, "share", args, NULL);
+    if(!path)
+      ui_logwindow_add(tab->log, "No shared directory with that name.");
+    else {
+      g_key_file_remove_key(conf_file, "share", args, NULL);
+      conf_save();
+      fl_unshare(args);
+      ui_logwindow_printf(tab->log, "Directory /%s (%s) removed from share.", args, path);
+    }
+    g_free(path);
   }
 }
 

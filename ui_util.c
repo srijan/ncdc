@@ -308,12 +308,10 @@ void ui_cmdhist_close() {
 
 // Text input "widget"
 // TODO: tab completion
-// TODO: use GString or something?
 
 struct ui_textinput {
-  int pos;
-  int len; // number of characters in *str
-  gunichar *str; // zero-terminated UCS-4 string
+  int pos; // position of the cursor, in number of characters
+  GString *str;
   gboolean usehist;
   int s_pos;
   char *s_q;
@@ -324,8 +322,7 @@ struct ui_textinput {
 
 struct ui_textinput *ui_textinput_create(gboolean usehist) {
   struct ui_textinput *ti = g_new0(struct ui_textinput, 1);
-  ti->str = g_new0(gunichar, 1);
-  ti->len = 0;
+  ti->str = g_string_new("");
   ti->usehist = usehist;
   ti->s_pos = -1;
   return ti;
@@ -333,7 +330,7 @@ struct ui_textinput *ui_textinput_create(gboolean usehist) {
 
 
 void ui_textinput_free(struct ui_textinput *ti) {
-  g_free(ti->str);
+  g_string_free(ti->str, TRUE);
   if(ti->s_q)
     g_free(ti->s_q);
   g_free(ti);
@@ -341,16 +338,13 @@ void ui_textinput_free(struct ui_textinput *ti) {
 
 
 void ui_textinput_set(struct ui_textinput *ti, const char *str) {
-  g_free(ti->str);
-  glong written;
-  ti->str = g_utf8_to_ucs4(str, -1, NULL, &written, NULL);
-  g_assert(ti->str != NULL);
-  ti->pos = ti->len = written;
+  g_string_assign(ti->str, str);
+  ti->pos = g_utf8_strlen(ti->str->str, -1);
 }
 
 
 char *ui_textinput_get(struct ui_textinput *ti) {
-  return g_ucs4_to_utf8(ti->str, -1, NULL, NULL, NULL);
+  return g_strdup(ti->str->str);
 }
 
 
@@ -383,9 +377,11 @@ void ui_textinput_draw(struct ui_textinput *ti, int y, int x, int col) {
 
   // calculate f (in number of columns)
   int width = 0;
-  gunichar *str = ti->str;
-  for(i=0; i<=ti->pos && str[i]; i++)
-    width += gunichar_width(str[i]);
+  char *str = ti->str->str;
+  for(i=0; i<=ti->pos && *str; i++) {
+    width += gunichar_width(g_utf8_get_char(str));
+    str = g_utf8_next_char(str);
+  }
   int f = width - (col*85)/100;
   if(f < 0)
     f = 0;
@@ -395,20 +391,21 @@ void ui_textinput_draw(struct ui_textinput *ti, int y, int x, int col) {
   mvhline(y, x, ' ', col);
   move(y, x);
   int pos = 0;
-  char enc[7];
+  str = ti->str->str;
   i = 0;
   while(*str) {
-    f -= gunichar_width(*str);
+    char *ostr = str;
+    str = g_utf8_next_char(str);
+    int l = gunichar_width(g_utf8_get_char(ostr));
+    f -= l;
     if(f <= -col)
       break;
     if(f < 0) {
-      enc[g_unichar_to_utf8(*str, enc)] = 0;
-      addstr(enc);
+      addnstr(ostr, str-ostr);
       if(i < ti->pos)
-        pos += gunichar_width(*str);
+        pos += l;
     }
     i++;
-    str++;
   }
   move(y, x+pos);
   curs_set(1);
@@ -444,30 +441,31 @@ static void ui_textinput_search(struct ui_textinput *ti, gboolean backwards) {
 
 
 gboolean ui_textinput_key(struct ui_textinput *ti, guint64 key, char **str) {
+  int chars = g_utf8_strlen(ti->str->str, -1);
   switch(key) {
   case INPT_KEY(KEY_LEFT):
     if(ti->pos > 0) ti->pos--;
     break;
   case INPT_KEY(KEY_RIGHT):
-    if(ti->pos < ti->len) ti->pos++;
+    if(ti->pos < chars) ti->pos++;
     break;
   case INPT_KEY(KEY_END):
-    ti->pos = ti->len;
+    ti->pos = chars;
     break;
   case INPT_KEY(KEY_HOME):
     ti->pos = 0;
     break;
   case INPT_KEY(KEY_BACKSPACE):
     if(ti->pos > 0) {
-      memmove(ti->str + ti->pos - 1, ti->str + ti->pos, (ti->len - ti->pos + 1) * sizeof(gunichar));
+      char *pos = g_utf8_offset_to_pointer(ti->str->str, ti->pos-1);
+      g_string_erase(ti->str, pos-ti->str->str, g_utf8_next_char(pos)-pos);
       ti->pos--;
-      ti->len--;
     }
     break;
   case INPT_KEY(KEY_DC):
-    if(ti->pos < ti->len) {
-      memmove(ti->str + ti->pos, ti->str + ti->pos + 1, (ti->len - ti->pos) * sizeof(gunichar));
-      ti->len--;
+    if(ti->pos < chars) {
+      char *pos = g_utf8_offset_to_pointer(ti->str->str, ti->pos);
+      g_string_erase(ti->str, pos-ti->str->str, g_utf8_next_char(pos)-pos);
     }
     break;
   case INPT_KEY(KEY_UP):
@@ -482,12 +480,7 @@ gboolean ui_textinput_key(struct ui_textinput *ti, guint64 key, char **str) {
     break;
   default:
     if(INPT_TYPE(key) == 1) { // char
-      // increase string size by one (not *very* efficient...)
-      ti->len++;
-      ti->str = g_renew(gunichar, ti->str, ti->len+1);
-      // insert character
-      memmove(ti->str + ti->pos + 1, ti->str + ti->pos, (ti->len - ti->pos) * sizeof(gunichar));
-      ti->str[ti->pos] = INPT_CODE(key);
+      g_string_insert_unichar(ti->str, g_utf8_offset_to_pointer(ti->str->str, ti->pos)-ti->str->str, INPT_CODE(key));
       ti->pos++;
     } else
       return FALSE;

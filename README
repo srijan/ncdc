@@ -26,7 +26,7 @@ BUILDING
 
   - autotools and make and stuff
   - A C compiler, obviously
-  - ncurses & glib development files
+  - Header files for the above REQUIREMENTS
   - The 'makeheaders' program, which is assumed to be in your $PATH
     (Get it from http://www.hwaci.com/sw/mkhdr/index.html)
 

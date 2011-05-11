@@ -260,7 +260,7 @@ static void c_set(char *args) {
   struct setting *s;
   gboolean checkalt;
 
-  // seperate key/value
+  // separate key/value
   if((sep = strchr(args, ' '))) {
     *sep = 0;
     val = sep+1;
@@ -440,7 +440,7 @@ static void c_reconnect(char *args) {
   else {
     if(tab->hub->state != HUBS_IDLE)
       nmdc_disconnect(tab->hub);
-    c_connect(""); // also checks for the existance of "hubaddr"
+    c_connect(""); // also checks for the existence of "hubaddr"
   }
 }
 
@@ -647,10 +647,10 @@ static struct cmd cmds[] = {
   },
   { "say",  c_say,
     "<message>", "Send a chat message.",
-    "You normally don't have to use the /say command explicitely, any command not staring"
+    "You normally don't have to use the /say command explicitly, any command not staring"
     " with '/' will automatically imply `/say <command>'. For example, typing `hello.'"
     " in the command line is equivalent to `/say hello.'.\n\n"
-    "Using the /say command explicitely may be useful to send message starting with '/' to"
+    "Using the /say command explicitly may be useful to send message starting with '/' to"
     " the chat, for example `/say /help is what you are looking for'."
   },
   { "set", c_set,

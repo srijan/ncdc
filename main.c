@@ -83,7 +83,7 @@ static void handle_input() {
    * - It may be useful to use define_key() for some special (and common) codes
    * - Modifier keys will always be a problem. Most alt+key things work, except
    *   for those that may start a control code. alt+[ is a famous one, but
-   *   there are others (like alt+O on my system). This is system-dependend,
+   *   there are others (like alt+O on my system). This is system-dependent,
    *   and again we have no way of knowing these things. (except perhaps by
    *   reading termcap entries on our own?)
    */

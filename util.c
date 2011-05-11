@@ -153,7 +153,7 @@ void conf_save() {
  * in the middle of a string (e.g. UTF-16).
  *
  * This function may not represent best practice with respect to character set
- * conversion, nor has it been thouroughly tested.
+ * conversion, nor has it been thoroughly tested.
  */
 char *str_convert(const char *to, const char *from, const char *str) {
   GIConv cd = g_iconv_open(to, from);

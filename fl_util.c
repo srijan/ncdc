@@ -157,7 +157,7 @@ gboolean fl_list_is_child(const struct fl_list *parent, const struct fl_list *ch
 // Resolves a path string (Either absolute or relative to root). Does not
 // support stuff like ./ and ../, and '/' is assumed to refer to the given
 // root. (So '/dir' and 'dir' are simply equivalent)
-// Case-sensitive, and '/' is the only recoginised path separator
+// Case-sensitive, and '/' is the only recognised path separator
 struct fl_list *fl_list_from_path(struct fl_list *root, const char *path) {
   while(path[0] == '/')
     path++;

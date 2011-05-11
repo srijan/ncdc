@@ -78,6 +78,35 @@ static char *fl_local_path(struct fl_list *fl) {
 }
 
 
+// Similar to fl_list_from_path, except this function starts from the root of
+// the local filelist, and also accepts filesystem paths. In the latter case,
+// the path must be absolute and "real" (i.e., what realpath() would return),
+// since that is the path that is stored in the config file. This function
+// makes no attempt to convert the given path into a real path.
+struct fl_list *fl_local_from_path(const char *path) {
+  struct fl_list *n = fl_list_from_path(fl_local_list, path);
+  if(!n && path[0] == '/') {
+    char **names = g_key_file_get_keys(conf_file, "share", NULL, NULL);
+    char **name;
+    char *cpath = NULL;
+    for(name=names; name && *name; name++) {
+      cpath = g_key_file_get_string(conf_file, "share", *name, NULL);
+      if(strncmp(path, cpath, strlen(cpath)) == 0)
+        break;
+      g_free(cpath);
+    }
+    if(name && *name) {
+      char *npath = g_strconcat(*name, path+strlen(cpath), NULL);
+      n = fl_list_from_path(fl_local_list, npath);
+      g_free(cpath);
+      g_free(npath);
+    }
+    g_strfreev(names);
+  }
+  return n;
+}
+
+
 // should be run from a timer. periodically flushes all unsaved data to disk.
 gboolean fl_flush(gpointer dat) {
   if(fl_needflush) {

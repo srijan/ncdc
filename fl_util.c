@@ -139,8 +139,8 @@ struct fl_list *fl_list_copy(const struct fl_list *fl) {
 // get a file by name in a directory
 struct fl_list *fl_list_file(const struct fl_list *dir, const char *name) {
   struct fl_list cmp;
-  cmp.name = (char *)dir;
-  GSequenceIter *iter = g_sequence_iter_prev(g_sequence_search(fl_local_list->sub, &cmp, fl_list_cmp, NULL));
+  cmp.name = (char *)name;
+  GSequenceIter *iter = g_sequence_iter_prev(g_sequence_search(dir->sub, &cmp, fl_list_cmp, NULL));
   return g_sequence_iter_is_end(iter)
     || strcmp(name, ((struct fl_list *)g_sequence_get(iter))->name) != 0 ? NULL : g_sequence_get(iter);
 }
@@ -152,6 +152,31 @@ gboolean fl_list_is_child(const struct fl_list *parent, const struct fl_list *ch
       return TRUE;
   return FALSE;
 }
+
+
+// Resolves a path string (Either absolute or relative to root). Does not
+// support stuff like ./ and ../, and '/' is assumed to refer to the given
+// root. (So '/dir' and 'dir' are simply equivalent)
+// Case-sensitive, and '/' is the only recoginised path separator
+struct fl_list *fl_list_from_path(struct fl_list *root, const char *path) {
+  while(path[0] == '/')
+    path++;
+  if(!path[0])
+    return root;
+  g_assert(root->sub);
+  int slash = strcspn(path, "/");
+  char *name = g_strndup(path, slash);
+  struct fl_list *n = fl_list_file(root, name);
+  g_free(name);
+  if(!n)
+    return NULL;
+  if(slash == strlen(path))
+    return n;
+  if(n->isfile)
+    return NULL;
+  return fl_list_from_path(n, path+slash+1);
+}
+
 
 
 

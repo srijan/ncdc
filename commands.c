@@ -557,6 +557,9 @@ static void c_unshare(char *args) {
   g_return_if_fail(tab->log);
   if(!args[0])
     c_share("");
+  // otherwise we may crash
+  else if(fl_hash_queue && g_hash_table_size(fl_hash_queue))
+    ui_logwindow_add(tab->log, "Sorry, can't remove directories from the share while refreshing.");
   else {
     while(args[0] == '/')
       args++;
@@ -579,17 +582,13 @@ static void c_unshare(char *args) {
 }
 
 
-// TODO: refresh a single shared dir
-// The ability to refresh a single deep subdirectory would be awesome as well,
-// but probably less easy.
 static void c_refresh(char *args) {
   g_return_if_fail(tab->log);
-  if(args[0])
-    ui_logwindow_add(tab->log, "This command does not accept any arguments.");
-  else {
-    ui_logwindow_add(tab->log, "Refreshing file list...");
-    fl_refresh(NULL);
-  }
+  struct fl_list *n = fl_local_from_path(args);
+  if(!n)
+    ui_msgf(UIMSG_TAB, "Directory `%s' not found.", args);
+  else
+    fl_refresh(n);
 }
 
 
@@ -641,8 +640,10 @@ static struct cmd cmds[] = {
     "When your nick or the hub encoding have been changed, the new settings will be used after the reconnect."
   },
   { "refresh", c_refresh,
-    NULL, "Refresh file list.",
-    "" // TODO
+    "[<path>]", "Refresh file list.",
+    "Initiates a refresh. If no argument is given, the complete list will be refreshed."
+    " Otherwise only the specified directory will be refreshed.\n\n"
+    "The path argument can be either an absolute filesystem path or a virtual path within your share."
   },
   { "say",  c_say,
     "<message>", "Send a chat message.",
@@ -658,8 +659,16 @@ static struct cmd cmds[] = {
     "/set <key> without value will print out the current value."
   },
   { "share", c_share,
-    "[<name> <directory>]", "Add a directory to your share.",
-    "" // TODO
+    "[<name> <path>]", "Add a directory to your share.",
+    "Use /share without arguments to get a list of shared directories.\n"
+    "When called with a name and a path, the path will be added to your share.\n"
+    "Note that shell escaping may be used in the name. For example, to add a"
+    " directory with the name `Fun Stuff', you could do the following:\n"
+    "  /share \"Fun Stuff\" /path/to/fun/stuff\n"
+    "Or:\n"
+    "  /share Fun\\ Stuff /path/to/fun/stuff\n\n"
+    "The full path to the directory will not be visible to others, only the name you give it will be public.\n"
+    "An initial `/refresh' is done automatically on the added directory."
   },
   { "unset", c_unset,
     "<key>", "Unset a configuration variable.",
@@ -692,8 +701,8 @@ void cmd_handle(char *ostr) {
   }
 
   // the current opened tab is where this command came from, and where the
-  // "replies" should be sent back to. (This tab is assumed to have a logwindow
-  // object - though this assumption can be relaxed in the future)
+  // "replies" should be sent back to. (Some commands require this tab to have
+  // a logwindow, others report to ui_msg())
   tab = ui_tab_cur->data;
 
   // extract the command from the string

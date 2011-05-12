@@ -275,6 +275,31 @@ char *str_formatsize(guint64 size) {
 }
 
 
+// Prefixes all strings in the array-of-strings with a string, obtained by
+// concatenating all arguments together. Last argument must be NULL.
+void strv_prefix(char **arr, const char *str, ...) {
+  // create the prefix
+  va_list va;
+  va_start(va, str);
+  char *prefix = g_strdup(str);
+  const char *c;
+  while((c = va_arg(va, const char *))) {
+    char *o = prefix;
+    prefix = g_strconcat(prefix, c, NULL);
+    g_free(o);
+  }
+  va_end(va);
+  // add the prefix to every string
+  char **a;
+  for(a=arr; *a; a++) {
+    char *o = *a;
+    *a = g_strconcat(prefix, *a, NULL);
+    g_free(o);
+  }
+  g_free(prefix);
+}
+
+
 
 
 // from[24] (binary) -> to[39] (ascii - no padding zero will be added)

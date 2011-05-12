@@ -558,7 +558,7 @@ static void c_unshare(char *args) {
   if(!args[0])
     c_share("");
   // otherwise we may crash
-  else if(fl_hash_queue && g_hash_table_size(fl_hash_queue))
+  else if(fl_refresh_queue && fl_refresh_queue->head)
     ui_logwindow_add(tab->log, "Sorry, can't remove directories from the share while refreshing.");
   else {
     while(args[0] == '/')
@@ -728,5 +728,19 @@ void cmd_handle(char *ostr) {
     ui_logwindow_printf(tab->log, "Unknown command '%s'.", cmd);
 
   g_free(str);
+}
+
+
+void cmd_suggest(const char *str, char **sug) {
+  // complete command name
+  if(str[0] == '/' && !strchr(str, ' ')) {
+    struct cmd *c;
+    int i = 0;
+    int len = strlen(str)-1;
+    for(c=cmds; i<20 && c->f; c++)
+      if(strncmp(str+1, c->name, len) == 0 && strlen(c->name) != len)
+        sug[i++] = g_strconcat("/", c->name, NULL);
+  }
+  // TODO: delegate completion to the commands
 }
 

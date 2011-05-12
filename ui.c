@@ -571,7 +571,7 @@ void ui_tab_remove(struct ui_tab *tab) {
 
 void ui_init() {
   // global textinput field
-  ui_global_textinput = ui_textinput_create(TRUE);
+  ui_global_textinput = ui_textinput_create(TRUE, cmd_suggest);
 
   // first tab = main tab
   ui_tab_open(ui_main_create());

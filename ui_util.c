@@ -193,7 +193,7 @@ void ui_logwindow_draw(struct ui_logwindow *lw, int y, int x, int rows, int cols
 
 
 
-// Command history and tab completion
+// Command history
 // We only have one command history, so the struct and its instance is local to
 // this file, and the functions work with this instead of accepting an instance
 // as argument. The ui_textinput functions also access the struct and static
@@ -316,20 +316,59 @@ struct ui_textinput {
   int s_pos;
   char *s_q;
   gboolean s_top;
+  void (*complete)(const char *str, char **suggestions);
+  char *c_q, *c_last, **c_sug;
+  int c_cur;
 };
 
 
 
-struct ui_textinput *ui_textinput_create(gboolean usehist) {
+struct ui_textinput *ui_textinput_create(gboolean usehist, void (*complete)(const char *str, char **suggestions)) {
   struct ui_textinput *ti = g_new0(struct ui_textinput, 1);
   ti->str = g_string_new("");
   ti->usehist = usehist;
   ti->s_pos = -1;
+  ti->complete = complete;
   return ti;
 }
 
 
+static void ui_textinput_complete_reset(struct ui_textinput *ti) {
+  if(ti->complete) {
+    g_free(ti->c_q);
+    g_free(ti->c_last);
+    g_strfreev(ti->c_sug);
+    ti->c_q = ti->c_last = NULL;
+    ti->c_sug = NULL;
+  }
+}
+
+
+static void ui_textinput_complete(struct ui_textinput *ti) {
+  if(!ti->complete)
+    return;
+  if(!ti->c_q) {
+    ti->c_q = ui_textinput_get(ti);
+    char *sep = g_utf8_offset_to_pointer(ti->c_q, ti->pos);
+    ti->c_last = g_strdup(sep);
+    *(sep) = 0;
+    ti->c_cur = -1;
+    ti->c_sug = g_new0(char *, 25);
+    ti->complete(ti->c_q, ti->c_sug);
+    // TODO: alert when no suggestions are available?
+  }
+  if(!ti->c_sug[++ti->c_cur])
+    ti->c_cur = -1;
+  char *first = ti->c_cur < 0 ? ti->c_q : ti->c_sug[ti->c_cur];
+  char *str = g_strconcat(first, ti->c_last, NULL);
+  ui_textinput_set(ti, str);
+  ti->pos = g_utf8_strlen(first, -1);
+  g_free(str);
+}
+
+
 void ui_textinput_free(struct ui_textinput *ti) {
+  ui_textinput_complete_reset(ti);
   g_string_free(ti->str, TRUE);
   if(ti->s_q)
     g_free(ti->s_q);
@@ -346,6 +385,7 @@ void ui_textinput_set(struct ui_textinput *ti, const char *str) {
 char *ui_textinput_get(struct ui_textinput *ti) {
   return g_strdup(ti->str->str);
 }
+
 
 
 char *ui_textinput_reset(struct ui_textinput *ti) {
@@ -442,6 +482,7 @@ static void ui_textinput_search(struct ui_textinput *ti, gboolean backwards) {
 
 gboolean ui_textinput_key(struct ui_textinput *ti, guint64 key, char **str) {
   int chars = g_utf8_strlen(ti->str->str, -1);
+  gboolean completereset = TRUE;
   switch(key) {
   case INPT_KEY(KEY_LEFT):
     if(ti->pos > 0) ti->pos--;
@@ -475,6 +516,10 @@ gboolean ui_textinput_key(struct ui_textinput *ti, guint64 key, char **str) {
     else
       return FALSE;
     break;
+  case INPT_CTRL('i'): // tab
+    ui_textinput_complete(ti);
+    completereset = FALSE;
+    break;
   case INPT_CTRL('j'): // newline
     *str = ui_textinput_reset(ti);
     break;
@@ -485,6 +530,8 @@ gboolean ui_textinput_key(struct ui_textinput *ti, guint64 key, char **str) {
     } else
       return FALSE;
   }
+  if(completereset)
+    ui_textinput_complete_reset(ti);
   return TRUE;
 }
 

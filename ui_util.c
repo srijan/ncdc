@@ -460,23 +460,22 @@ void ui_textinput_draw(struct ui_textinput *ti, int y, int x, int col) {
 static void ui_textinput_search(struct ui_textinput *ti, gboolean backwards) {
   int start;
   if(ti->s_pos < 0) {
-    if(!backwards)
+    if(!backwards) {
+      ui_beep = TRUE;
       return;
+    }
     ti->s_q = ui_textinput_get(ti);
     start = cmdhist->last;
-    ti->s_top = FALSE;
   } else
-    start = ti->s_pos+(!backwards ? 1 : ti->s_top ? 0 : -1);
+    start = ti->s_pos+(backwards ? -1 : 1);
   int pos = ui_cmdhist_search(backwards, ti->s_q, start);
   if(pos >= 0) {
     ti->s_pos = pos;
     ti->s_top = FALSE;
     ui_textinput_set(ti, cmdhist->buf[pos & CMDHIST_BUF]);
-  } else if(backwards) {
-    ti->s_pos = start;
-    ti->s_top = TRUE;
-    ui_textinput_set(ti, "<end>");
-  } else {
+  } else if(backwards)
+    ui_beep = TRUE;
+  else {
     ti->s_pos = -1;
     ui_textinput_set(ti, ti->s_q);
     g_free(ti->s_q);

@@ -194,6 +194,16 @@ static void user_free(gpointer dat) {
 }
 
 
+// Get a user by a UTF-8 string. May fail if the UTF-8 -> hub encoding is not
+// really one-to-one
+struct nmdc_user *nmdc_user_get(struct nmdc_hub *hub, const char *name) {
+  char *name_hub = charset_convert(hub, FALSE, name);
+  struct nmdc_user *u = g_hash_table_lookup(hub->users, name_hub);
+  g_free(name_hub);
+  return u;
+}
+
+
 #define ASSIGN_OR_FREE(lval, rval) do { if(rval[0]) lval = rval; else { lval =  NULL; g_free(rval); } } while(0)
 
 static void user_myinfo(struct nmdc_hub *hub, struct nmdc_user *u, const char *str) {
@@ -360,6 +370,17 @@ void nmdc_say(struct nmdc_hub *hub, const char *str) {
 }
 
 
+void nmdc_msg(struct nmdc_hub *hub, struct nmdc_user *user, const char *str) {
+  char *msg = encode_and_escape(hub, str);
+  send_cmdf(hub, "$To: %s From: %s $<%s> %s", user->name_hub, hub->nick_hub, hub->nick_hub, msg);
+  g_free(msg);
+  // emulate protocol echo
+  msg = g_strdup_printf("<%s> %s", hub->nick, str);
+  ui_hub_msg(hub->tab, user, msg);
+  g_free(msg);
+}
+
+
 static void handle_cmd(struct nmdc_hub *hub, const char *cmd) {
   g_debug("%s< %s", hub->tab->name, cmd);
 
@@ -377,6 +398,7 @@ static void handle_cmd(struct nmdc_hub *hub, const char *cmd) {
   CMDREGEX(nicklist, "NickList (.+)");
   CMDREGEX(myinfo, "MyINFO \\$ALL ([^ $]+) (.+)");
   CMDREGEX(hubname, "HubName (.+)");
+  CMDREGEX(to, "To: ([^ $]+) From: ([^ $]+) \\$(.+)");
 
   // $Lock
   if(g_regex_match(lock, cmd, 0, &nfo)) { // 1 = lock
@@ -479,6 +501,25 @@ static void handle_cmd(struct nmdc_hub *hub, const char *cmd) {
     char *name = g_match_info_fetch(nfo, 1);
     hub->hubname = unescape_and_decode(hub, name);
     g_free(name);
+  }
+  g_match_info_free(nfo);
+
+  // $To
+  if(g_regex_match(to, cmd, 0, &nfo)) { // 1 = to, 2 = from, 3 = msg
+    char *to = g_match_info_fetch(nfo, 1);
+    char *from = g_match_info_fetch(nfo, 2);
+    char *msg = g_match_info_fetch(nfo, 3);
+    struct nmdc_user *u = g_hash_table_lookup(hub->users, from);
+    if(!u)
+      g_warning("[hub: %s] Got a $To from `%s', who is not on this hub!", hub->tab->name, from);
+    else {
+      char *msge = unescape_and_decode(hub, msg);
+      ui_hub_msg(hub->tab, u, msge);
+      g_free(msge);
+    }
+    g_free(from);
+    g_free(to);
+    g_free(msg);
   }
   g_match_info_free(nfo);
 

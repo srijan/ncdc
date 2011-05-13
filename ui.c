@@ -34,13 +34,17 @@
 #define UIT_MAIN     0
 #define UIT_HUB      1
 #define UIT_USERLIST 2
+#define UIT_MSG      3
 
 struct ui_tab {
   int type; // UIT_ type
   char *name;
-  struct ui_logwindow *log;    // MAIN, HUB
-  struct nmdc_hub *hub;        // HUB, USERLIST
+  struct ui_logwindow *log;    // MAIN, HUB, MSG
+  struct nmdc_hub *hub;        // HUB, USERLIST, MSG
   struct ui_tab *userlist_tab; // HUB
+  // MSG
+  struct nmdc_user *msg_user;
+  char *msg_uname;
   // USERLIST
   GSequence *users;
   GSequenceIter *user_sel;
@@ -118,6 +122,86 @@ static void ui_main_key(guint64 key) {
 
 
 
+
+// User message tab
+
+struct ui_tab *ui_msg_create(struct nmdc_hub *hub, struct nmdc_user *user) {
+  struct ui_tab *tab = g_new0(struct ui_tab, 1);
+  tab->type = UIT_MSG;
+  tab->hub = hub;
+  tab->msg_user = user;
+  tab->msg_uname = g_strdup(user->name);
+  tab->name = g_strdup_printf("~%s", user->name);
+  tab->log = ui_logwindow_create(tab->name);
+
+  ui_logwindow_printf(tab->log, "Chatting with %s on %s.", user->name, hub->tab->name);
+
+  return tab;
+}
+
+
+void ui_msg_close(struct ui_tab *tab) {
+  ui_tab_remove(tab);
+  ui_logwindow_free(tab->log);
+  g_free(tab->name);
+  g_free(tab->msg_uname);
+  g_free(tab);
+}
+
+
+static void ui_msg_draw(struct ui_tab *tab) {
+  ui_logwindow_draw(tab->log, 1, 0, winrows-4, wincols);
+
+  mvaddstr(winrows-3, 0, tab->name);
+  addstr("> ");
+  int pos = str_columns(tab->name)+2;
+  ui_textinput_draw(ui_global_textinput, winrows-3, pos, wincols-pos);
+}
+
+
+static char *ui_msg_title(struct ui_tab *tab) {
+  return g_strdup_printf("Chatting with %s on %s%s.",
+      tab->msg_uname, tab->hub->tab->name, tab->msg_user ? "" : " (disabled)");
+}
+
+
+static void ui_msg_key(struct ui_tab *tab, guint64 key) {
+  char *str = NULL;
+  switch(key) {
+  case INPT_KEY(KEY_NPAGE):
+    ui_logwindow_scroll(tab->log, winrows/2);
+    break;
+  case INPT_KEY(KEY_PPAGE):
+    ui_logwindow_scroll(tab->log, -winrows/2);
+    break;
+  default:
+    if(ui_textinput_key(ui_global_textinput, key, &str) && str) {
+      cmd_handle(str);
+      g_free(str);
+    }
+  }
+}
+
+
+static void ui_msg_msg(struct ui_tab *tab, const char *msg) {
+  ui_logwindow_add(tab->log, msg);
+}
+
+
+static void ui_msg_joinquit(struct ui_tab *tab, gboolean join, struct nmdc_user *user) {
+  if(join) {
+    ui_logwindow_printf(tab->log, "%s has joined.", user->name);
+    tab->msg_user = user;
+  } else {
+    ui_logwindow_printf(tab->log, "%s has quit.", user->name);
+    tab->msg_user = NULL;
+  }
+}
+
+
+
+
+
 // Hub tab
 
 struct ui_tab *ui_hub_create(const char *name) {
@@ -134,10 +218,21 @@ struct ui_tab *ui_hub_create(const char *name) {
 }
 
 
-void ui_hub_close(ui_tab *tab) {
-  // also close the userlist tab, if there is one
+void ui_hub_close(struct ui_tab *tab) {
+  // close the userlist tab
   if(tab->userlist_tab)
     ui_userlist_close(tab->userlist_tab);
+  // close msg tabs
+  GList *t;
+  for(t=ui_tabs; t;) {
+    if(((struct ui_tab *)t->data)->type == UIT_MSG && ((struct ui_tab *)t->data)->hub == tab->hub) {
+      GList *n = t->next;
+      ui_msg_close(t->data);
+      t = n;
+    } else
+      t = t->next;
+  }
+  // remove ourself from the list
   ui_tab_remove(tab);
 
   nmdc_free(tab->hub);
@@ -206,7 +301,30 @@ static void ui_hub_key(struct ui_tab *tab, guint64 key) {
 }
 
 
+struct ui_tab *ui_hub_getmsg(struct ui_tab *tab, struct nmdc_user *user) {
+  // This is slow when many tabs are open, should be improved...
+  GList *t;
+  struct ui_tab *mt;
+  for(t=ui_tabs; t; t=t->next) {
+    mt = t->data;
+    if(mt->type == UIT_MSG && mt->hub == tab->hub && (mt->msg_user == user || strcmp(mt->msg_uname, user->name) == 0))
+      return mt;
+  }
+  return NULL;
+}
+
+
 void ui_hub_joinquit(struct ui_tab *tab, gboolean join, struct nmdc_user *user) {
+  // notify msg tab, if any
+  struct ui_tab *t = ui_hub_getmsg(tab, user);
+  if(t)
+    ui_msg_joinquit(t, join, user);
+
+  // notify the userlist, when it is open
+  if(tab->userlist_tab)
+    ui_userlist_joinquit(tab->userlist_tab, join, user);
+
+  // display the join/quit, when requested
   gboolean log = conf_hub_get(boolean, tab->name, "show_joinquit");
   if(join) {
     if(log && tab->hub->sharecount == g_hash_table_size(tab->hub->users)
@@ -216,9 +334,17 @@ void ui_hub_joinquit(struct ui_tab *tab, gboolean join, struct nmdc_user *user) 
     if(log)
       ui_logwindow_printf(tab->log, "%s has quit.", user->name);
   }
+}
 
-  if(tab->userlist_tab)
-    ui_userlist_joinquit(tab->userlist_tab, join, user);
+
+void ui_hub_msg(struct ui_tab *tab, struct nmdc_user *user, const char *msg) {
+  struct ui_tab *t = ui_hub_getmsg(tab, user);
+  if(!t) {
+    t = ui_msg_create(tab->hub, user);
+    // TODO: This also puts the focus on the new tab, which is annoying.
+    ui_tab_open(t);
+  }
+  ui_msg_msg(t, msg);
 }
 
 
@@ -620,7 +746,8 @@ void ui_draw() {
   char *title =
     curtab->type == UIT_MAIN     ? ui_main_title() :
     curtab->type == UIT_HUB      ? ui_hub_title(curtab) :
-    curtab->type == UIT_USERLIST ? ui_userlist_title(curtab) : g_strdup("");
+    curtab->type == UIT_USERLIST ? ui_userlist_title(curtab) :
+    curtab->type == UIT_MSG      ? ui_msg_title(curtab) : g_strdup("");
   attron(A_REVERSE);
   mvhline(0, 0, ' ', wincols);
   mvaddstr(0, 0, title);
@@ -661,6 +788,7 @@ void ui_draw() {
   case UIT_MAIN:     ui_main_draw(); break;
   case UIT_HUB:      ui_hub_draw(curtab);  break;
   case UIT_USERLIST: ui_userlist_draw(curtab);  break;
+  case UIT_MSG:      ui_msg_draw(curtab);  break;
   }
 
   refresh();
@@ -720,6 +848,7 @@ void ui_input(guint64 key) {
       case UIT_MAIN:     ui_main_key(key); break;
       case UIT_HUB:      ui_hub_key(curtab, key); break;
       case UIT_USERLIST: ui_userlist_key(curtab, key); break;
+      case UIT_MSG:      ui_msg_key(curtab, key); break;
       }
     }
     // TODO: some user feedback on invalid key

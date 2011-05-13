@@ -413,12 +413,51 @@ static void c_quit(char *args) {
 
 static void c_say(char *args) {
   g_return_if_fail(tab->log);
-  if(tab->type != UIT_HUB)
-    ui_logwindow_add(tab->log, "Chatting only works on hub tabs.");
+  if(tab->type != UIT_HUB && tab->type != UIT_MSG)
+    ui_logwindow_add(tab->log, "This command can only be used on hub and message tabs.");
   else if(!tab->hub->nick_valid)
     ui_logwindow_add(tab->log, "Not connected or logged in yet.");
-  else
+  else if(!args[0])
+    ui_logwindow_add(tab->log, "Message empty.");
+  else if(tab->type == UIT_HUB)
     nmdc_say(tab->hub, args);
+  else if(!tab->msg_user)
+    ui_logwindow_add(tab->log, "User is not online.");
+  else
+    nmdc_msg(tab->hub, tab->msg_user, args);
+}
+
+
+static void c_msg(char *args) {
+  g_return_if_fail(tab->log);
+  char *sep = strchr(args, ' ');
+  if(sep) {
+    *sep = 0;
+    while(*(++sep) == ' ');
+  }
+  if(tab->type != UIT_HUB && tab->type != UIT_MSG)
+    ui_logwindow_add(tab->log, "This command can only be used on hub and message tabs.");
+  else if(!tab->hub->nick_valid)
+    ui_logwindow_add(tab->log, "Not connected or logged in yet.");
+  else if(!args[0])
+    ui_logwindow_add(tab->log, "No user specified. See `/help msg' for more information.");
+  else {
+    struct nmdc_user *u = nmdc_user_get(tab->hub, args);
+    if(!u)
+      ui_logwindow_add(tab->log, "No user found with that name. Note that usernames are case-sensitive.");
+    else {
+      // get or open tab and make sure it's selected
+      struct ui_tab *t = ui_hub_getmsg(tab, u);
+      if(!t) {
+        t = ui_msg_create(tab->hub, u);
+        ui_tab_open(t);
+      } else
+        ui_tab_cur = g_list_find(ui_tabs, t);
+      // if we need to send something, do so
+      if(sep && *sep)
+        nmdc_msg(tab->hub, t->msg_user, sep);
+    }
+  }
 }
 
 
@@ -582,6 +621,8 @@ static void c_close(char *args) {
     ui_hub_close(tab);
   else if(tab->type == UIT_USERLIST)
     ui_userlist_close(tab);
+  else if(tab->type == UIT_MSG)
+    ui_msg_close(tab);
 }
 
 
@@ -770,6 +811,11 @@ static struct cmd cmds[] = {
     "[<command>]", "Request information on commands.",
     "Use /help without arguments to list all the available commands.\n"
     "Use /help <command> to get information about a particular command."
+  },
+  { "msg", c_msg, NULL, // TODO: auto-complete nicks
+    "<user> [<message>]", "Send a private message.",
+    "Send a private message to a user on the currently opened hub.\n"
+    "When no message is given, the tab will be opened but no message will be sent."
   },
   { "open", c_open, c_open_sug,
     "<name>", "Open a new hub tab.",

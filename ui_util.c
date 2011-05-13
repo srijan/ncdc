@@ -307,7 +307,6 @@ void ui_cmdhist_close() {
 
 
 // Text input "widget"
-// TODO: tab completion
 
 struct ui_textinput {
   int pos; // position of the cursor, in number of characters
@@ -355,7 +354,6 @@ static void ui_textinput_complete(struct ui_textinput *ti) {
     ti->c_cur = -1;
     ti->c_sug = g_new0(char *, 25);
     ti->complete(ti->c_q, ti->c_sug);
-    // TODO: alert when no suggestions are available?
   }
   if(!ti->c_sug[++ti->c_cur])
     ti->c_cur = -1;
@@ -364,10 +362,12 @@ static void ui_textinput_complete(struct ui_textinput *ti) {
   ui_textinput_set(ti, str);
   ti->pos = g_utf8_strlen(first, -1);
   g_free(str);
+  if(!g_strv_length(ti->c_sug))
+    ui_beep = TRUE;
   // If there is only one suggestion: finalize this auto-completion and reset
   // state. This may be slightly counter-intuitive, but makes auto-completing
   // paths a lot less annoying.
-  if(g_strv_length(ti->c_sug) == 1)
+  if(g_strv_length(ti->c_sug) <= 1)
     ui_textinput_complete_reset(ti);
 }
 

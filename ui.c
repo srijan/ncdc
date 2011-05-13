@@ -62,6 +62,8 @@ GList *ui_tab_cur = NULL;
 int wincols;
 int winrows;
 
+gboolean ui_beep = FALSE; // set to true anywhere to send a beep
+
 
 
 
@@ -662,12 +664,16 @@ void ui_draw() {
   }
 
   refresh();
+  if(ui_beep) {
+    beep();
+    ui_beep = FALSE;
+  }
 }
 
 
 gboolean ui_checkupdate() {
   struct ui_tab *cur = ui_tab_cur->data;
-  return ui_msg_updated || (cur->log && cur->log->updated);
+  return ui_msg_updated || ui_beep || (cur->log && cur->log->updated);
 }
 
 

@@ -36,6 +36,7 @@
 char           *fl_local_list_file;
 struct fl_list *fl_local_list  = NULL;
 GQueue         *fl_refresh_queue = NULL;
+time_t          fl_refresh_last = 0;
 static gboolean fl_needflush = FALSE;
 // index of the files in fl_local_list. Key = TTH root, value = GSList of files
 static GHashTable *fl_hash_index;
@@ -665,6 +666,7 @@ static void fl_refresh_process() {
 
   // refresh the entire share, which consists of multiple dirs.
   } else {
+    time(&fl_refresh_last);
     char **names = g_key_file_get_keys(conf_file, "share", NULL, NULL);
     int i, len = g_strv_length(names);
     args->file = g_new0(struct fl_list *, len+1);
@@ -796,6 +798,15 @@ static gboolean fl_init_hash_equal(gconstpointer a, gconstpointer b) {
 }
 
 
+static gboolean fl_init_autorefresh(gpointer dat) {
+  int r = conf_autorefresh();
+  time_t t = time(NULL);
+  if(r && fl_refresh_last+(r*60) < t)
+    fl_refresh(NULL);
+  return TRUE;
+}
+
+
 void fl_init() {
   GError *err = NULL;
   gboolean dorefresh = FALSE;
@@ -815,6 +826,11 @@ void fl_init() {
 
   // flush unsaved data to disk every 60 seconds
   g_timeout_add_seconds_full(G_PRIORITY_LOW, 60, fl_flush, NULL, NULL);
+  // Check every 60 seconds whether we need to refresh. This automatically
+  // adapts itself to changes to the autorefresh config variable. Unlike using
+  // the configured interval as a timeout, in which case we need to manually
+  // adjust the timer on every change.
+  g_timeout_add_seconds_full(G_PRIORITY_LOW, 60, fl_init_autorefresh, NULL, NULL);
 
   // read config
   char **shares = g_key_file_get_keys(conf_file, "share", NULL, NULL);
@@ -846,10 +862,7 @@ void fl_init() {
       ui_msg(UIMSG_NOTIFY, "File list incomplete, refreshing...");
   }
 
-  // Note: LinuxDC++ (and without a doubt other clients as well) force a
-  // refresh on startup. I can't say I'm a huge fan of that, but maybe it
-  // should be an option?
-  if(dorefresh)
+  if(dorefresh || conf_autorefresh())
     fl_refresh(NULL);
 }
 

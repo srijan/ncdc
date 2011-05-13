@@ -81,6 +81,17 @@ static void get_bool(char *group, char *key) {
 }
 
 
+static void get_int(char *group, char *key) {
+  GError *err = NULL;
+  int val = g_key_file_get_integer(conf_file, group, key, &err);
+  if(err) {
+    ui_logwindow_printf(tab->log, "%s.%s is not set.", group, key);
+    g_error_free(err);
+  } else
+    ui_logwindow_printf(tab->log, "%s.%s = %d", group, key, val);
+}
+
+
 #define UNSET(group, key) do {\
     g_key_file_remove_key(conf_file, group, key, NULL);\
     ui_logwindow_printf(tab->log, "%s.%s reset.", group, key);\
@@ -207,16 +218,34 @@ static void set_autoconnect(char *group, char *key, char *val) {
 }
 
 
+static void set_autorefresh(char *group, char *key, char *val) {
+  if(!val)
+    UNSET(group, key);
+  else {
+    long v = strtol(val, NULL, 10);
+    if((!v && errno == EINVAL) || v < INT_MIN || v > INT_MAX || v < 0)
+      ui_logwindow_add(tab->log, "Invalid number.");
+    else if(v > 0 && v < 10)
+      ui_logwindow_add(tab->log, "Interval between automatic refreshes should be at least 10 minutes.");
+    else {
+      g_key_file_set_integer(conf_file, group, key, v);
+      get_int(group, key);
+    }
+  }
+}
+
+
 // the settings list
 // TODO: help text / documentation?
 static struct setting settings[] = {
-  { "autoconnect",   NULL, get_bool,   set_autoconnect, set_bool_sug     }, // may not be used in "global"
-  { "connection",    NULL, get_string, set_userinfo,    NULL             },
-  { "description",   NULL, get_string, set_userinfo,    NULL             },
-  { "email",         NULL, get_string, set_userinfo,    NULL             },
-  { "encoding",      NULL, get_string, set_encoding,    set_encoding_sug },
-  { "nick",          NULL, get_string, set_nick,        NULL             }, // global.nick may not be /unset
-  { "show_joinquit", NULL, get_bool,   set_bool,        set_bool_sug     },
+  { "autoconnect",   NULL,     get_bool,   set_autoconnect, set_bool_sug     }, // may not be used in "global"
+  { "autorefresh",   "global", get_int,    set_autorefresh, NULL             }, // in minutes, 0 = disabled
+  { "connection",    NULL,     get_string, set_userinfo,    NULL             },
+  { "description",   NULL,     get_string, set_userinfo,    NULL             },
+  { "email",         NULL,     get_string, set_userinfo,    NULL             },
+  { "encoding",      NULL,     get_string, set_encoding,    set_encoding_sug },
+  { "nick",          NULL,     get_string, set_nick,        NULL             }, // global.nick may not be /unset
+  { "show_joinquit", NULL,     get_bool,   set_bool,        set_bool_sug     },
   { NULL }
 };
 

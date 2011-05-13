@@ -28,6 +28,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <string.h>
+#include <stdlib.h>
 #include <glib/gstdio.h>
 #include <sys/file.h>
 
@@ -297,6 +298,88 @@ void strv_prefix(char **arr, const char *str, ...) {
     g_free(o);
   }
   g_free(prefix);
+}
+
+
+
+// Split a two-argument string into the two arguments.  The first argument
+// should be shell-escaped, the second shouldn't. The string should be
+// writable. *first should be free()'d, *second refers to a location in str.
+void str_arg2_split(char *str, char **first, char **second) {
+  GError *err = NULL;
+  while(*str == ' ')
+    str++;
+  char *sep = str;
+  gboolean bs = FALSE;
+  *first = *second = NULL;
+  do {
+    if(err)
+      g_error_free(err);
+    err = NULL;
+    sep = strchr(sep+1, ' ');
+    if(sep && *(sep-1) == '\\')
+      bs = TRUE;
+    else {
+      if(sep)
+        *sep = 0;
+      *first = g_shell_unquote(str, &err);
+      if(sep)
+        *sep = ' ';
+      bs = FALSE;
+    }
+  } while(sep && (err || bs));
+  if(sep && sep != str) {
+    *second = sep+1;
+    while(**second == ' ')
+      (*second)++;
+  }
+}
+
+
+
+static int cmpstringp(const void *p1, const void *p2) {
+  return strcmp(* (char * const *) p1, * (char * const *) p2);
+}
+
+// Expand and auto-complete a filesystem path
+void path_suggest(char *opath, char **sug) {
+  char *path = g_strdup(opath);
+  char *name, *dir;
+  char *sep = strrchr(path, '/');
+  if(sep) {
+    *sep = 0;
+    name = sep+1;
+    // TODO: expand ~ to $HOME
+    dir = realpath(path[0] ? path : "/", NULL);
+    if(!dir)
+      goto path_suggest_f;
+  } else {
+    name = path;
+    dir = realpath(".", NULL);
+  }
+  GError *err = NULL;
+  GDir *d = g_dir_open(dir, 0, &err);
+  if(!d) {
+    g_error_free(err);
+    goto path_suggest_f;
+  }
+
+  const char *n;
+  int i = 0, len = strlen(name);
+  while(i<20 && (n = g_dir_read_name(d))) {
+    if(strcmp(n, ".") == 0 || strcmp(n, "..") == 0)
+      continue;
+    char *fn = g_build_filename(dir, n, NULL);
+    if(strncmp(n, name, len) == 0 && strlen(n) != len)
+      sug[i++] = g_file_test(fn, G_FILE_TEST_IS_DIR) ? g_strconcat(fn, "/", NULL) : g_strdup(fn);
+    g_free(fn);
+  }
+  g_dir_close(d);
+  qsort(sug, i, sizeof(char *), cmpstringp);
+
+path_suggest_f:
+  g_free(path);
+  free(dir);
 }
 
 

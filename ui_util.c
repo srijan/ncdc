@@ -316,14 +316,14 @@ struct ui_textinput {
   int s_pos;
   char *s_q;
   gboolean s_top;
-  void (*complete)(const char *str, char **suggestions);
+  void (*complete)(char *, char **);
   char *c_q, *c_last, **c_sug;
   int c_cur;
 };
 
 
 
-struct ui_textinput *ui_textinput_create(gboolean usehist, void (*complete)(const char *str, char **suggestions)) {
+struct ui_textinput *ui_textinput_create(gboolean usehist, void (*complete)(char *, char **)) {
   struct ui_textinput *ti = g_new0(struct ui_textinput, 1);
   ti->str = g_string_new("");
   ti->usehist = usehist;
@@ -364,6 +364,11 @@ static void ui_textinput_complete(struct ui_textinput *ti) {
   ui_textinput_set(ti, str);
   ti->pos = g_utf8_strlen(first, -1);
   g_free(str);
+  // If there is only one suggestion: finalize this auto-completion and reset
+  // state. This may be slightly counter-intuitive, but makes auto-completing
+  // paths a lot less annoying.
+  if(g_strv_length(ti->c_sug) == 1)
+    ui_textinput_complete_reset(ti);
 }
 
 

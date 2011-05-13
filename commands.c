@@ -602,23 +602,16 @@ static void c_share(char *args) {
       g_strfreev(dirs);
     return;
   }
-  // use g_shell_parse_argv() to allow the name to contain a space. (e.g. /share "Kewl Share!" ~/blah)
-  // TODO: only use that quoting stuff for the first argument, and allow the second argument to be unquoted?
-  GError *err = NULL;
-  int argc;
-  char **argv;
-  if(!g_shell_parse_argv(args, &argc, &argv, &err)) {
-    ui_logwindow_printf(tab->log, "Unable to parse arguments: %s", err->message);
-    g_error_free(err);
-    return;
-  }
-  if(argc != 2)
-    ui_logwindow_add(tab->log, "This command requires two arguments. See \"/help share\" for details.");
-  else if(g_key_file_has_key(conf_file, "share", argv[0], NULL))
+
+  char *first, *second;
+  str_arg2_split(args, &first, &second);
+  if(!first || !first[0] || !second || !second[0])
+    ui_logwindow_add(tab->log, "Error parsing arguments. See \"/help share\" for details.");
+  else if(g_key_file_has_key(conf_file, "share", first, NULL))
     ui_logwindow_add(tab->log, "You have already shared a directory with that name.");
   else {
     // TODO: ~ substitution with $HOME?
-    char *path = realpath(argv[1], NULL); // TODO: how many systems support this?
+    char *path = realpath(second, NULL);
     if(!path)
       ui_logwindow_printf(tab->log, "Error obtaining absolute path: %s", g_strerror(errno));
     else if(!g_file_test(path, G_FILE_TEST_IS_DIR))
@@ -638,17 +631,31 @@ static void c_share(char *args) {
       if(dirs && *dir)
         ui_logwindow_printf(tab->log, "Directory already (partly) shared in /%s", *dir);
       else {
-        g_key_file_set_string(conf_file, "share", argv[0], path);
+        g_key_file_set_string(conf_file, "share", first, path);
         conf_save();
-        fl_share(argv[0]);
-        ui_logwindow_printf(tab->log, "Added to share: /%s -> %s", argv[0], path);
+        fl_share(first);
+        ui_logwindow_printf(tab->log, "Added to share: /%s -> %s", first, path);
       }
       if(dirs)
         g_strfreev(dirs);
       free(path);
     }
   }
-  g_strfreev(argv);
+  g_free(first);
+}
+
+
+static void c_share_sug(char *args, char **sug) {
+  char *first, *second;
+  str_arg2_split(args, &first, &second);
+  g_free(first);
+  if(!first || !second)
+    return;
+  // we want the escaped first part
+  first = g_strndup(args, second-args);
+  path_suggest(second, sug);
+  strv_prefix(sug, first, NULL);
+  g_free(first);
 }
 
 
@@ -750,13 +757,13 @@ static struct cmd cmds[] = {
     NULL, "Shortcut for /disconnect and /connect",
     "When your nick or the hub encoding have been changed, the new settings will be used after the reconnect."
   },
-  { "refresh", c_refresh, NULL, // TODO: auto-complete path
+  { "refresh", c_refresh, fl_local_suggest,
     "[<path>]", "Refresh file list.",
     "Initiates a refresh. If no argument is given, the complete list will be refreshed."
     " Otherwise only the specified directory will be refreshed.\n\n"
     "The path argument can be either an absolute filesystem path or a virtual path within your share."
   },
-  { "say",  c_say, NULL, // TODO: auto-complete nicks on hub tabs
+  { "say", c_say, NULL, // TODO: auto-complete nicks on hub tabs
     "<message>", "Send a chat message.",
     "You normally don't have to use the /say command explicitly, any command not staring"
     " with '/' will automatically imply `/say <command>'. For example, typing `hello.'"
@@ -769,7 +776,7 @@ static struct cmd cmds[] = {
     "Use /set without arguments to get a list of configuration variables.\n"
     "/set <key> without value will print out the current value."
   },
-  { "share", c_share, NULL, // TODO: autocomplete path
+  { "share", c_share, c_share_sug,
     "[<name> <path>]", "Add a directory to your share.",
     "Use /share without arguments to get a list of shared directories.\n"
     "When called with a name and a path, the path will be added to your share.\n"
@@ -842,7 +849,7 @@ void cmd_handle(char *ostr) {
 }
 
 
-void cmd_suggest(const char *ostr, char **sug) {
+void cmd_suggest(char *ostr, char **sug) {
   struct cmd *c;
   char *str = g_strdup(ostr);
   // complete command name

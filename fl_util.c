@@ -178,6 +178,37 @@ struct fl_list *fl_list_from_path(struct fl_list *root, const char *path) {
 }
 
 
+// Auto-complete for fl_list_from_path()
+void fl_list_suggest(struct fl_list *root, char *opath, char **sug) {
+  struct fl_list *parent = root;
+  char *path = g_strdup(opath);
+  char *name = path;
+  char *sep = strrchr(path, '/');
+  if(sep) {
+    *sep = 0;
+    name = sep+1;
+    parent = fl_list_from_path(parent, path);
+  } else {
+    name = path;
+    path = "";
+  }
+  if(parent) {
+    int i = 0, len = strlen(name);
+    // Note: performance can be improved by using _search() instead
+    GSequenceIter *iter;
+    for(iter=g_sequence_get_begin_iter(parent->sub); i<20 && !g_sequence_iter_is_end(iter); iter=g_sequence_iter_next(iter)) {
+      struct fl_list *n = fl_list_copy(g_sequence_get(iter));
+      if(strncmp(n->name, name, len) == 0)
+        sug[i++] = n->isfile ? g_strconcat(path, "/", n->name, NULL) : g_strconcat(path, "/", n->name, "/", NULL);
+    }
+  }
+  if(sep)
+    g_free(path);
+  else
+    g_free(name);
+}
+
+
 
 
 

@@ -107,6 +107,14 @@ struct fl_list *fl_local_from_path(const char *path) {
 }
 
 
+// Auto-complete for fl_local_from_path()
+void fl_local_suggest(char *path, char **sug) {
+  fl_list_suggest(fl_local_list, path, sug);
+  if(!sug[0])
+    path_suggest(path, sug);
+}
+
+
 // should be run from a timer. periodically flushes all unsaved data to disk.
 gboolean fl_flush(gpointer dat) {
   if(fl_needflush) {

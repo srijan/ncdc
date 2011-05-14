@@ -26,6 +26,7 @@
 
 #include "ncdc.h"
 #include <string.h>
+#include <stdlib.h>
 
 
 #if INTERFACE
@@ -201,6 +202,19 @@ struct nmdc_user *nmdc_user_get(struct nmdc_hub *hub, const char *name) {
   struct nmdc_user *u = g_hash_table_lookup(hub->users, name_hub);
   g_free(name_hub);
   return u;
+}
+
+
+// Auto-complete suggestions for nmdc_user_get()
+void nmdc_user_suggest(struct nmdc_hub *hub, char *str, char **sug) {
+  GHashTableIter iter;
+  struct nmdc_user *u;
+  int i=0, len = strlen(str);
+  g_hash_table_iter_init(&iter, hub->users);
+  while(i<20 && g_hash_table_iter_next(&iter, NULL, (gpointer *)&u))
+    if(g_ascii_strncasecmp(u->name, str, len) == 0 && strlen(u->name) != len)
+      sug[i++] = g_strdup(u->name);
+  qsort(sug, i, sizeof(char *), cmpstringp);
 }
 
 

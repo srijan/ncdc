@@ -341,7 +341,8 @@ void str_arg2_split(char *str, char **first, char **second) {
 
 
 
-static int cmpstringp(const void *p1, const void *p2) {
+// String pointer comparison, for use with qsort() on string arrays.
+int cmpstringp(const void *p1, const void *p2) {
   return strcmp(* (char * const *) p1, * (char * const *) p2);
 }
 

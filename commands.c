@@ -780,6 +780,21 @@ static void c_refresh(char *args) {
 }
 
 
+static void nick_sug(char *args, char **sug) {
+  struct ui_tab *t = ui_tab_cur->data;
+  if(!t->hub)
+    return;
+  // get starting point of the nick
+  char *nick = args+strlen(args);
+  while(nick > args && *(nick-1) != ' ' && *(nick-1) != ',' && *(nick-1) != ':')
+    nick--;
+  nmdc_user_suggest(t->hub, nick, sug);
+  *nick = 0;
+  if(*args)
+    strv_prefix(sug, args, NULL);
+}
+
+
 // definition of the command list
 static struct cmd cmds[] = {
   { "clear", c_clear, NULL,
@@ -812,7 +827,7 @@ static struct cmd cmds[] = {
     "Use /help without arguments to list all the available commands.\n"
     "Use /help <command> to get information about a particular command."
   },
-  { "msg", c_msg, NULL, // TODO: auto-complete nicks
+  { "msg", c_msg, nick_sug,
     "<user> [<message>]", "Send a private message.",
     "Send a private message to a user on the currently opened hub.\n"
     "When no message is given, the tab will be opened but no message will be sent."
@@ -838,7 +853,7 @@ static struct cmd cmds[] = {
     " Otherwise only the specified directory will be refreshed.\n\n"
     "The path argument can be either an absolute filesystem path or a virtual path within your share."
   },
-  { "say", c_say, NULL, // TODO: auto-complete nicks on hub tabs
+  { "say", c_say, nick_sug,
     "<message>", "Send a chat message.",
     "You normally don't have to use the /say command explicitly, any command not staring"
     " with '/' will automatically imply `/say <command>'. For example, typing `hello.'"
@@ -935,10 +950,9 @@ void cmd_suggest(char *ostr, char **sug) {
       if(strncmp(str+1, c->name, len) == 0 && strlen(c->name) != len)
         sug[i++] = g_strconcat("/", c->name, NULL);
   } else {
-    if(str[0] != '/') {
-      // /say does not have a suggest function yet
-      // getcmd("say")->suggest(str, sug);
-    } else {
+    if(str[0] != '/')
+      getcmd("say")->suggest(str, sug);
+    else {
       char *sep = strchr(str, ' ');
       *sep = 0;
       c = getcmd(str+1);

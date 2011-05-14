@@ -818,7 +818,7 @@ void ui_input(guint64 key) {
   case INPT_ALT('k'): // alt+k (next tab)
     ui_tab_cur = ui_tab_cur->next ? ui_tab_cur->next : ui_tabs;
     break;
-  case INPT_ALT('h'): ; // alt+h (swap tab with leff)
+  case INPT_ALT('h'): ; // alt+h (swap tab with left)
     GList *prev = ui_tab_cur->prev;
     ui_tabs = g_list_delete_link(ui_tabs, ui_tab_cur);
     ui_tabs = g_list_insert_before(ui_tabs, prev, curtab);

@@ -341,6 +341,16 @@ void str_arg2_split(char *str, char **first, char **second) {
 
 
 
+// like realpath(), but also expands ~
+char *path_expand(const char *path) {
+  char *p = path[0] == '~' ? g_build_filename(g_get_home_dir(), path+1, NULL) : g_strdup(path);
+  char *r = realpath(p, NULL);
+  g_free(p);
+  return r;
+}
+
+
+
 // String pointer comparison, for use with qsort() on string arrays.
 int cmpstringp(const void *p1, const void *p2) {
   return strcmp(* (char * const *) p1, * (char * const *) p2);
@@ -349,18 +359,26 @@ int cmpstringp(const void *p1, const void *p2) {
 // Expand and auto-complete a filesystem path
 void path_suggest(char *opath, char **sug) {
   char *path = g_strdup(opath);
-  char *name, *dir;
+  char *name, *dir = NULL;
+
+  // special-case ~ and .
+  if((path[0] == '~' || path[0] == '.') && (path[1] == 0 || (path[1] == '/' && path[2] == 0))) {
+    name = path_expand(path);
+    sug[0] = g_strconcat(name, "/", NULL);
+    g_free(name);
+    goto path_suggest_f;
+  }
+
   char *sep = strrchr(path, '/');
   if(sep) {
     *sep = 0;
     name = sep+1;
-    // TODO: expand ~ to $HOME
-    dir = realpath(path[0] ? path : "/", NULL);
+    dir = path_expand(path[0] ? path : "/");
     if(!dir)
       goto path_suggest_f;
   } else {
     name = path;
-    dir = realpath(".", NULL);
+    dir = path_expand(".");
   }
   GError *err = NULL;
   GDir *d = g_dir_open(dir, 0, &err);
@@ -384,7 +402,8 @@ void path_suggest(char *opath, char **sug) {
 
 path_suggest_f:
   g_free(path);
-  free(dir);
+  if(dir)
+    free(dir);
 }
 
 

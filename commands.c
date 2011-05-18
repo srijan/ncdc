@@ -649,27 +649,31 @@ static void c_userlist(char *args) {
 }
 
 
+static void listshares() {
+  gsize len;
+  char **dirs = g_key_file_get_keys(conf_file, "share", &len, NULL);
+  if(!dirs || len == 0)
+    ui_logwindow_add(tab->log, "Nothing shared.");
+  else {
+    ui_logwindow_add(tab->log, "");
+    char **cur;
+    for(cur=dirs; *cur; cur++) {
+      char *d = g_key_file_get_string(conf_file, "share", *cur, NULL);
+      struct fl_list *fl = fl_list_file(fl_local_list, *cur);
+      ui_logwindow_printf(tab->log, " /%s -> %s (%s)", *cur, d, str_formatsize(fl->size));
+      g_free(d);
+    }
+    ui_logwindow_add(tab->log, "");
+  }
+  if(dirs)
+    g_strfreev(dirs);
+}
+
+
 static void c_share(char *args) {
   g_return_if_fail(tab->log);
-  // No arguments: list currently shared dirs
   if(!args[0]) {
-    gsize len;
-    char **dirs = g_key_file_get_keys(conf_file, "share", &len, NULL);
-    if(!dirs || len == 0)
-      ui_logwindow_add(tab->log, "Nothing shared.");
-    else {
-      ui_logwindow_add(tab->log, "");
-      char **cur;
-      for(cur=dirs; *cur; cur++) {
-        char *d = g_key_file_get_string(conf_file, "share", *cur, NULL);
-        struct fl_list *fl = fl_list_file(fl_local_list, *cur);
-        ui_logwindow_printf(tab->log, " /%s -> %s (%s)", *cur, d, str_formatsize(fl->size));
-        g_free(d);
-      }
-      ui_logwindow_add(tab->log, "");
-    }
-    if(dirs)
-      g_strfreev(dirs);
+    listshares();
     return;
   }
 
@@ -680,8 +684,7 @@ static void c_share(char *args) {
   else if(g_key_file_has_key(conf_file, "share", first, NULL))
     ui_logwindow_add(tab->log, "You have already shared a directory with that name.");
   else {
-    // TODO: ~ substitution with $HOME?
-    char *path = realpath(second, NULL);
+    char *path = path_expand(second);
     if(!path)
       ui_logwindow_printf(tab->log, "Error obtaining absolute path: %s", g_strerror(errno));
     else if(!g_file_test(path, G_FILE_TEST_IS_DIR))
@@ -732,7 +735,7 @@ static void c_share_sug(char *args, char **sug) {
 static void c_unshare(char *args) {
   g_return_if_fail(tab->log);
   if(!args[0])
-    c_share("");
+    listshares();
   // otherwise we may crash
   else if(fl_refresh_queue && fl_refresh_queue->head)
     ui_logwindow_add(tab->log, "Sorry, can't remove directories from the share while refreshing.");

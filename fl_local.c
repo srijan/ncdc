@@ -327,15 +327,16 @@ static void fl_scan_dir(struct fl_list *parent, const char *path) {
     // we're currently following symlinks, but I'm not sure whether that's a good idea yet
     int r = stat(cpath, &dat);
     g_free(encname);
-    g_free(cpath);
     if(r < 0 || !(S_ISREG(dat.st_mode) || S_ISDIR(dat.st_mode))) {
       if(r < 0)
         ui_msgf(UIMSG_MAIN, "Error stat'ing \"%s\": %s", cpath, g_strerror(errno));
       else
         ui_msgf(UIMSG_MAIN, "Not sharing \"%s\": Neither file nor directory.", cpath);
       g_free(confname);
+      g_free(cpath);
       continue;
     }
+    g_free(cpath);
     // and create the node
     struct fl_list *cur = g_slice_new0(struct fl_list);
     cur->name = confname;

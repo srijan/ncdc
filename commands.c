@@ -661,9 +661,9 @@ static void c_share(char *args) {
       ui_logwindow_add(tab->log, "");
       char **cur;
       for(cur=dirs; *cur; cur++) {
-        // TODO: display size (and hash status?)
         char *d = g_key_file_get_string(conf_file, "share", *cur, NULL);
-        ui_logwindow_printf(tab->log, " /%s -> %s", *cur, d);
+        struct fl_list *fl = fl_list_file(fl_local_list, *cur);
+        ui_logwindow_printf(tab->log, " /%s -> %s (%s)", *cur, d, str_formatsize(fl->size));
         g_free(d);
       }
       ui_logwindow_add(tab->log, "");

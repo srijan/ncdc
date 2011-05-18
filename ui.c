@@ -27,6 +27,7 @@
 #include "ncdc.h"
 #include <string.h>
 #include <time.h>
+#include <math.h>
 
 
 #if INTERFACE
@@ -487,7 +488,7 @@ static void ui_userlist_draw(struct ui_tab *tab) {
     str_formatsize(tab->hub->sharesize), tab->hub->sharecount == count ? ' ' : '+', count);
   mvaddstr(winrows-3, cw_user, tmp);
   g_free(tmp);
-  tmp = g_strdup_printf("%3d%%", MIN(100, (row_top+height)*100/row_last));
+  tmp = g_strdup_printf("%3d%%", MIN(100, row_last ? (row_top+height)*100/row_last : 0));
   mvaddstr(winrows-3, wincols-6, tmp);
   g_free(tmp);
   attroff(A_BOLD);
@@ -735,6 +736,58 @@ static void ui_draw_status() {
 }
 
 
+#define tabcol(t, n) (2+ceil(log10((n)+1))+str_columns(((struct ui_tab *)(t)->data)->name))
+
+static void ui_tablist_draw() {
+  static const int xoffset = 8;
+  static int top = 0;
+  int i, w;
+  GList *n;
+
+  int cur = g_list_position(ui_tabs, ui_tab_cur);
+  int maxw = wincols-xoffset-6;
+
+  // Make sure cur is visible
+  if(top > cur)
+    top = cur;
+  do {
+    w = maxw;
+    i = top;
+    for(n=g_list_nth(ui_tabs, top); n; n=n->next) {
+      w -= tabcol(n, ++i);
+      if(w < 0 || n == ui_tab_cur)
+        break;
+    }
+  } while(top != cur && w < 0 && ++top);
+
+  // display some more tabs when there is still room left
+  while(top > 0 && w > tabcol(g_list_nth(ui_tabs, top-1), top-1)) {
+    top--;
+    w -= tabcol(g_list_nth(ui_tabs, top), top);
+  }
+
+  // Print the stuff
+  mvaddstr(winrows-2, xoffset, top > 0 ? " <<" : " --");
+  w = maxw;
+  i = top;
+  for(n=g_list_nth(ui_tabs, top); n; n=n->next) {
+    w -= tabcol(n, ++i);
+    if(w < 0)
+      break;
+    addch(' ');
+    if(n == ui_tab_cur)
+      attron(A_BOLD);
+    char *tmp = g_strdup_printf("%d:%s", i, ((struct ui_tab *)n->data)->name);
+    addstr(tmp);
+    g_free(tmp);
+    if(n == ui_tab_cur)
+      attroff(A_BOLD);
+  }
+  mvaddstr(winrows-2, wincols-3, n ? " >>" : " --");
+}
+#undef tabcol
+
+
 void ui_draw() {
   struct ui_tab *curtab = ui_tab_cur->data;
 
@@ -762,22 +815,7 @@ void ui_draw() {
   char ts[10];
   strftime(ts, 9, "%H:%M:%S", localtime(&tm));
   mvaddstr(winrows-2, 0, ts);
-  addstr(" --");
-  // tab list
-  // TODO: handle screen overflows
-  GList *n;
-  int i=0;
-  for(n=ui_tabs; n; n=n->next) {
-    i++;
-    addch(' ');
-    if(n == ui_tab_cur)
-      attron(A_BOLD);
-    char *tmp = g_strdup_printf("%d:%s", i, ((struct ui_tab *)n->data)->name);
-    addstr(tmp);
-    g_free(tmp);
-    if(n == ui_tab_cur)
-      attroff(A_BOLD);
-  }
+  ui_tablist_draw();
   attroff(A_REVERSE);
 
   // last line - status info or notification

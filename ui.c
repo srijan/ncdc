@@ -551,6 +551,18 @@ static void ui_userlist_key(struct ui_tab *tab, guint64 key) {
   case INPT_CHAR('c'): // c (toggle connection visibility)
     tab->user_hide_conn = !tab->user_hide_conn;
     break;
+  case INPT_CHAR('m'): // m (/msg user)
+    if(!g_sequence_iter_is_end(tab->user_sel)) {
+      struct nmdc_user *u = g_sequence_get(tab->user_sel);
+      struct ui_tab *t = ui_hub_getmsg(tab, u);
+      if(!t) {
+        t = ui_msg_create(tab->hub, u);
+        ui_tab_open(t);
+      } else
+        ui_tab_cur = g_list_find(ui_tabs, t);
+    } else
+      ui_msg(UIMSG_TAB, "No user selected.");
+    break;
   }
 
   // TODO: some way to save the column visibility? per hub? global default?

@@ -105,18 +105,10 @@ static char *ui_main_title() {
 
 static void ui_main_key(guint64 key) {
   char *str = NULL;
-  switch(key) {
-  case INPT_KEY(KEY_NPAGE):
-    ui_logwindow_scroll(ui_main->log, winrows/2);
-    break;
-  case INPT_KEY(KEY_PPAGE):
-    ui_logwindow_scroll(ui_main->log, -winrows/2);
-    break;
-  default:
-    if(ui_textinput_key(ui_global_textinput, key, &str) && str) {
-      cmd_handle(str);
-      g_free(str);
-    }
+  if(!ui_logwindow_key(ui_main->log, key, winrows) &&
+      ui_textinput_key(ui_global_textinput, key, &str) && str) {
+    cmd_handle(str);
+    g_free(str);
   }
 }
 
@@ -168,18 +160,10 @@ static char *ui_msg_title(struct ui_tab *tab) {
 
 static void ui_msg_key(struct ui_tab *tab, guint64 key) {
   char *str = NULL;
-  switch(key) {
-  case INPT_KEY(KEY_NPAGE):
-    ui_logwindow_scroll(tab->log, winrows/2);
-    break;
-  case INPT_KEY(KEY_PPAGE):
-    ui_logwindow_scroll(tab->log, -winrows/2);
-    break;
-  default:
-    if(ui_textinput_key(ui_global_textinput, key, &str) && str) {
-      cmd_handle(str);
-      g_free(str);
-    }
+  if(!ui_logwindow_key(tab->log, key, winrows) &&
+      ui_textinput_key(ui_global_textinput, key, &str) && str) {
+    cmd_handle(str);
+    g_free(str);
   }
 }
 
@@ -286,18 +270,10 @@ static char *ui_hub_title(struct ui_tab *tab) {
 
 static void ui_hub_key(struct ui_tab *tab, guint64 key) {
   char *str = NULL;
-  switch(key) {
-  case INPT_KEY(KEY_NPAGE):
-    ui_logwindow_scroll(tab->log, winrows/2);
-    break;
-  case INPT_KEY(KEY_PPAGE):
-    ui_logwindow_scroll(tab->log, -winrows/2);
-    break;
-  default:
-    if(ui_textinput_key(ui_global_textinput, key, &str) && str) {
-      cmd_handle(str);
-      g_free(str);
-    }
+  if(!ui_logwindow_key(tab->log, key, winrows) &&
+      ui_textinput_key(ui_global_textinput, key, &str) && str) {
+    cmd_handle(str);
+    g_free(str);
   }
 }
 

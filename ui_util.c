@@ -191,6 +191,19 @@ void ui_logwindow_draw(struct ui_logwindow *lw, int y, int x, int rows, int cols
 }
 
 
+gboolean ui_logwindow_key(struct ui_logwindow *lw, guint64 key, int rows) {
+  switch(key) {
+  case INPT_KEY(KEY_NPAGE):
+    ui_logwindow_scroll(lw, rows/2);
+    return TRUE;
+  case INPT_KEY(KEY_PPAGE):
+    ui_logwindow_scroll(lw, -rows/2);
+    return TRUE;
+  }
+  return FALSE;
+}
+
+
 
 
 // Command history

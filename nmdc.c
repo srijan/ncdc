@@ -413,6 +413,7 @@ static void handle_cmd(struct nmdc_hub *hub, const char *cmd) {
   CMDREGEX(myinfo, "MyINFO \\$ALL ([^ $]+) (.+)");
   CMDREGEX(hubname, "HubName (.+)");
   CMDREGEX(to, "To: ([^ $]+) From: ([^ $]+) \\$(.+)");
+  CMDREGEX(forcemove, "ForceMove (.+)");
 
   // $Lock
   if(g_regex_match(lock, cmd, 0, &nfo)) { // 1 = lock
@@ -534,6 +535,16 @@ static void handle_cmd(struct nmdc_hub *hub, const char *cmd) {
     g_free(from);
     g_free(to);
     g_free(msg);
+  }
+  g_match_info_free(nfo);
+
+  // $ForceMove
+  if(g_regex_match(forcemove, cmd, 0, &nfo)) { // 1 = addr
+    char *addr = g_match_info_fetch(nfo, 1);
+    char *eaddr = unescape_and_decode(hub, addr);
+    ui_logwindow_printf(hub->tab->log, "\nThe hub is requesting you to move to %s.\nType `/connect %s' to do so.\n", eaddr, eaddr);
+    g_free(eaddr);
+    g_free(addr);
   }
   g_match_info_free(nfo);
 

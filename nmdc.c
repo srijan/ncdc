@@ -32,7 +32,8 @@
 #if INTERFACE
 
 struct nmdc_user {
-  gboolean hasinfo;
+  gboolean hasinfo : 1;
+  gboolean isop : 1;
   char *name;     // UTF-8
   char *name_hub; // hub-encoded (used as hash key)
   char *desc;
@@ -410,6 +411,7 @@ static void handle_cmd(struct nmdc_hub *hub, const char *cmd) {
   CMDREGEX(hello, "Hello ([^ $]+)");
   CMDREGEX(quit, "Quit ([^ $]+)");
   CMDREGEX(nicklist, "NickList (.+)");
+  CMDREGEX(oplist, "OpList (.+)");
   CMDREGEX(myinfo, "MyINFO \\$ALL ([^ $]+) (.+)");
   CMDREGEX(hubname, "HubName (.+)");
   CMDREGEX(to, "To: ([^ $]+) From: ([^ $]+) \\$(.+)");
@@ -488,6 +490,19 @@ static void handle_cmd(struct nmdc_hub *hub, const char *cmd) {
       if(!u->hasinfo && !hub->supports_nogetinfo)
         send_cmdf(hub, "$GetINFO %s %s", *cur, hub->nick_hub);
     }
+    g_strfreev(list);
+  }
+  g_match_info_free(nfo);
+
+  // $OpList
+  if(g_regex_match(oplist, cmd, 0, &nfo)) { // 1 = list of ops
+    // not really efficient, but does the trick
+    char *str = g_match_info_fetch(nfo, 1);
+    char **list = g_strsplit(str, "$$", 0);
+    g_free(str);
+    char **cur;
+    for(cur=list; *cur&&**cur; cur++)
+      user_add(hub, *cur)->isop = TRUE;
     g_strfreev(list);
   }
   g_match_info_free(nfo);

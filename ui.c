@@ -350,7 +350,7 @@ static gint ui_userlist_sort_func(gconstpointer da, gconstpointer db, gpointer d
 
 struct ui_tab *ui_userlist_create(struct nmdc_hub *hub) {
   struct ui_tab *tab = g_new0(struct ui_tab, 1);
-  tab->name = g_strdup_printf("u/%s", hub->tab->name);
+  tab->name = g_strdup_printf("@%s", hub->tab->name+1);
   tab->type = UIT_USERLIST;
   tab->hub = hub;
   tab->users = g_sequence_new(NULL);

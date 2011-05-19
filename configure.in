@@ -14,11 +14,13 @@ AC_PROG_RANLIB
 AC_SYS_LARGEFILE
 
 
-# Check for makeheaders
-AC_CHECK_PROG([have_mh],[makeheaders],[yes])
-if test -z "$have_mh"; then
+# Check for makeheaders. Not having makeheaders is fatal if no header files are
+# present in this distribution. (Only main.h is checked, though)
+AC_CHECK_PROG([have_mh],[makeheaders],[yes],[no])
+if test \( "x$have_mh" = "xno" \) -a \( ! -f "$srcdir/main.h" \) ; then
   AC_MSG_ERROR([Could not find the makeheaders program.])
 fi
+AM_CONDITIONAL([USE_MH], [test "x$have_mh" = "xyes"])
 
 
 # Check for header files.
@@ -67,4 +69,14 @@ PKG_CHECK_MODULES([DEPS], [
 
 
 AC_OUTPUT([Makefile])
+
+
+# Notify user about missing makeheaders
+if test "x$have_mh" = "xno"; then
+  echo ""
+  echo "WARNING: Could not find the makeheaders program."
+  echo " If you wish to make non-trivial changes to the source code, you"
+  echo " may want to install makeheaders and re-run this configure script."
+  echo ""
+fi
 

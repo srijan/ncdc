@@ -12,7 +12,7 @@ REQUIREMENTS
 
 
   ncursesw
-  bzip
+  bzip2
   gdbm
   glib2
   libxml2

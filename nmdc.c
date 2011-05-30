@@ -51,19 +51,8 @@ struct nmdc_user {
 
 struct nmdc_hub {
   struct ui_tab *tab; // to get name (for config) and for logging & setting of title
+  struct net *net;
   int state;
-  GSocketConnection *conn;
-  GDataInputStream *in;
-  GOutputStream *out;
-  char *out_buf;
-  char *out_buf_old;
-  int out_buf_len;
-  int out_buf_pos;
-  // Used for all async operations. Cancelling is only used on user-disconnect,
-  // and when we disconnect we want to cancel *all* outstanding operations at
-  // the same time. The documentation advices against this, but...
-  //   http://www.mail-archive.com/gtk-devel-list@gnome.org/msg10628.html
-  GCancellable *cancel;
   // nick as used in this connection, NULL when no $ValidateNick has been sent yet
   char *nick_hub; // in hub encoding
   char *nick;     // UTF-8
@@ -268,80 +257,6 @@ static void user_myinfo(struct nmdc_hub *hub, struct nmdc_user *u, const char *s
 // hub stuff
 
 
-static void handle_write(GObject *src, GAsyncResult *res, gpointer dat) {
-  struct nmdc_hub *hub = dat;
-
-  GError *err = NULL;
-  gsize written = g_output_stream_write_finish(G_OUTPUT_STREAM(src), res, &err);
-
-  if(!err || err->code != G_IO_ERROR_CANCELLED) {
-    g_free(hub->out_buf_old);
-    hub->out_buf_old = NULL;
-  }
-
-  if(err) {
-    if(err->code != G_IO_ERROR_CANCELLED) {
-      ui_logwindow_printf(hub->tab->log, "Write error: %s", err->message);
-      nmdc_disconnect(hub);
-    }
-    g_error_free(err);
-
-  } else {
-    if(written > 0) {
-      hub->out_buf_pos -= written;
-      memmove(hub->out_buf, hub->out_buf+written, hub->out_buf_pos);
-    }
-    g_assert(hub->out_buf_pos >= 0);
-    if(hub->out_buf_pos > 0)
-      g_output_stream_write_async(hub->out, hub->out_buf, hub->out_buf_pos, G_PRIORITY_DEFAULT, hub->cancel, handle_write, hub);
-  }
-}
-
-
-static void send_cmd(struct nmdc_hub *hub, const char *cmd) {
-  // ignore writes when we're not connected
-  if(hub->state != HUBS_CONNECTED)
-    return;
-
-  g_debug("%s> %s", hub->tab->name, cmd);
-
-  // append cmd to the buffer
-  int len = strlen(cmd)+1; // the 1 is the termination char
-  if(hub->out_buf_pos + len > hub->out_buf_len) {
-    hub->out_buf_len = MAX(hub->out_buf_len*2, hub->out_buf_pos+len);
-    // we can only use g_renew() if no async operation is in progress.
-    // Otherwise the async operation may be trying to read from the buffer
-    // which we just freed. Instead, allocate a new buffer for the new data and
-    // keep the old buffer in memory, to be freed after the write has finished.
-    // (I don't suppose this will happen very often)
-    if(!g_output_stream_has_pending(hub->out) || hub->out_buf_old)
-      hub->out_buf = g_renew(char, hub->out_buf, hub->out_buf_len);
-    else {
-      hub->out_buf_old = hub->out_buf;
-      hub->out_buf = g_new(char, hub->out_buf_len);
-      memcpy(hub->out_buf, hub->out_buf_old, hub->out_buf_pos);
-    }
-  }
-  memcpy(hub->out_buf + hub->out_buf_pos, cmd, len-1);
-  hub->out_buf[hub->out_buf_pos+len-1] = '|';
-  hub->out_buf_pos += len;
-
-  // write it, if we aren't doing so already
-  if(!g_output_stream_has_pending(hub->out))
-    g_output_stream_write_async(hub->out, hub->out_buf, hub->out_buf_pos, G_PRIORITY_DEFAULT, hub->cancel, handle_write, hub);
-}
-
-
-static void send_cmdf(struct nmdc_hub *hub, const char *fmt, ...) {
-  va_list va;
-  va_start(va, fmt);
-  char *str = g_strdup_vprintf(fmt, va);
-  va_end(va);
-  send_cmd(hub, str);
-  g_free(str);
-}
-
-
 void nmdc_send_myinfo(struct nmdc_hub *hub) {
   if(!hub->nick_valid)
     return;
@@ -370,7 +285,7 @@ void nmdc_send_myinfo(struct nmdc_hub *hub) {
   if(!hub->myinfo_last || strcmp(tmp, hub->myinfo_last) != 0) {
     g_free(hub->myinfo_last);
     hub->myinfo_last = tmp;
-    send_cmd(hub, tmp);
+    net_send(hub->net, tmp);
   } else
     g_free(tmp);
 }
@@ -380,14 +295,14 @@ void nmdc_say(struct nmdc_hub *hub, const char *str) {
   if(!hub->nick_valid)
     return;
   char *msg = encode_and_escape(hub, str);
-  send_cmdf(hub, "<%s> %s", hub->nick_hub, msg);
+  net_sendf(hub->net, "<%s> %s", hub->nick_hub, msg);
   g_free(msg);
 }
 
 
 void nmdc_msg(struct nmdc_hub *hub, struct nmdc_user *user, const char *str) {
   char *msg = encode_and_escape(hub, str);
-  send_cmdf(hub, "$To: %s From: %s $<%s> %s", user->name_hub, hub->nick_hub, hub->nick_hub, msg);
+  net_sendf(hub->net, "$To: %s From: %s $<%s> %s", user->name_hub, hub->nick_hub, hub->nick_hub, msg);
   g_free(msg);
   // emulate protocol echo
   msg = g_strdup_printf("<%s> %s", hub->nick, str);
@@ -396,9 +311,8 @@ void nmdc_msg(struct nmdc_hub *hub, struct nmdc_user *user, const char *str) {
 }
 
 
-static void handle_cmd(struct nmdc_hub *hub, const char *cmd) {
-  g_debug("%s< %s", hub->tab->name, cmd);
-
+static void handle_cmd(struct net *n, char *cmd) {
+  struct nmdc_hub *hub = n->handle;
   GMatchInfo *nfo;
 
   // create regexes (declared statically, allocated/compiled on first call)
@@ -421,12 +335,12 @@ static void handle_cmd(struct nmdc_hub *hub, const char *cmd) {
   if(g_regex_match(lock, cmd, 0, &nfo)) { // 1 = lock
     char *lock = g_match_info_fetch(nfo, 1);
     if(strncmp(lock, "EXTENDEDPROTOCOL", 16) == 0)
-      send_cmd(hub, "$Supports NoGetINFO NoHello");
+      net_send(hub->net, "$Supports NoGetINFO NoHello");
     char *key = lock2key(lock);
-    send_cmdf(hub, "$Key %s", key);
+    net_sendf(hub->net, "$Key %s", key);
     hub->nick = conf_hub_get(string, hub->tab->name, "nick");
     hub->nick_hub = charset_convert(hub, FALSE, hub->nick);
-    send_cmdf(hub, "$ValidateNick %s", hub->nick_hub);
+    net_sendf(hub->net, "$ValidateNick %s", hub->nick_hub);
     g_free(key);
     g_free(lock);
   }
@@ -451,14 +365,14 @@ static void handle_cmd(struct nmdc_hub *hub, const char *cmd) {
       if(!hub->nick_valid) {
         ui_logwindow_add(hub->tab->log, "Nick validated.");
         hub->nick_valid = TRUE;
-        send_cmd(hub, "$Version 1,0091");
+        net_send(hub->net, "$Version 1,0091");
         nmdc_send_myinfo(hub);
-        send_cmd(hub, "$GetNickList");
+        net_send(hub->net, "$GetNickList");
       }
     } else {
       struct nmdc_user *u = user_add(hub, nick);
       if(!u->hasinfo && !hub->supports_nogetinfo)
-        send_cmdf(hub, "$GetINFO %s", nick);
+        net_sendf(hub->net, "$GetINFO %s", nick);
     }
     g_free(nick);
   }
@@ -488,7 +402,7 @@ static void handle_cmd(struct nmdc_hub *hub, const char *cmd) {
     for(cur=list; *cur&&**cur; cur++) {
       struct nmdc_user *u = user_add(hub, *cur);
       if(!u->hasinfo && !hub->supports_nogetinfo)
-        send_cmdf(hub, "$GetINFO %s %s", *cur, hub->nick_hub);
+        net_sendf(hub->net, "$GetINFO %s %s", *cur, hub->nick_hub);
     }
     g_strfreev(list);
   }
@@ -590,104 +504,50 @@ static void handle_cmd(struct nmdc_hub *hub, const char *cmd) {
 }
 
 
-static void handle_input(GObject *src, GAsyncResult *res, gpointer dat) {
-  struct nmdc_hub *hub = dat;
-
-  GError *err = NULL;
-#if GLIB_CHECK_VERSION(2, 25, 16)
-  char *str = g_data_input_stream_read_upto_finish(G_DATA_INPUT_STREAM(src), res, NULL, &err);
-#else
-  char *str = g_data_input_stream_read_until_finish(G_DATA_INPUT_STREAM(src), res, NULL, &err);
-#endif
-
-  if(err) {
-    if(err->code != G_IO_ERROR_CANCELLED) {
-      ui_logwindow_printf(hub->tab->log, "Read error: %s", err->message);
-      nmdc_disconnect(hub);
-    }
-    g_error_free(err);
-
-  } else if(hub->state == HUBS_CONNECTED) {
-    // consume the termination character.  the char should be in the read
-    // buffer, and this call should therefore not block. if the hub
-    // disconnected for some reason, this function will fail and all data that
-    // the hub sent before disconnecting (but after the last termination char)
-    // is in str (which we just discard since it probably wasn't anything
-    // useful anyway)
-    g_data_input_stream_read_byte(hub->in, NULL, &err);
-    if(err) {
-      ui_logwindow_printf(hub->tab->log, "Read error: %s", err->message);
-      g_free(str);
-      g_error_free(err);
-      nmdc_disconnect(hub);
-    } else {
-      if(str) {
-        handle_cmd(hub, str);
-        g_free(str);
-      }
-      if(hub->state == HUBS_CONNECTED) // handle_cmd() may change the state
-#if GLIB_CHECK_VERSION(2, 25, 16)
-        g_data_input_stream_read_upto_async(hub->in, "|", -1, G_PRIORITY_DEFAULT, hub->cancel, handle_input, hub);
-#else
-        g_data_input_stream_read_until_async(hub->in, "|", G_PRIORITY_DEFAULT, hub->cancel, handle_input, hub);
-#endif
-    }
-  }
-}
-
-
-static void handle_connect(GObject *src, GAsyncResult *res, gpointer dat) {
-  struct nmdc_hub *hub = dat;
-
-  GError *err = NULL;
-  GSocketConnection *conn = g_socket_client_connect_to_host_finish(G_SOCKET_CLIENT(src), res, &err);
-
-  if(!conn) {
-    if(err->code != G_IO_ERROR_CANCELLED) {
-      ui_logwindow_printf(hub->tab->log, "Could not connect to hub: %s", err->message);
-      hub->state = HUBS_IDLE;
-    }
-    g_error_free(err);
-  } else {
-    hub->state = HUBS_CONNECTED;
-    hub->conn = conn;
-    hub->in = g_data_input_stream_new(g_io_stream_get_input_stream(G_IO_STREAM(hub->conn)));
-    hub->out = g_io_stream_get_output_stream(G_IO_STREAM(hub->conn));
-
-    // continuously wait for incoming commands.
-    // The documentation says 2.24, but _upto_ was actually added in late 2.25
-#if GLIB_CHECK_VERSION(2, 25, 16)
-    g_data_input_stream_read_upto_async(hub->in, "|", -1, G_PRIORITY_DEFAULT, hub->cancel, handle_input, hub);
-#else
-    g_data_input_stream_read_until_async(hub->in, "|", G_PRIORITY_DEFAULT, hub->cancel, handle_input, hub);
-#endif
-
-    GInetSocketAddress *addr = G_INET_SOCKET_ADDRESS(g_socket_connection_get_remote_address(conn, NULL));
-    g_assert(addr);
-    char *ip = g_inet_address_to_string(g_inet_socket_address_get_address(addr));
-    ui_logwindow_printf(hub->tab->log, "Connected to %s:%d.", ip, g_inet_socket_address_get_port(addr));
-    g_free(ip);
-    g_object_unref(addr);
-  }
-}
-
-
 static gboolean check_myinfo(gpointer data) {
   nmdc_send_myinfo(data);
   return TRUE;
 }
 
 
+static void handle_error(struct net *n, int action, GError *err) {
+  struct nmdc_hub *hub = n->handle;
+
+  if(err->code == G_IO_ERROR_CANCELLED)
+    return;
+
+  switch(action) {
+  case NETERR_CONN:
+    ui_logwindow_printf(hub->tab->log, "Could not connect to hub: %s", err->message);
+    hub->state = HUBS_IDLE;
+    break;
+  case NETERR_RECV:
+    ui_logwindow_printf(hub->tab->log, "Read error: %s", err->message);
+    nmdc_disconnect(hub);
+    break;
+  case NETERR_SEND:
+    ui_logwindow_printf(hub->tab->log, "Write error: %s", err->message);
+    nmdc_disconnect(hub);
+    break;
+  }
+}
+
+
 // TODO: periodically send empty keep-alive commands
 struct nmdc_hub *nmdc_create(struct ui_tab *tab) {
   struct nmdc_hub *hub = g_new0(struct nmdc_hub, 1);
+  hub->net = net_create('|', hub, handle_cmd, handle_error);
   hub->tab = tab;
-  hub->cancel = g_cancellable_new();
-  hub->out_buf_len = 1024;
-  hub->out_buf = g_new(char, hub->out_buf_len);
   hub->users = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, user_free);
   hub->myinfo_timer = g_timeout_add_seconds(5*60, check_myinfo, hub);
   return hub;
+}
+
+
+static void handle_connect(struct net *n) {
+  struct nmdc_hub *hub = n->handle;
+  ui_logwindow_printf(hub->tab->log, "Connected to %s.", net_remoteaddr(n));
+  hub->state = HUBS_CONNECTED;
 }
 
 
@@ -697,27 +557,14 @@ void nmdc_connect(struct nmdc_hub *hub) {
 
   ui_logwindow_printf(hub->tab->log, "Connecting to %s...", addr);
   hub->state = HUBS_CONNECTING;
-
-  GSocketClient *sc = g_socket_client_new();
-  g_socket_client_connect_to_host_async(sc, addr, 411, hub->cancel, handle_connect, hub);
-  g_object_unref(sc);
-
+  net_connect(hub->net, addr, 411, handle_connect);
   g_free(addr);
 }
 
 
 void nmdc_disconnect(struct nmdc_hub *hub) {
-  // cancel current operations and create a new cancellable object for later operations
-  // (_reset() is not a good idea when there are still async jobs using the cancellable object)
-  g_cancellable_cancel(hub->cancel);
-  g_object_unref(hub->cancel);
-  hub->cancel = g_cancellable_new();
-  if(hub->conn) {
-    // do these functions block?
-    g_object_unref(hub->in);
-    g_object_unref(hub->conn); // also closes the connection
-    hub->conn = NULL;
-  }
+  net_cancel(hub->net);
+  net_disconnect(hub->net);
   g_hash_table_remove_all(hub->users);
   g_free(hub->nick);     hub->nick = NULL;
   g_free(hub->nick_hub); hub->nick_hub = NULL;
@@ -730,11 +577,9 @@ void nmdc_disconnect(struct nmdc_hub *hub) {
 
 void nmdc_free(struct nmdc_hub *hub) {
   nmdc_disconnect(hub);
+  net_free(hub->net);
   g_hash_table_unref(hub->users);
-  g_object_unref(hub->cancel);
   g_source_remove(hub->myinfo_timer);
-  g_free(hub->out_buf);
-  g_free(hub->out_buf_old);
   g_free(hub);
 }
 

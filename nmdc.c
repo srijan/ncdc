@@ -76,9 +76,9 @@ struct nmdc_hub {
 
 
 
-// nmdc utility functions
+// nmdc utility functions (also used by nmdc_cc.c)
 
-static char *charset_convert(struct nmdc_hub *hub, gboolean to_utf8, const char *str) {
+char *nmdc_charset_convert(struct nmdc_hub *hub, gboolean to_utf8, const char *str) {
   char *fmt = conf_hub_get(string, hub->tab->name, "encoding");
   char *res = str_convert(to_utf8||!fmt?"UTF-8":fmt, !to_utf8||!fmt?"UTF-8":fmt, str);
   g_free(fmt);
@@ -86,8 +86,8 @@ static char *charset_convert(struct nmdc_hub *hub, gboolean to_utf8, const char 
 }
 
 
-static char *encode_and_escape(struct nmdc_hub *hub, const char *str) {
-  char *enc = charset_convert(hub, FALSE, str);
+char *nmdc_encode_and_escape(struct nmdc_hub *hub, const char *str) {
+  char *enc = nmdc_charset_convert(hub, FALSE, str);
   GString *dest = g_string_sized_new(strlen(enc));
   char *tmp = enc;
   while(*tmp) {
@@ -106,7 +106,7 @@ static char *encode_and_escape(struct nmdc_hub *hub, const char *str) {
 }
 
 
-static char *unescape_and_decode(struct nmdc_hub *hub, const char *str) {
+char *nmdc_unescape_and_decode(struct nmdc_hub *hub, const char *str) {
   GString *dest = g_string_sized_new(strlen(str));
   while(*str) {
     if(strncmp(str, "&#36;", 5) == 0) {
@@ -123,7 +123,7 @@ static char *unescape_and_decode(struct nmdc_hub *hub, const char *str) {
       str++;
     }
   }
-  char *dec = charset_convert(hub, TRUE, dest->str);
+  char *dec = nmdc_charset_convert(hub, TRUE, dest->str);
   g_string_free(dest, TRUE);
   return dec;
 }
@@ -131,7 +131,7 @@ static char *unescape_and_decode(struct nmdc_hub *hub, const char *str) {
 
 // Info & algorithm @ http://www.teamfair.info/wiki/index.php?title=Lock_to_key
 // This function modifies "lock" in-place for temporary data
-static char *lock2key(char *lock) {
+char *nmdc_lock2key(char *lock) {
   char n;
   int i;
   int len = strlen(lock);
@@ -166,7 +166,7 @@ static struct nmdc_user *user_add(struct nmdc_hub *hub, const char *name) {
     return u;
   u = g_slice_new0(struct nmdc_user);
   u->name_hub = g_strdup(name);
-  u->name = charset_convert(hub, TRUE, name);
+  u->name = nmdc_charset_convert(hub, TRUE, name);
   g_hash_table_insert(hub->users, u->name_hub, u);
   ui_hub_joinquit(hub->tab, TRUE, u);
   return u;
@@ -188,7 +188,7 @@ static void user_free(gpointer dat) {
 // Get a user by a UTF-8 string. May fail if the UTF-8 -> hub encoding is not
 // really one-to-one
 struct nmdc_user *nmdc_user_get(struct nmdc_hub *hub, const char *name) {
-  char *name_hub = charset_convert(hub, FALSE, name);
+  char *name_hub = nmdc_charset_convert(hub, FALSE, name);
   struct nmdc_user *u = g_hash_table_lookup(hub->users, name_hub);
   g_free(name_hub);
   return u;
@@ -235,7 +235,7 @@ static void user_myinfo(struct nmdc_hub *hub, struct nmdc_user *u, const char *s
     //char *flag = g_match_info_fetch(nfo, 4); // currently ignored
     char *mail = g_match_info_fetch(nfo, 5);
     char *share = g_match_info_fetch(nfo, 6);
-    u->desc = desc[0] ? unescape_and_decode(hub, desc) : NULL;
+    u->desc = desc[0] ? nmdc_unescape_and_decode(hub, desc) : NULL;
     g_free(desc);
     ASSIGN_OR_FREE(u->tag, tag);
     ASSIGN_OR_FREE(u->conn, conn);
@@ -261,9 +261,9 @@ void nmdc_send_myinfo(struct nmdc_hub *hub) {
   if(!hub->nick_valid)
     return;
   char *tmp;
-  tmp = conf_hub_get(string, hub->tab->name, "description"); char *desc = encode_and_escape(hub, tmp?tmp:""); g_free(tmp);
-  tmp = conf_hub_get(string, hub->tab->name, "connection");  char *conn = encode_and_escape(hub, tmp?tmp:""); g_free(tmp);
-  tmp = conf_hub_get(string, hub->tab->name, "email");       char *mail = encode_and_escape(hub, tmp?tmp:""); g_free(tmp);
+  tmp = conf_hub_get(string, hub->tab->name, "description"); char *desc = nmdc_encode_and_escape(hub, tmp?tmp:""); g_free(tmp);
+  tmp = conf_hub_get(string, hub->tab->name, "connection");  char *conn = nmdc_encode_and_escape(hub, tmp?tmp:""); g_free(tmp);
+  tmp = conf_hub_get(string, hub->tab->name, "email");       char *mail = nmdc_encode_and_escape(hub, tmp?tmp:""); g_free(tmp);
 
   // TODO: differentiate between normal/passworded/OP
   int hubs = 0;
@@ -294,14 +294,14 @@ void nmdc_send_myinfo(struct nmdc_hub *hub) {
 void nmdc_say(struct nmdc_hub *hub, const char *str) {
   if(!hub->nick_valid)
     return;
-  char *msg = encode_and_escape(hub, str);
+  char *msg = nmdc_encode_and_escape(hub, str);
   net_sendf(hub->net, "<%s> %s", hub->nick_hub, msg);
   g_free(msg);
 }
 
 
 void nmdc_msg(struct nmdc_hub *hub, struct nmdc_user *user, const char *str) {
-  char *msg = encode_and_escape(hub, str);
+  char *msg = nmdc_encode_and_escape(hub, str);
   net_sendf(hub->net, "$To: %s From: %s $<%s> %s", user->name_hub, hub->nick_hub, hub->nick_hub, msg);
   g_free(msg);
   // emulate protocol echo
@@ -330,16 +330,17 @@ static void handle_cmd(struct net *n, char *cmd) {
   CMDREGEX(hubname, "HubName (.+)");
   CMDREGEX(to, "To: ([^ $]+) From: ([^ $]+) \\$(.+)");
   CMDREGEX(forcemove, "ForceMove (.+)");
+  CMDREGEX(connecttome, "ConnectToMe ([^ $]+) ([0-9]{1,3}(?:\\.[0-9]{1,3}){3}:[0-9]+)"); // TODO: IPv6
 
   // $Lock
   if(g_regex_match(lock, cmd, 0, &nfo)) { // 1 = lock
     char *lock = g_match_info_fetch(nfo, 1);
     if(strncmp(lock, "EXTENDEDPROTOCOL", 16) == 0)
       net_send(hub->net, "$Supports NoGetINFO NoHello");
-    char *key = lock2key(lock);
+    char *key = nmdc_lock2key(lock);
     net_sendf(hub->net, "$Key %s", key);
     hub->nick = conf_hub_get(string, hub->tab->name, "nick");
-    hub->nick_hub = charset_convert(hub, FALSE, hub->nick);
+    hub->nick_hub = nmdc_charset_convert(hub, FALSE, hub->nick);
     net_sendf(hub->net, "$ValidateNick %s", hub->nick_hub);
     g_free(key);
     g_free(lock);
@@ -443,7 +444,7 @@ static void handle_cmd(struct net *n, char *cmd) {
   // $HubName
   if(g_regex_match(hubname, cmd, 0, &nfo)) { // 1 = name
     char *name = g_match_info_fetch(nfo, 1);
-    hub->hubname = unescape_and_decode(hub, name);
+    hub->hubname = nmdc_unescape_and_decode(hub, name);
     g_free(name);
   }
   g_match_info_free(nfo);
@@ -457,7 +458,7 @@ static void handle_cmd(struct net *n, char *cmd) {
     if(!u)
       g_warning("[hub: %s] Got a $To from `%s', who is not on this hub!", hub->tab->name, from);
     else {
-      char *msge = unescape_and_decode(hub, msg);
+      char *msge = nmdc_unescape_and_decode(hub, msg);
       ui_hub_msg(hub->tab, u, msge);
       g_free(msge);
     }
@@ -470,9 +471,22 @@ static void handle_cmd(struct net *n, char *cmd) {
   // $ForceMove
   if(g_regex_match(forcemove, cmd, 0, &nfo)) { // 1 = addr
     char *addr = g_match_info_fetch(nfo, 1);
-    char *eaddr = unescape_and_decode(hub, addr);
+    char *eaddr = nmdc_unescape_and_decode(hub, addr);
     ui_logwindow_printf(hub->tab->log, "\nThe hub is requesting you to move to %s.\nType `/connect %s' to do so.\n", eaddr, eaddr);
     g_free(eaddr);
+    g_free(addr);
+  }
+  g_match_info_free(nfo);
+
+  // $ConnectToMe
+  if(g_regex_match(connecttome, cmd, 0, &nfo)) { // 1 = me, 2 = addr
+    char *me = g_match_info_fetch(nfo, 1);
+    char *addr = g_match_info_fetch(nfo, 2);
+    if(strcmp(me, hub->nick_hub) != 0)
+      g_warning("Received a $ConnectToMe for someone else (to %s from %s)", me, addr);
+    else
+      nmdc_cc_connect(nmdc_cc_create(hub), addr);
+    g_free(me);
     g_free(addr);
   }
   g_match_info_free(nfo);
@@ -497,7 +511,7 @@ static void handle_cmd(struct net *n, char *cmd) {
 
   // global hub message
   if(cmd[0] != '$') {
-    char *msg = unescape_and_decode(hub, cmd);
+    char *msg = nmdc_unescape_and_decode(hub, cmd);
     ui_logwindow_add(hub->tab->log, msg);
     g_free(msg);
   }
@@ -576,6 +590,7 @@ void nmdc_disconnect(struct nmdc_hub *hub) {
 
 
 void nmdc_free(struct nmdc_hub *hub) {
+  // TODO: make sure there are no nmdc_cc objects referring to this hub
   nmdc_disconnect(hub);
   net_free(hub->net);
   g_hash_table_unref(hub->users);

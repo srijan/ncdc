@@ -1,6 +1,6 @@
 
 bin_PROGRAMS = ncdc
-ncdc_SOURCES = main.c fl_local.c fl_util.c commands.c util.c ui.c ui_util.c nmdc.c tth.c
+ncdc_SOURCES = main.c fl_local.c fl_util.c commands.c util.c ui.c ui_util.c nmdc.c nmdc_cc.c tth.c
 auto_headers = $(ncdc_SOURCES:.c=.h)
 noinst_HEADERS = ncdc.h ${auto_headers}
 ncdc_CFLAGS = $(DEPS_CFLAGS)

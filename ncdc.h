@@ -39,6 +39,7 @@
 // (some of these remain incomplete, others are defined in interfaces)
 struct fl_list;
 struct net;
+struct nmdc_cc;
 struct nmdc_hub;
 struct nmdc_user;
 struct tth_ctx;
@@ -53,6 +54,7 @@ struct ui_textinput;
 #include "fl_util.h"
 #include "main.h"
 #include "nmdc.h"
+#include "nmdc_cc.h"
 #include "tth.h"
 #include "ui.h"
 #include "ui_util.h"

@@ -18,6 +18,7 @@ fl_local.h
 fl_util.h
 main.h
 nmdc.h
+nmdc_cc.h
 tth.h
 ui.h
 ui_util.h

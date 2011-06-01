@@ -537,13 +537,17 @@ void ratecalc_calc() {
 
 
 
-/* High-level connection handling for message-based protocols.
+/* High-level connection handling for message-based protocols. With some binary
+ * transfer stuff mixed in.
  *
  * Implements the following:
  * - Async connecting to a hostname/ip + port
  * - Async message sending (end-of-message char is added automatically)
  * - Async message receiving ("message" = all bytes until end-of-message char)
  * TODO: Use ratecalc for in and output
+ *
+ * Does not use the GIOStream interface, since that is inefficient and has too
+ * many limitations to be useful.
  */
 
 #if INTERFACE
@@ -555,15 +559,11 @@ void ratecalc_calc() {
 
 struct net {
   GSocketConnection *conn;
-  GDataInputStream *in;
-  // output steam and buffer
-  GOutputStream *out;
-  char *out_buf;
-  char *out_buf_old;
-  int out_buf_len;
-  int out_buf_pos;
-  // used to cancel any outstanding operation
-  GCancellable *cancel;
+  GSocket *sock;
+  // input/output buffers
+  GString *in, *out;
+  GCancellable *cancel; // used to cancel a connect operation
+  guint in_src, out_src;
   // receive callback
   void (*cb_rcv)(struct net *, char *);
   // on-connect callback
@@ -579,17 +579,28 @@ struct net {
 };
 
 
+// g_socket_create_source() has a cancellable argument. But I can't tell from
+// the documentation that it does exactly what I want it to do, so let's just
+// use g_source_remove() manually.
 #define net_cancel(n) do {\
+    if((n)->in_src) {\
+      g_source_remove((n)->in_src);\
+      (n)->in_src = 0;\
+    }\
+    if((n)->out_src) {\
+      g_source_remove((n)->out_src);\
+      (n)->out_src = 0;\
+    }\
     g_cancellable_cancel((n)->cancel);\
     g_object_unref((n)->cancel);\
     (n)->cancel = g_cancellable_new();\
   } while(0)
 
 
-// do these functions block?
+// does this function block?
 #define net_disconnect(n) do {\
     if((n)->conn) {\
-      g_object_unref((n)->in);\
+      net_cancel(n);\
       g_object_unref((n)->conn);\
       (n)->conn = NULL;\
     }\
@@ -599,148 +610,87 @@ struct net {
 // Should not be called while connected.
 #define net_free(n) do {\
     g_object_unref((n)->cancel);\
-    g_free((n)->out_buf);\
-    g_free((n)->out_buf_old);\
+    g_string_free((n)->out, TRUE);\
+    g_string_free((n)->in, TRUE);\
     g_free(n);\
   } while(0)
 
 #endif
 
 
-static void net_handle_input(GObject *src, GAsyncResult *res, gpointer dat) {
+static void net_consume_input(struct net *n) {
+  char *str = n->in->str;
+  char *sep;
+  gssize consumed = 0;
+
+  // TODO: set a maximum length on a single message to prevent unbounded buffer growth
+  while((sep = strchr(str, n->eom[0]))) {
+    consumed += 1 + sep - str;
+    *sep = 0;
+    g_debug("%s< %s", net_remoteaddr(n), str);
+    if(str[0])
+      n->cb_rcv(n, str);
+    str = sep+1;
+  }
+  if(consumed)
+    g_string_erase(n->in, 0, consumed);
+}
+
+
+// catches and handles any errors from g_socket_receive or g_socket_send in a
+// input/output handler.
+#define net_handle_ioerr(n, src, ret, err, action) do {\
+    if(err && err->code == G_IO_ERROR_WOULD_BLOCK) {\
+      g_error_free(err);\
+      return TRUE;\
+    }\
+    if(err) {\
+      n->cb_err(n, action, err);\
+      g_error_free(err);\
+      src = 0;\
+      return FALSE;\
+    }\
+    if(ret == 0) {\
+      g_set_error_literal(&err, 1, 0, "Remote disconnected.");\
+      n->cb_err(n, action, err);\
+      g_error_free(err);\
+      src = 0;\
+      return FALSE;\
+    }\
+  } while(0)
+
+
+static gboolean net_handle_input(GSocket *sock, GIOCondition cond, gpointer dat) {
+  struct net *n = dat;
+
+  // make sure enough space is available in the input buffer (ugly hack, GString has no simple grow function)
+  if(n->in->allocated_len - n->in->len < 1024) {
+    gsize oldlen = n->in->len;
+    g_string_set_size(n->in, n->in->len+1024);
+    n->in->len = oldlen;
+  }
+
+  GError *err = NULL;
+  gssize read = g_socket_receive(n->sock, n->in->str + n->in->len, n->in->allocated_len - n->in->len, NULL, &err);
+  net_handle_ioerr(n, n->in_src, read, err, NETERR_RECV);
+  n->in->len += read;
+  n->in->str[n->in->len] = 0;
+  net_consume_input(n);
+  return TRUE;
+}
+
+
+static gboolean net_handle_output(GSocket *sock, GIOCondition cond, gpointer dat) {
   struct net *n = dat;
 
   GError *err = NULL;
-#if GLIB_CHECK_VERSION(2, 25, 16)
-  char *str = g_data_input_stream_read_upto_finish(G_DATA_INPUT_STREAM(src), res, NULL, &err);
-#else
-  char *str = g_data_input_stream_read_until_finish(G_DATA_INPUT_STREAM(src), res, NULL, &err);
-#endif
-
-  if(err) {
-    if(err->code != G_IO_ERROR_CANCELLED)
-      n->cb_err(n, NETERR_RECV, err);
-    g_error_free(err);
-
-  } else {
-    // consume the termination character.  the char should be in the read
-    // buffer, and this call should therefore not block. if the hub
-    // disconnected for some reason, this function will fail and all data that
-    // the hub sent before disconnecting (but after the last termination char)
-    // is in str (which we just discard since it probably wasn't anything
-    // useful anyway)
-    g_data_input_stream_read_byte(n->in, NULL, &err);
-    if(err) {
-      n->cb_err(n, NETERR_RECV, err);
-      g_free(str);
-      g_error_free(err);
-    } else {
-      if(str) {
-        g_debug("%s< %s", net_remoteaddr(n), str);
-        n->cb_rcv(n, str);
-      }
-      g_free(str);
-      if(n->conn) // cb_recv() may perform a disconnect
-#if GLIB_CHECK_VERSION(2, 25, 16)
-        g_data_input_stream_read_upto_async(n->in, n->eom, -1, G_PRIORITY_DEFAULT,n->cancel, net_handle_input, n);
-#else
-        g_data_input_stream_read_until_async(n->in, n->eom, G_PRIORITY_DEFAULT, n->cancel, net_handle_input, n);
-#endif
-    }
-  }
-}
-
-
-static void net_handle_write(GObject *src, GAsyncResult *res, gpointer dat) {
-  struct net *n = dat;
-
-  GError *err = NULL;
-  gsize written = g_output_stream_write_finish(G_OUTPUT_STREAM(src), res, &err);
-
-  if(!err || err->code != G_IO_ERROR_CANCELLED) {
-    g_free(n->out_buf_old);
-    n->out_buf_old = NULL;
-  }
-
-  if(err) {
-    if(err->code != G_IO_ERROR_CANCELLED)
-      n->cb_err(n, NETERR_SEND, err);
-    g_error_free(err);
-
-  } else {
-    if(written > 0) {
-      n->out_buf_pos -= written;
-      memmove(n->out_buf, n->out_buf+written, n->out_buf_pos);
-    }
-    g_assert(n->out_buf_pos >= 0);
-    if(n->out_buf_pos > 0)
-      g_output_stream_write_async(n->out, n->out_buf, n->out_buf_pos, G_PRIORITY_DEFAULT, n->cancel, net_handle_write, n);
-  }
-}
-
-
-static void net_growbuf(struct net *n, int len) {
-  if(n->out_buf_pos + len <= n->out_buf_len)
-    return;
-
-  n->out_buf_len = MAX(n->out_buf_len*2, n->out_buf_pos+len);
-  // we can only use g_renew() if no async operation is in progress.
-  // Otherwise the async operation may be trying to read from the buffer
-  // which we just freed. Instead, allocate a new buffer for the new data and
-  // keep the old buffer in memory, to be freed after the write has finished.
-  // (I don't suppose this will happen very often)
-  if(!g_output_stream_has_pending(n->out) || n->out_buf_old)
-    n->out_buf = g_renew(char, n->out_buf, n->out_buf_len);
-  else {
-    n->out_buf_old = n->out_buf;
-    n->out_buf = g_new(char, n->out_buf_len);
-    memcpy(n->out_buf, n->out_buf_old, n->out_buf_pos);
-  }
-}
-
-
-void net_send(struct net *n, const char *msg) {
-  // ignore writes when we're not connected
-  if(!n->conn)
-    return;
-
-  g_debug("%s> %s", net_remoteaddr(n), msg);
-
-  // append the message to the buffer
-  int len = strlen(msg)+1; // the 1 is the termination char
-  net_growbuf(n, len);
-  memcpy(n->out_buf + n->out_buf_pos, msg, len-1);
-  n->out_buf[n->out_buf_pos+len-1] = n->eom[0];
-  n->out_buf_pos += len;
-
-  // write it, if we aren't doing so already
-  if(!g_output_stream_has_pending(n->out))
-    g_output_stream_write_async(n->out, n->out_buf, n->out_buf_pos, G_PRIORITY_DEFAULT, n->cancel, net_handle_write, n);
-}
-
-
-void net_sendf(struct net *n, const char *fmt, ...) {
-  va_list va;
-  va_start(va, fmt);
-  char *str = g_strdup_vprintf(fmt, va);
-  va_end(va);
-  net_send(n, str);
-  g_free(str);
-}
-
-
-// TODO: !!THIS IMPLEMENTATION IS NOT SUPPOSED TO BE USED FOR LARGE FILES!!
-// TODO: Error handling and large file support
-// Should probably call sendfile() in a separate thread or so.
-void net_sendfile(struct net *n, const char *path, guint64 offset, guint64 length) {
-  FILE *f = fopen(path, "r");
-  g_assert(f);
-  fseek(f, offset, SEEK_SET);
-  net_growbuf(n, length);
-  n->out_buf_pos += fread(n->out_buf+n->out_buf_pos, 1, length, f);
-  fclose(f);
-  if(!g_output_stream_has_pending(n->out))
-    g_output_stream_write_async(n->out, n->out_buf, n->out_buf_pos, G_PRIORITY_DEFAULT, n->cancel, net_handle_write, n);
+  gssize written = g_socket_send(n->sock, n->out->str, n->out->len, NULL, &err);
+  net_handle_ioerr(n, n->out_src, written, err, NETERR_SEND);
+  g_string_erase(n->out, 0, written);
+  if(n->out->len > 0)
+    return TRUE;
+  n->out_src = 0;
+  return FALSE;
 }
 
 
@@ -756,16 +706,12 @@ static void net_handle_connect(GObject *src, GAsyncResult *res, gpointer dat) {
     g_error_free(err);
   } else {
     n->conn = conn;
-    n->in = g_data_input_stream_new(g_io_stream_get_input_stream(G_IO_STREAM(n->conn)));
-    n->out = g_io_stream_get_output_stream(G_IO_STREAM(n->conn));
-
-    // continuously wait for incoming messages.
-    // The documentation says 2.24, but _upto_ was actually added in late 2.25
-#if GLIB_CHECK_VERSION(2, 25, 16)
-    g_data_input_stream_read_upto_async(n->in, n->eom, -1, G_PRIORITY_DEFAULT, n->cancel, net_handle_input, n);
-#else
-    g_data_input_stream_read_until_async(n->in, n->eom, G_PRIORITY_DEFAULT, n->cancel, net_handle_input, n);
-#endif
+    n->sock = g_socket_connection_get_socket(n->conn);
+    g_socket_set_blocking(n->sock, FALSE);
+    GSource *src = g_socket_create_source(n->sock, G_IO_IN, NULL);
+    g_source_set_callback(src, (GSourceFunc)net_handle_input, n, NULL);
+    n->in_src = g_source_attach(src, NULL);
+    g_source_unref(src);
     n->cb_con(n);
   }
 }
@@ -797,13 +743,58 @@ char *net_remoteaddr(struct net *n) {
 
 struct net *net_create(char term, void *han, void (*rfunc)(struct net *, char *), void (*errfunc)(struct net *, int, GError *)) {
   struct net *n = g_new0(struct net, 1);
-  n->out_buf_len = 1024;
-  n->out_buf = g_new(char, n->out_buf_len);
+  n->in  = g_string_sized_new(1024);
+  n->out = g_string_sized_new(1024);
   n->cancel = g_cancellable_new();
   n->eom[0] = term;
   n->handle = han;
   n->cb_rcv = rfunc;
   n->cb_err = errfunc;
   return n;
+}
+
+
+void net_send_raw(struct net *n, const char *msg, int len) {
+  if(!n->conn)
+    return;
+  g_string_append_len(n->out, msg, len);
+  if(!n->out_src) {
+    GSource *src = g_socket_create_source(n->sock, G_IO_OUT, NULL);
+    g_source_set_callback(src, (GSourceFunc)net_handle_output, n, NULL);
+    n->out_src = g_source_attach(src, NULL);
+    g_source_unref(src);
+  }
+}
+
+
+void net_send(struct net *n, const char *msg) {
+  g_debug("%s> %s", net_remoteaddr(n), msg);
+  net_send_raw(n, msg, strlen(msg));
+  net_send_raw(n, n->eom, 1);
+}
+
+
+void net_sendf(struct net *n, const char *fmt, ...) {
+  va_list va;
+  va_start(va, fmt);
+  char *str = g_strdup_vprintf(fmt, va);
+  va_end(va);
+  net_send(n, str);
+  g_free(str);
+}
+
+
+// TODO: !!THIS IMPLEMENTATION IS NOT SUPPOSED TO BE USED FOR LARGE FILES!!
+// TODO: Error handling and large file support
+// Should probably call sendfile() in a separate thread or so.
+void net_sendfile(struct net *n, const char *path, guint64 offset, guint64 length) {
+  FILE *f = fopen(path, "r");
+  g_assert(f);
+  fseek(f, offset, SEEK_SET);
+  char *buf = g_malloc(length);
+  int len = fread(buf, 1, length, f);
+  fclose(f);
+  net_send_raw(n, buf, len);
+  g_free(buf);
 }
 

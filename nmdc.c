@@ -577,7 +577,6 @@ void nmdc_connect(struct nmdc_hub *hub) {
 
 
 void nmdc_disconnect(struct nmdc_hub *hub) {
-  net_cancel(hub->net);
   net_disconnect(hub->net);
   g_hash_table_remove_all(hub->users);
   g_free(hub->nick);     hub->nick = NULL;

@@ -31,6 +31,9 @@
 #include <stdlib.h>
 #include <glib/gstdio.h>
 #include <sys/file.h>
+#ifdef HAVE_SYS_SENDFILE_H
+# include <sys/sendfile.h>
+#endif
 
 
 #if INTERFACE
@@ -564,6 +567,10 @@ struct net {
   GString *in, *out;
   GCancellable *cancel; // used to cancel a connect operation
   guint in_src, out_src;
+  // sending a file
+  int file_fd;
+  gint64 file_left;
+  off_t file_offset;
   // receive callback
   void (*cb_rcv)(struct net *, char *);
   // on-connect callback
@@ -680,15 +687,57 @@ static gboolean net_handle_input(GSocket *sock, GIOCondition cond, gpointer dat)
 }
 
 
+// TODO: do this in a separate thread to avoid blocking on HDD reads
+static gboolean net_handle_sendfile(struct net *n) {
+#ifdef HAVE_SENDFILE
+  ssize_t r = sendfile(g_socket_get_fd(n->sock), n->file_fd, &(n->file_offset), MIN((size_t)n->file_left, 102400));
+
+  if(r >= 0) {
+    n->file_left -= r;
+    return TRUE;
+
+  } else if(errno == EAGAIN)
+    return TRUE;
+
+  // non-sendfile() fallback
+  else if(errno == ENOTSUP || errno == ENOSYS || errno == EINVAL) {
+#endif
+    GError *err = NULL;
+    char buf[10240];
+    g_return_val_if_fail(lseek(n->file_fd, n->file_offset, SEEK_SET) != (off_t)-1, FALSE);
+    int r = read(n->file_fd, buf, 10240);
+    g_return_val_if_fail(r >= 0, FALSE);
+    gssize written = g_socket_send(n->sock, buf, r, NULL, &err);
+    net_handle_ioerr(n, n->out_src, written, err, NETERR_SEND);
+    n->file_offset += r;
+    n->file_left -= r;
+    return TRUE;
+
+#ifdef HAVE_SENDFILE
+  }
+  g_return_val_if_reached(FALSE);
+#endif
+}
+
+
 static gboolean net_handle_output(GSocket *sock, GIOCondition cond, gpointer dat) {
   struct net *n = dat;
 
-  GError *err = NULL;
-  gssize written = g_socket_send(n->sock, n->out->str, n->out->len, NULL, &err);
-  net_handle_ioerr(n, n->out_src, written, err, NETERR_SEND);
-  g_string_erase(n->out, 0, written);
-  if(n->out->len > 0)
-    return TRUE;
+  // send our buffer
+  if(n->out->len) {
+    GError *err = NULL;
+    gssize written = g_socket_send(n->sock, n->out->str, n->out->len, NULL, &err);
+    net_handle_ioerr(n, n->out_src, written, err, NETERR_SEND);
+    g_string_erase(n->out, 0, written);
+    if(n->out->len || n->file_left)
+      return TRUE;
+
+  // send a file
+  } else if(n->file_left) {
+    if(net_handle_sendfile(n) && (n->out->len || n->file_left))
+      return TRUE;
+  }
+
   n->out_src = 0;
   return FALSE;
 }
@@ -753,17 +802,20 @@ struct net *net_create(char term, void *han, void (*rfunc)(struct net *, char *)
   return n;
 }
 
+#define net_send_do(n) do {\
+    if(!n->out_src) {\
+      GSource *src = g_socket_create_source(n->sock, G_IO_OUT, NULL);\
+      g_source_set_callback(src, (GSourceFunc)net_handle_output, n, NULL);\
+      n->out_src = g_source_attach(src, NULL);\
+      g_source_unref(src);\
+    }\
+  } while (0)
 
 void net_send_raw(struct net *n, const char *msg, int len) {
   if(!n->conn)
     return;
   g_string_append_len(n->out, msg, len);
-  if(!n->out_src) {
-    GSource *src = g_socket_create_source(n->sock, G_IO_OUT, NULL);
-    g_source_set_callback(src, (GSourceFunc)net_handle_output, n, NULL);
-    n->out_src = g_source_attach(src, NULL);
-    g_source_unref(src);
-  }
+  net_send_do(n);
 }
 
 
@@ -784,17 +836,12 @@ void net_sendf(struct net *n, const char *fmt, ...) {
 }
 
 
-// TODO: !!THIS IMPLEMENTATION IS NOT SUPPOSED TO BE USED FOR LARGE FILES!!
-// TODO: Error handling and large file support
-// Should probably call sendfile() in a separate thread or so.
+// TODO: error reporting?
+// Note: the net_send() family shouldn't be used while the file is being sent.
 void net_sendfile(struct net *n, const char *path, guint64 offset, guint64 length) {
-  FILE *f = fopen(path, "r");
-  g_assert(f);
-  fseek(f, offset, SEEK_SET);
-  char *buf = g_malloc(length);
-  int len = fread(buf, 1, length, f);
-  fclose(f);
-  net_send_raw(n, buf, len);
-  g_free(buf);
+  g_return_if_fail((n->file_fd = open(path, O_RDONLY)) >= 0);
+  n->file_offset = offset;
+  n->file_left = length;
+  net_send_do(n);
 }
 

@@ -41,6 +41,13 @@ AC_CHECK_FUNCS(
   AC_MSG_ERROR([Required function missing]))
 
 
+# Check for sendfile() support (not required)
+# TODO: test this on more than only Linux, and perhaps add a --disable-sendfile option
+# TODO: check for 64-bit off_t. AC_SYS_LARGEFILE should do this, but I believe it could fail...
+AC_CHECK_HEADERS([sys/sendfile.h])
+AC_CHECK_FUNCS([sendfile])
+
+
 # Check for ncursesw
 AC_CHECK_LIB([ncursesw],
              [get_wch],

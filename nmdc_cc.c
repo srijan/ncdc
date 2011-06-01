@@ -26,6 +26,7 @@
 
 #include "ncdc.h"
 #include <string.h>
+#include <sys/stat.h>
 
 
 #if INTERFACE
@@ -49,6 +50,38 @@ static void handle_error(struct net *n, int action, GError *err) {
 }
 
 
+// TODO:
+// - id = path
+// - type = tthl (TTHL)
+// - id = TTH/.. (TTHF)
+// - id = files.xml? (Required by ADC, but I doubt it's used)
+// - type = list? (Also required by ADC, but is this used?)
+static void handle_adcget(struct nmdc_cc *cc, char *type, char *id, guint64 start, gint64 bytes) {
+  if(strcmp(type, "file") != 0) {
+    net_send(cc->net, "$Error Unsupported ADCGET type");
+    return;
+  }
+
+  // get path (for file uploads)
+  char *path = NULL;
+  if(strcmp(id, "files.xml.bz2") == 0)
+    path = fl_local_list_file;
+
+  // validate
+  struct stat st;
+  if(!path || stat(path, &st) < 0 || !S_ISREG(st.st_mode) || start > st.st_size) {
+    net_send(cc->net, "$Error File Not Available");
+    return;
+  }
+  if(bytes < 0 || bytes > st.st_size-start)
+    bytes = st.st_size-start;
+
+  // send
+  net_sendf(cc->net, "$ADCSND %s %s %"G_GUINT64_FORMAT" %"G_GINT64_FORMAT, type, id, start, bytes);
+  net_sendfile(cc->net, path, start, bytes);
+}
+
+
 static void handle_cmd(struct net *n, char *cmd) {
   struct nmdc_cc *cc = n->handle;
   GMatchInfo *nfo;
@@ -60,11 +93,14 @@ static void handle_cmd(struct net *n, char *cmd) {
 
   CMDREGEX(mynick, "MyNick ([^ $]+)");
   CMDREGEX(lock, "Lock ([^ $]+) Pk=[^ $]+");
+  CMDREGEX(supports, "Supports (.+)");
+  CMDREGEX(adcget, "ADCGET ([^ $]+) ([^ ]+) ([0-9]+) (-?[0-9]+)");
 
   // $MyNick
   if(g_regex_match(mynick, cmd, 0, &nfo)) { // 1 = nick
     cc->nick_raw = g_match_info_fetch(nfo, 1);
     // TODO: if !hub, figure out on which hub this user belongs
+    // TODO: check that the user is indeed on the hub
     cc->nick = nmdc_charset_convert(cc->hub, TRUE, cc->nick_raw);
   }
   g_match_info_free(nfo);
@@ -77,12 +113,41 @@ static void handle_cmd(struct net *n, char *cmd) {
       g_warning("C-C connection with %s (%s), but it does not support EXTENDEDPROTOCOL.", net_remoteaddr(cc->net), cc->nick);
       nmdc_cc_disconnect(cc);
     } else {
-      net_send(cc->net, "$Supports "); // TODO: actually support something
+      net_send(cc->net, "$Supports MiniSlots XmlBZList ADCGet TTHL TTHF");
       char *key = nmdc_lock2key(lock);
+      net_send(cc->net, "$Direction Upload 0"); // we don't support downloading yet.
       net_sendf(cc->net, "$Key %s", key);
       g_free(key);
       g_free(lock);
     }
+  }
+  g_match_info_free(nfo);
+
+  // $Supports
+  if(g_regex_match(supports, cmd, 0, &nfo)) { // 1 = list
+    char *list = g_match_info_fetch(nfo, 1);
+    // Client must support ADCGet to download from us, since we haven't implemented the old NMDC $Get.
+    if(!strstr(list, "ADCGet")) {
+      g_warning("C-C connection with %s (%s), but it does not support ADCGet.", net_remoteaddr(cc->net), cc->nick);
+      nmdc_cc_disconnect(cc);
+    }
+    g_free(list);
+  }
+  g_match_info_free(nfo);
+
+  // $ADCGET
+  if(g_regex_match(adcget, cmd, 0, &nfo)) { // 1 = type, 2 = identifier, 3 = start_pos, 4 = bytes
+    char *type = g_match_info_fetch(nfo, 1);
+    char *id = g_match_info_fetch(nfo, 2);
+    char *start = g_match_info_fetch(nfo, 3);
+    char *bytes = g_match_info_fetch(nfo, 4);
+    guint64 st = g_ascii_strtoull(start, NULL, 10);
+    gint64 by = g_ascii_strtoll(bytes, NULL, 10);
+    handle_adcget(cc, type, id, st, by);
+    g_free(type);
+    g_free(id);
+    g_free(start);
+    g_free(bytes);
   }
   g_match_info_free(nfo);
 }

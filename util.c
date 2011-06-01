@@ -543,7 +543,6 @@ void ratecalc_calc() {
  * - Async connecting to a hostname/ip + port
  * - Async message sending (end-of-message char is added automatically)
  * - Async message receiving ("message" = all bytes until end-of-message char)
- * TODO: Async sendfile() or something
  * TODO: Use ratecalc for in and output
  */
 
@@ -680,6 +679,26 @@ static void net_handle_write(GObject *src, GAsyncResult *res, gpointer dat) {
 }
 
 
+static void net_growbuf(struct net *n, int len) {
+  if(n->out_buf_pos + len <= n->out_buf_len)
+    return;
+
+  n->out_buf_len = MAX(n->out_buf_len*2, n->out_buf_pos+len);
+  // we can only use g_renew() if no async operation is in progress.
+  // Otherwise the async operation may be trying to read from the buffer
+  // which we just freed. Instead, allocate a new buffer for the new data and
+  // keep the old buffer in memory, to be freed after the write has finished.
+  // (I don't suppose this will happen very often)
+  if(!g_output_stream_has_pending(n->out) || n->out_buf_old)
+    n->out_buf = g_renew(char, n->out_buf, n->out_buf_len);
+  else {
+    n->out_buf_old = n->out_buf;
+    n->out_buf = g_new(char, n->out_buf_len);
+    memcpy(n->out_buf, n->out_buf_old, n->out_buf_pos);
+  }
+}
+
+
 void net_send(struct net *n, const char *msg) {
   // ignore writes when we're not connected
   if(!n->conn)
@@ -689,21 +708,7 @@ void net_send(struct net *n, const char *msg) {
 
   // append the message to the buffer
   int len = strlen(msg)+1; // the 1 is the termination char
-  if(n->out_buf_pos + len > n->out_buf_len) {
-    n->out_buf_len = MAX(n->out_buf_len*2, n->out_buf_pos+len);
-    // we can only use g_renew() if no async operation is in progress.
-    // Otherwise the async operation may be trying to read from the buffer
-    // which we just freed. Instead, allocate a new buffer for the new data and
-    // keep the old buffer in memory, to be freed after the write has finished.
-    // (I don't suppose this will happen very often)
-    if(!g_output_stream_has_pending(n->out) || n->out_buf_old)
-      n->out_buf = g_renew(char, n->out_buf, n->out_buf_len);
-    else {
-      n->out_buf_old = n->out_buf;
-      n->out_buf = g_new(char, n->out_buf_len);
-      memcpy(n->out_buf, n->out_buf_old, n->out_buf_pos);
-    }
-  }
+  net_growbuf(n, len);
   memcpy(n->out_buf + n->out_buf_pos, msg, len-1);
   n->out_buf[n->out_buf_pos+len-1] = n->eom[0];
   n->out_buf_pos += len;
@@ -721,6 +726,21 @@ void net_sendf(struct net *n, const char *fmt, ...) {
   va_end(va);
   net_send(n, str);
   g_free(str);
+}
+
+
+// TODO: !!THIS IMPLEMENTATION IS NOT SUPPOSED TO BE USED FOR LARGE FILES!!
+// TODO: Error handling and large file support
+// Should probably call sendfile() in a separate thread or so.
+void net_sendfile(struct net *n, const char *path, guint64 offset, guint64 length) {
+  FILE *f = fopen(path, "r");
+  g_assert(f);
+  fseek(f, offset, SEEK_SET);
+  net_growbuf(n, length);
+  n->out_buf_pos += fread(n->out_buf+n->out_buf_pos, 1, length, f);
+  fclose(f);
+  if(!g_output_stream_has_pending(n->out))
+    g_output_stream_write_async(n->out, n->out_buf, n->out_buf_pos, G_PRIORITY_DEFAULT, n->cancel, net_handle_write, n);
 }
 
 

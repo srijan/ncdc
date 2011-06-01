@@ -25,7 +25,7 @@ AM_CONDITIONAL([USE_MH], [test "x$have_mh" = "xyes"])
 
 # Check for header files.
 AC_CHECK_HEADERS(
-  [wchar.h locale.h signal.h bzlib.h gdbm.h],[],
+  [wchar.h locale.h signal.h bzlib.h gdbm.h sys/types.h sys/stat.h],[],
   AC_MSG_ERROR([Required header file not found]))
 
 have_nch=no

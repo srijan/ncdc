@@ -51,9 +51,7 @@ static void handle_error(struct net *n, int action, GError *err) {
 
 
 // TODO:
-// - id = path
 // - type = tthl (TTHL)
-// - id = TTH/.. (TTHF)
 // - id = files.xml? (Required by ADC, but I doubt it's used)
 // - type = list? (Also required by ADC, but is this used?)
 static void handle_adcget(struct nmdc_cc *cc, char *type, char *id, guint64 start, gint64 bytes) {
@@ -63,14 +61,33 @@ static void handle_adcget(struct nmdc_cc *cc, char *type, char *id, guint64 star
   }
 
   // get path (for file uploads)
+
   char *path = NULL;
+  struct fl_list *f = NULL;
+  // files.xml.bz2
   if(strcmp(id, "files.xml.bz2") == 0)
-    path = fl_local_list_file;
+    path = g_strdup(fl_local_list_file);
+  // / (path in the nameless root - assumed to be UTF-8)
+  else if(id[0] == '/' && fl_local_list) {
+    f = fl_list_from_path(fl_local_list, id);
+  // TTH/
+  } else if(strncmp(id, "TTH/", 4) == 0 && strlen(id) == 4+39) {
+    char root[24];
+    base32_decode(id+4, root);
+    f = fl_local_from_tth(root);
+  }
+
+  if(f) {
+    char *enc_path = fl_local_path(f);
+    path = g_filename_from_utf8(enc_path, -1, NULL, NULL, NULL);
+    g_free(enc_path);
+  }
 
   // validate
   struct stat st;
   if(!path || stat(path, &st) < 0 || !S_ISREG(st.st_mode) || start > st.st_size) {
     net_send(cc->net, "$Error File Not Available");
+    g_free(path);
     return;
   }
   if(bytes < 0 || bytes > st.st_size-start)
@@ -79,6 +96,7 @@ static void handle_adcget(struct nmdc_cc *cc, char *type, char *id, guint64 star
   // send
   net_sendf(cc->net, "$ADCSND %s %s %"G_GUINT64_FORMAT" %"G_GINT64_FORMAT, type, id, start, bytes);
   net_sendfile(cc->net, path, start, bytes);
+  g_free(path);
 }
 
 

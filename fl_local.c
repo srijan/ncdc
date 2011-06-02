@@ -58,7 +58,7 @@ static GDBM_FILE   fl_hashdat;
 
 // Get full path to an item in our list. Result should be free'd. This function
 // isn't particularly fast.
-static char *fl_local_path(struct fl_list *fl) {
+char *fl_local_path(struct fl_list *fl) {
   if(!fl->parent->parent)
     return g_key_file_get_string(conf_file, "share", fl->name, NULL);
   char *tmp, *root, *path = g_strdup(fl->name);
@@ -112,6 +112,13 @@ void fl_local_suggest(char *path, char **sug) {
   fl_list_suggest(fl_local_list, path, sug);
   if(!sug[0])
     path_suggest(path, sug);
+}
+
+
+// get a file with the (raw) TTH
+struct fl_list *fl_local_from_tth(const char *root) {
+  GSList *cur = g_hash_table_lookup(fl_hash_index, root);
+  return cur ? cur->data : NULL;
 }
 
 

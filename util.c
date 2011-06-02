@@ -28,6 +28,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <string.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <glib/gstdio.h>
 #include <sys/file.h>
@@ -690,7 +691,7 @@ static gboolean net_handle_input(GSocket *sock, GIOCondition cond, gpointer dat)
 // TODO: do this in a separate thread to avoid blocking on HDD reads
 static gboolean net_handle_sendfile(struct net *n) {
 #ifdef HAVE_SENDFILE
-  ssize_t r = sendfile(g_socket_get_fd(n->sock), n->file_fd, &(n->file_offset), MIN((size_t)n->file_left, 102400));
+  ssize_t r = sendfile(g_socket_get_fd(n->sock), n->file_fd, &(n->file_offset), MIN((size_t)n->file_left, INT_MAX));
 
   if(r >= 0) {
     n->file_left -= r;

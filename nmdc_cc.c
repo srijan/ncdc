@@ -41,8 +41,25 @@ struct nmdc_cc {
 
 #endif
 
-// TODO: keep a list/hashtable/sequence of nmdc_cc objects
+// opened connections - in no particular order
+GList *nmdc_cc_list = NULL;
 
+
+// When a hub tab is closed (not just disconnected), make sure all hub fields
+// are reset to NULL - since we won't be able to dereference it anymore.  Note
+// that we do keep the connections opened, and things can resume as normal
+// without the hub field, since it is only used in the initial phase (with the
+// $MyNick's being exchanged.)
+// Note that the connection will remain hubless even when the same hub is later
+// opened again. I don't think this is a huge problem, however.
+void nmdc_cc_remove_hub(struct nmdc_hub *hub) {
+  GList *n;
+  for(n=nmdc_cc_list; n; n=n->next) {
+    struct nmdc_cc *c = n->data;
+    if(c->hub == hub)
+      c->hub = NULL;
+  }
+}
 
 
 // ADC parameter unescaping, required for $ADCGET
@@ -183,10 +200,15 @@ static void handle_cmd(struct net *n, char *cmd) {
 
   // $MyNick
   if(g_regex_match(mynick, cmd, 0, &nfo)) { // 1 = nick
-    cc->nick_raw = g_match_info_fetch(nfo, 1);
-    // TODO: if !hub, figure out on which hub this user belongs
-    // TODO: check that the user is indeed on the hub
-    cc->nick = nmdc_charset_convert(cc->hub, TRUE, cc->nick_raw);
+    if(cc->nick)
+      g_warning("Received a $MyNick from %s when we have already received one.", cc->nick);
+    else if(!cc->hub) // TODO: figure out hub if this is an active session
+      nmdc_cc_disconnect(cc);
+    else {
+      // TODO: check that the user is indeed on the hub
+      cc->nick_raw = g_match_info_fetch(nfo, 1);
+      cc->nick = nmdc_charset_convert(cc->hub, TRUE, cc->nick_raw);
+    }
   }
   g_match_info_free(nfo);
 
@@ -229,7 +251,10 @@ static void handle_cmd(struct net *n, char *cmd) {
     guint64 st = g_ascii_strtoull(start, NULL, 10);
     gint64 by = g_ascii_strtoll(bytes, NULL, 10);
     char *un_id = adc_unescape(id);
-    if(un_id)
+    if(!cc->nick) {
+      g_warning("Received $ADCGET before $MyNick, disconnecting client.");
+      nmdc_cc_disconnect(cc);
+    } else if(un_id)
       handle_adcget(cc, type, un_id, st, by);
     g_free(un_id);
     g_free(type);
@@ -246,15 +271,19 @@ struct nmdc_cc *nmdc_cc_create(struct nmdc_hub *hub) {
   struct nmdc_cc *cc = g_new0(struct nmdc_cc, 1);
   cc->net = net_create('|', cc, handle_cmd, handle_error);
   cc->hub = hub;
+  nmdc_cc_list = g_list_prepend(nmdc_cc_list, cc);
   return cc;
 }
 
 
 static void handle_connect(struct net *n) {
   struct nmdc_cc *cc = n->handle;
-  g_assert(cc->hub);
-  net_sendf(n, "$MyNick %s", cc->hub->nick_hub);
-  net_sendf(n, "$Lock EXTENDEDPROTOCOL/wut? Pk=%s-%s", PACKAGE_NAME, PACKAGE_VERSION);
+  if(!cc->hub)
+    nmdc_cc_disconnect(cc);
+  else {
+    net_sendf(n, "$MyNick %s", cc->hub->nick_hub);
+    net_sendf(n, "$Lock EXTENDEDPROTOCOL/wut? Pk=%s-%s", PACKAGE_NAME, PACKAGE_VERSION);
+  }
 }
 
 
@@ -265,6 +294,7 @@ void nmdc_cc_connect(struct nmdc_cc *cc, const char *addr) {
 
 // this is a disconnect-and-free
 void nmdc_cc_disconnect(struct nmdc_cc *cc) {
+  nmdc_cc_list = g_list_remove(nmdc_cc_list, cc);
   if(cc->net->conn)
     net_disconnect(cc->net);
   net_free(cc->net);

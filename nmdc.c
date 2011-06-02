@@ -589,7 +589,7 @@ void nmdc_disconnect(struct nmdc_hub *hub) {
 
 
 void nmdc_free(struct nmdc_hub *hub) {
-  // TODO: make sure there are no nmdc_cc objects referring to this hub
+  nmdc_cc_remove_hub(hub);
   nmdc_disconnect(hub);
   net_free(hub->net);
   g_hash_table_unref(hub->users);

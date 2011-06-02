@@ -44,6 +44,32 @@ struct nmdc_cc {
 
 
 
+// ADC parameter unescaping, required for $ADCGET
+static char *adc_unescape(const char *str) {
+  char *dest = g_new0(char, strlen(str));
+  char *tmp = dest;
+  while(*str) {
+    if(*str == '\\') {
+      str++;
+      if(*str == 's')
+        *tmp = ' ';
+      else if(*str == 'n')
+        *tmp = '\n';
+      else if(*str == '\\')
+        *tmp = '\\';
+      else {
+        g_free(dest);
+        return NULL;
+      }
+    } else
+      *tmp = *str;
+    tmp++;
+    str++;
+  }
+  return dest;
+}
+
+
 static void handle_error(struct net *n, int action, GError *err) {
   // TODO: report error somewhere?
   nmdc_cc_disconnect(n->handle);
@@ -54,6 +80,7 @@ static void handle_error(struct net *n, int action, GError *err) {
 // - type = tthl (TTHL)
 // - id = files.xml? (Required by ADC, but I doubt it's used)
 // - type = list? (Also required by ADC, but is this used?)
+// - disallow the transfer if we don't have any free slots
 static void handle_adcget(struct nmdc_cc *cc, char *type, char *id, guint64 start, gint64 bytes) {
   if(strcmp(type, "file") != 0) {
     net_send(cc->net, "$Error Unsupported ADCGET type");
@@ -161,7 +188,10 @@ static void handle_cmd(struct net *n, char *cmd) {
     char *bytes = g_match_info_fetch(nfo, 4);
     guint64 st = g_ascii_strtoull(start, NULL, 10);
     gint64 by = g_ascii_strtoll(bytes, NULL, 10);
-    handle_adcget(cc, type, id, st, by);
+    char *un_id = adc_unescape(id);
+    if(un_id)
+      handle_adcget(cc, type, un_id, st, by);
+    g_free(un_id);
     g_free(type);
     g_free(id);
     g_free(start);

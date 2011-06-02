@@ -71,6 +71,22 @@ static char *adc_unescape(const char *str) {
 }
 
 
+static char *adc_escape(const char *str) {
+  GString *dest = g_string_sized_new(strlen(str)+50);
+  while(*str) {
+    switch(*str) {
+    case ' ':  g_string_append(dest, "\\s"); break;
+    case '\n': g_string_append(dest, "\\n"); break;
+    case '\\': g_string_append(dest, "\\\\"); break;
+    default: g_string_append_c(dest, *str); break;
+    }
+    str++;
+  }
+  return g_string_free(dest, FALSE);
+}
+
+
+
 static void handle_error(struct net *n, int action, GError *err) {
   // TODO: report error somewhere?
   nmdc_cc_disconnect(n->handle);
@@ -95,6 +111,7 @@ static void handle_adcget(struct nmdc_cc *cc, char *type, char *id, guint64 star
     if(!dat)
       net_send(cc->net, "$Error File Not Available");
     else {
+      // no need to adc_escape(id) here, since it cannot contain any special characters
       net_sendf(cc->net, "$ADCSND tthl %s 0 %d", id, len);
       net_send_raw(cc->net, dat, len);
       free(dat);
@@ -142,8 +159,10 @@ static void handle_adcget(struct nmdc_cc *cc, char *type, char *id, guint64 star
     bytes = st.st_size-start;
 
   // send
-  net_sendf(cc->net, "$ADCSND %s %s %"G_GUINT64_FORMAT" %"G_GINT64_FORMAT, type, id, start, bytes);
+  char *tmp = adc_escape(id);
+  net_sendf(cc->net, "$ADCSND %s %s %"G_GUINT64_FORMAT" %"G_GINT64_FORMAT, type, tmp, start, bytes);
   net_sendfile(cc->net, path, start, bytes);
+  g_free(tmp);
   g_free(path);
 }
 

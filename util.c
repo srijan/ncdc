@@ -761,13 +761,20 @@ static gboolean net_handle_output(GSocket *sock, GIOCondition cond, gpointer dat
 static gboolean net_handle_timer(gpointer dat) {
   struct net *n = dat;
   time_t t = time(NULL);
-  if(n->timeout_last > t-30)
-    return TRUE;
-  GError *err = NULL;
-  g_set_error_literal(&err, 1, G_IO_ERROR_TIMED_OUT, "No activity for a too long time period.");
-  n->cb_err(n, NETERR_RECV, err); // actually not _RECV, but whatever
-  g_error_free(err);
-  return FALSE;
+
+  // keepalive? send an empty command every 2 minutes of inactivity
+  if(n->keepalive && n->timeout_last < t-120)
+    net_send(n, "");
+
+  // not keepalive? give a timeout after 30 seconds of inactivity
+  else if(!n->keepalive && n->timeout_last < t-30) {
+    GError *err = NULL;
+    g_set_error_literal(&err, 1, G_IO_ERROR_TIMED_OUT, "No activity for a too long time period.");
+    n->cb_err(n, NETERR_RECV, err); // actually not _RECV, but whatever
+    g_error_free(err);
+    return FALSE;
+  }
+  return TRUE;
 }
 
 
@@ -786,10 +793,9 @@ static void net_handle_connect(GObject *src, GAsyncResult *res, gpointer dat) {
     n->sock = g_socket_connection_get_socket(n->conn);
     g_socket_set_timeout(n->sock, 0);
     time(&(n->timeout_last));
+    n->timeout_src = g_timeout_add_seconds(5, net_handle_timer, n);
     if(n->keepalive)
       g_socket_set_keepalive(n->sock, TRUE);
-    else
-      n->timeout_src = g_timeout_add_seconds(5, net_handle_timer, n);
     g_socket_set_blocking(n->sock, FALSE);
     GSource *src = g_socket_create_source(n->sock, G_IO_IN, NULL);
     g_source_set_callback(src, (GSourceFunc)net_handle_input, n, NULL);

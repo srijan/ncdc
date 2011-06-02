@@ -547,7 +547,6 @@ static void handle_error(struct net *n, int action, GError *err) {
 }
 
 
-// TODO: periodically send empty keep-alive commands
 struct nmdc_hub *nmdc_create(struct ui_tab *tab) {
   struct nmdc_hub *hub = g_new0(struct nmdc_hub, 1);
   hub->net = net_create('|', hub, TRUE, handle_cmd, handle_error);

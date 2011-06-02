@@ -582,6 +582,15 @@ struct net {
   void (*cb_err)(struct net *, int, GError *);
   // message termination character
   char eom[2];
+  // Whether this connection should be kept alive or not. When true, keepalive
+  // packets will be sent. Otherwise, an error will be generated if there has
+  // been no read activity within the last 30 seconds (or so).
+  gboolean keepalive;
+  // Don't use _set_timeout() on the socket, since that will throw a timeout
+  // even when we're actively writing to the socket. So we use our own timeout
+  // detection using a 5-second timer and a timestamp of the last action.
+  guint timeout_src;
+  time_t timeout_last;
   // some pointer for use by the user
   void *handle;
 };
@@ -608,6 +617,7 @@ struct net {
 // does this function block?
 #define net_disconnect(n) do {\
     if((n)->conn) {\
+      g_debug("%s- Disconnected.", net_remoteaddr(n));\
       net_cancel(n);\
       g_object_unref((n)->conn);\
       (n)->conn = NULL;\
@@ -617,6 +627,8 @@ struct net {
 
 // Should not be called while connected.
 #define net_free(n) do {\
+    if((n)->timeout_src)\
+      g_source_remove((n)->timeout_src);\
     g_object_unref((n)->cancel);\
     g_string_free((n)->out, TRUE);\
     g_string_free((n)->in, TRUE);\
@@ -670,6 +682,7 @@ static void net_consume_input(struct net *n) {
 
 static gboolean net_handle_input(GSocket *sock, GIOCondition cond, gpointer dat) {
   struct net *n = dat;
+  time(&(n->timeout_last));
 
   // make sure enough space is available in the input buffer (ugly hack, GString has no simple grow function)
   if(n->in->allocated_len - n->in->len < 1024) {
@@ -723,6 +736,7 @@ static gboolean net_handle_sendfile(struct net *n) {
 
 static gboolean net_handle_output(GSocket *sock, GIOCondition cond, gpointer dat) {
   struct net *n = dat;
+  time(&(n->timeout_last));
 
   // send our buffer
   if(n->out->len) {
@@ -744,6 +758,19 @@ static gboolean net_handle_output(GSocket *sock, GIOCondition cond, gpointer dat
 }
 
 
+static gboolean net_handle_timer(gpointer dat) {
+  struct net *n = dat;
+  time_t t = time(NULL);
+  if(n->timeout_last > t-30)
+    return TRUE;
+  GError *err = NULL;
+  g_set_error_literal(&err, 1, G_IO_ERROR_TIMED_OUT, "No activity for a too long time period.");
+  n->cb_err(n, NETERR_RECV, err); // actually not _RECV, but whatever
+  g_error_free(err);
+  return FALSE;
+}
+
+
 static void net_handle_connect(GObject *src, GAsyncResult *res, gpointer dat) {
   struct net *n = dat;
 
@@ -757,12 +784,19 @@ static void net_handle_connect(GObject *src, GAsyncResult *res, gpointer dat) {
   } else {
     n->conn = conn;
     n->sock = g_socket_connection_get_socket(n->conn);
+    g_socket_set_timeout(n->sock, 0);
+    time(&(n->timeout_last));
+    if(n->keepalive)
+      g_socket_set_keepalive(n->sock, TRUE);
+    else
+      n->timeout_src = g_timeout_add_seconds(5, net_handle_timer, n);
     g_socket_set_blocking(n->sock, FALSE);
     GSource *src = g_socket_create_source(n->sock, G_IO_IN, NULL);
     g_source_set_callback(src, (GSourceFunc)net_handle_input, n, NULL);
     n->in_src = g_source_attach(src, NULL);
     g_source_unref(src);
     n->cb_con(n);
+    g_debug("%s- Connected.", net_remoteaddr(n));
   }
 }
 
@@ -771,6 +805,8 @@ void net_connect(struct net *n, const char *addr, unsigned short defport, void (
   n->cb_con = cb;
 
   GSocketClient *sc = g_socket_client_new();
+  // set a timeout on the connect, regardless of the value of keepalive
+  g_socket_client_set_timeout(sc, 30);
   g_socket_client_connect_to_host_async(sc, addr, defport, n->cancel, net_handle_connect, n);
   g_object_unref(sc);
 }
@@ -791,13 +827,14 @@ char *net_remoteaddr(struct net *n) {
 }
 
 
-struct net *net_create(char term, void *han, void (*rfunc)(struct net *, char *), void (*errfunc)(struct net *, int, GError *)) {
+struct net *net_create(char term, void *han, gboolean keepalive, void (*rfunc)(struct net *, char *), void (*errfunc)(struct net *, int, GError *)) {
   struct net *n = g_new0(struct net, 1);
   n->in  = g_string_sized_new(1024);
   n->out = g_string_sized_new(1024);
   n->cancel = g_cancellable_new();
   n->eom[0] = term;
   n->handle = han;
+  n->keepalive = keepalive;
   n->cb_rcv = rfunc;
   n->cb_err = errfunc;
   return n;

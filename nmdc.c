@@ -550,7 +550,7 @@ static void handle_error(struct net *n, int action, GError *err) {
 // TODO: periodically send empty keep-alive commands
 struct nmdc_hub *nmdc_create(struct ui_tab *tab) {
   struct nmdc_hub *hub = g_new0(struct nmdc_hub, 1);
-  hub->net = net_create('|', hub, handle_cmd, handle_error);
+  hub->net = net_create('|', hub, TRUE, handle_cmd, handle_error);
   hub->tab = tab;
   hub->users = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, user_free);
   hub->myinfo_timer = g_timeout_add_seconds(5*60, check_myinfo, hub);

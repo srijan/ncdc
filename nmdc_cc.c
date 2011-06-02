@@ -269,7 +269,7 @@ static void handle_cmd(struct net *n, char *cmd) {
 // Hub may be unknown when we start listening on incoming connections.
 struct nmdc_cc *nmdc_cc_create(struct nmdc_hub *hub) {
   struct nmdc_cc *cc = g_new0(struct nmdc_cc, 1);
-  cc->net = net_create('|', cc, handle_cmd, handle_error);
+  cc->net = net_create('|', cc, FALSE, handle_cmd, handle_error);
   cc->hub = hub;
   nmdc_cc_list = g_list_prepend(nmdc_cc_list, cc);
   return cc;

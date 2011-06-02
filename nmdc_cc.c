@@ -25,6 +25,7 @@
 
 
 #include "ncdc.h"
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 
@@ -77,11 +78,31 @@ static void handle_error(struct net *n, int action, GError *err) {
 
 
 // TODO:
-// - type = tthl (TTHL)
+// - disallow the transfer if we don't have any free slots
 // - id = files.xml? (Required by ADC, but I doubt it's used)
 // - type = list? (Also required by ADC, but is this used?)
-// - disallow the transfer if we don't have any free slots
 static void handle_adcget(struct nmdc_cc *cc, char *type, char *id, guint64 start, gint64 bytes) {
+  // tthl
+  if(strcmp(type, "tthl") == 0) {
+    if(strncmp(id, "TTH/", 4) != 0 || strlen(id) != 4+39 || start != 0 || bytes != -1) {
+      net_send(cc->net, "$Error Invalid ADCGET arguments");
+      return;
+    }
+    char root[24];
+    base32_decode(id+4, root);
+    int len;
+    char *dat = fl_hashdat_get(root, &len);
+    if(!dat)
+      net_send(cc->net, "$Error File Not Available");
+    else {
+      net_sendf(cc->net, "$ADCSND tthl %s 0 %d", id, len);
+      net_send_raw(cc->net, dat, len);
+      free(dat);
+    }
+    return;
+  }
+
+  // file
   if(strcmp(type, "file") != 0) {
     net_send(cc->net, "$Error Unsupported ADCGET type");
     return;

@@ -213,6 +213,21 @@ static void fl_hashdat_del(const char *tth) {
 }
 
 
+// return value must be freed using free()
+char *fl_hashdat_get(const char *tth, int *len) {
+  char key[25];
+  datum keydat = { key, 25 };
+  key[0] = HASHDAT_TTHL;
+  memcpy(key+1, tth, 24);
+  datum res = gdbm_fetch(fl_hashdat, keydat);
+  if(res.dsize <= 0)
+    return NULL;
+  if(len)
+    *len = res.dsize;
+  return res.dptr;
+}
+
+
 
 
 

@@ -27,6 +27,8 @@
 #include "ncdc.h"
 #include <errno.h>
 #include <string.h>
+#include <stdio.h>
+#include <unistd.h>
 #include <libxml/xmlreader.h>
 #include <libxml/xmlwriter.h>
 #include <bzlib.h>
@@ -467,17 +469,20 @@ static gboolean fl_save_childs(xmlTextWriterPtr writer, struct fl_list *fl) {
 gboolean fl_save(struct fl_list *fl, const char *file, GError **err) {
   g_return_val_if_fail(err == NULL || *err == NULL, FALSE);
 
-  // open the file
+  // open a temporary file for writing
   gboolean isbz2 = strlen(file) > 4 && strcmp(file+(strlen(file)-4), ".bz2") == 0;
   xmlTextWriterPtr writer;
+
+  char *tmpfile = g_strdup_printf("%s.tmp-%d", file, rand());
 
   struct fl_loadsave_context xc;
   xc.err = err;
 
   if(isbz2) {
-    xc.fh_f = fopen(file, "w");
+    xc.fh_f = fopen(tmpfile, "w");
     if(!xc.fh_f) {
-      g_set_error_literal(err, 0, 0, g_strerror(errno));
+      g_set_error_literal(err, 1, 0, g_strerror(errno));
+      g_free(tmpfile);
       return FALSE;
     }
     int bzerr;
@@ -489,7 +494,8 @@ gboolean fl_save(struct fl_list *fl, const char *file, GError **err) {
 
   if(!writer) {
     if(err && !*err)
-      g_set_error_literal(err, 1, 0, "Failed to open file.");
+      g_set_error_literal(err, 1, 0, "Failed to open temporary file.");
+    g_free(tmpfile);
     return FALSE;
   }
 
@@ -520,6 +526,15 @@ fl_save_error:
   xmlTextWriterEndDocument(writer);
   xmlFreeTextWriter(writer);
 
+  // rename or unlink
+  if(success && rename(tmpfile, file) < 0) {
+    g_set_error_literal(err, 1, 0, g_strerror(errno));
+    success = FALSE;
+  }
+  if(!success)
+    unlink(tmpfile);
+
+  g_free(tmpfile);
   return success;
 }
 

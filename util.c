@@ -552,13 +552,17 @@ void ratecalc_calc() {
  * - Async connecting to a hostname/ip + port
  * - Async message sending (end-of-message char is added automatically)
  * - Async message receiving ("message" = all bytes until end-of-message char)
- * TODO: Use ratecalc for in and output
  *
  * Does not use the GIOStream interface, since that is inefficient and has too
  * many limitations to be useful.
  */
 
+
+// global network stats
+struct ratecalc net_in, net_out;
+
 #if INTERFACE
+
 
 // actions that can fail
 #define NETERR_CONN 0
@@ -639,6 +643,13 @@ struct net {
     g_free(n);\
   } while(0)
 
+#define net_init_ratecalc() do {\
+    ratecalc_init(&net_in, 10);\
+    ratecalc_init(&net_out, 10);\
+    ratecalc_register(&net_in);\
+    ratecalc_register(&net_out);\
+  } while(0)
+
 #endif
 
 
@@ -698,6 +709,7 @@ static gboolean net_handle_input(GSocket *sock, GIOCondition cond, gpointer dat)
   GError *err = NULL;
   gssize read = g_socket_receive(n->sock, n->in->str + n->in->len, n->in->allocated_len - n->in->len, NULL, &err);
   net_handle_ioerr(n, n->in_src, read, err, NETERR_RECV);
+  ratecalc_add(&net_in, read);
   n->in->len += read;
   n->in->str[n->in->len] = 0;
   net_consume_input(n);
@@ -712,6 +724,7 @@ static gboolean net_handle_sendfile(struct net *n) {
 
   if(r >= 0) {
     n->file_left -= r;
+    ratecalc_add(&net_out, r);
     return TRUE;
 
   } else if(errno == EAGAIN)
@@ -727,6 +740,7 @@ static gboolean net_handle_sendfile(struct net *n) {
     g_return_val_if_fail(r >= 0, FALSE);
     gssize written = g_socket_send(n->sock, buf, r, NULL, &err);
     net_handle_ioerr(n, n->out_src, written, err, NETERR_SEND);
+    ratecalc_add(&net_out, r);
     n->file_offset += r;
     n->file_left -= r;
     return TRUE;
@@ -747,6 +761,7 @@ static gboolean net_handle_output(GSocket *sock, GIOCondition cond, gpointer dat
     GError *err = NULL;
     gssize written = g_socket_send(n->sock, n->out->str, n->out->len, NULL, &err);
     net_handle_ioerr(n, n->out_src, written, err, NETERR_SEND);
+    ratecalc_add(&net_out, written);
     g_string_erase(n->out, 0, written);
     if(n->out->len || n->file_left)
       return TRUE;

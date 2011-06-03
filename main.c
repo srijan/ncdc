@@ -221,6 +221,7 @@ int main(int argc, char **argv) {
   g_thread_init(NULL);
   g_type_init();
   conf_init();
+  net_init_ratecalc();
 
   // setup logging
   char *errlog = g_build_filename(conf_dir, "stderr.log", NULL);

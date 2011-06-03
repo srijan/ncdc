@@ -77,6 +77,17 @@ int nmdc_cc_slots_in_use() {
 }
 
 
+static struct nmdc_cc *nmdc_cc_get(struct nmdc_hub *hub, const char *user) {
+  GList *n;
+  for(n=nmdc_cc_list; n; n=n->next) {
+    struct nmdc_cc *c = n->data;
+    if(c->nick_raw && c->hub == hub && strcmp(c->nick_raw, user) == 0)
+      return c;
+  }
+  return NULL;
+}
+
+
 // ADC parameter unescaping, required for $ADCGET
 static char *adc_unescape(const char *str) {
   char *dest = g_new0(char, strlen(str));
@@ -205,6 +216,37 @@ static void handle_adcget(struct nmdc_cc *cc, char *type, char *id, guint64 star
 }
 
 
+static void handle_mynick(struct nmdc_cc *cc, const char *nick) {
+  if(cc->nick) {
+    g_warning("Received a $MyNick from %s when we have already received one.", cc->nick);
+    return;
+  }
+
+  // TODO: figure out hub if this is an active session
+  if(!cc->hub) {
+    nmdc_cc_disconnect(cc);
+    return;
+  }
+
+  // don't allow multiple connections from the same user
+  if(nmdc_cc_get(cc->hub, cc->nick)) {
+    g_warning("User %s attemted to connect more than once.", cc->nick);
+    nmdc_cc_disconnect(cc);
+    return;
+  }
+
+  struct nmdc_user *u = g_hash_table_lookup(cc->hub->users, nick);
+  if(!u) {
+    g_warning("Received C-C connection from %s who is not on the hub.", nick);
+    nmdc_cc_disconnect(cc);
+    return;
+  }
+
+  cc->nick_raw = g_strdup(nick);
+  cc->nick = g_strdup(u->name);
+}
+
+
 static void handle_cmd(struct net *n, char *cmd) {
   struct nmdc_cc *cc = n->handle;
   GMatchInfo *nfo;
@@ -221,15 +263,9 @@ static void handle_cmd(struct net *n, char *cmd) {
 
   // $MyNick
   if(g_regex_match(mynick, cmd, 0, &nfo)) { // 1 = nick
-    if(cc->nick)
-      g_warning("Received a $MyNick from %s when we have already received one.", cc->nick);
-    else if(!cc->hub) // TODO: figure out hub if this is an active session
-      nmdc_cc_disconnect(cc);
-    else {
-      // TODO: check that the user is indeed on the hub
-      cc->nick_raw = g_match_info_fetch(nfo, 1);
-      cc->nick = nmdc_charset_convert(cc->hub, TRUE, cc->nick_raw);
-    }
+    char *nick = g_match_info_fetch(nfo, 1);
+    handle_mynick(cc, nick);
+    g_free(nick);
   }
   g_match_info_free(nfo);
 

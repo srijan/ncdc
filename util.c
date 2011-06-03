@@ -805,8 +805,8 @@ static void net_handle_connect(GObject *src, GAsyncResult *res, gpointer dat) {
     g_source_set_callback(src, (GSourceFunc)net_handle_input, n, NULL);
     n->in_src = g_source_attach(src, NULL);
     g_source_unref(src);
-    n->cb_con(n);
     g_debug("%s- Connected.", net_remoteaddr(n));
+    n->cb_con(n);
   }
 }
 

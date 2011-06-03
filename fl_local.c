@@ -116,10 +116,9 @@ void fl_local_suggest(char *path, char **sug) {
 }
 
 
-// get a file with the (raw) TTH
-struct fl_list *fl_local_from_tth(const char *root) {
-  GSList *cur = g_hash_table_lookup(fl_hash_index, root);
-  return cur ? cur->data : NULL;
+// get files with the (raw) TTH. Result does not have to be freed.
+GSList *fl_local_from_tth(const char *root) {
+  return g_hash_table_lookup(fl_hash_index, root);
 }
 
 

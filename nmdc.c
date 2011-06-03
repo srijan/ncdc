@@ -59,6 +59,7 @@ struct nmdc_hub {
   // TRUE is the above nick has also been validated (and we're properly logged in)
   gboolean nick_valid;
   char *hubname;  // UTF-8, or NULL when unknown
+  char *hubname_hub; // in hub encoding
   // user list, key = username (in hub encoding!), value = struct nmdc_user *
   GHashTable *users;
   int sharecount;
@@ -313,6 +314,90 @@ void nmdc_msg(struct nmdc_hub *hub, struct nmdc_user *user, const char *str) {
 }
 
 
+static void handle_search(struct nmdc_hub *hub, char *from, int size_m, guint64 size, int type, char *query) {
+  static char *exts[][10] = { { },
+    { "mp3", "mp2", "wav", "au", "rm", "mid", "sm" },
+    { "zip", "arj", "rar", "lzh", "gz", "z", "arc", "pak" },
+    { "doc", "txt", "wri", "pdf", "ps", "tex" },
+    { "pm", "exe", "bat", "com" },
+    { "gif", "jpg", "jpeg", "bmp", "pcx", "png", "wmf", "psd" },
+    { "mpg", "mpeg", "avi", "asf", "mov" },
+    { }, { }, { }
+  };
+  int max = from[0] == 'H' ? 5 : 10;
+  struct fl_list *res[max];
+  gboolean isdir = type == 8;
+  char **ext = exts[type-1];
+  char **inc = { NULL };
+  int i = 0;
+
+  // TODO: also implement active search replies
+  if(from[0] != 'H')
+    return;
+
+  // TTH lookup (YAY! this is fast!)
+  if(type == 9) {
+    if(strncmp(query, "TTH:", 4) != 0 || strlen(query) != 4+29) {
+      g_warning("Invalid TTH $Search for %s", from);
+      return;
+    }
+    char root[24];
+    base32_decode(query+4, root);
+    GSList *l = fl_local_from_tth(root);
+    // it still has to match the other requirements...
+    for(; i<max && l; l=l->next) {
+      struct fl_list *c = l->data;
+      if(fl_list_search_matches(c, size_m, size, isdir, ext, inc))
+        res[i++] = c;
+    }
+
+  // Advanced lookup (Noo! This is slooow!)
+  } else {
+    char *tmp = query;
+    for(; *tmp; tmp++)
+      if(*tmp == '$')
+        *tmp = ' ';
+    tmp = nmdc_unescape_and_decode(hub, query);
+    inc = g_strsplit(tmp, " ", 0);
+    g_free(tmp);
+    i = fl_list_search(fl_local_list, size_m, size, isdir, ext, inc, res, max);
+    g_strfreev(inc);
+  }
+
+  // reply
+  if(!i)
+    return;
+
+  char *hubaddr = net_remoteaddr(hub->net);
+  int slots = conf_slots();
+  int slots_free = slots - nmdc_cc_slots_in_use();
+  if(slots_free < 0)
+    slots_free = 0;
+  char tth[44] = "TTH:";
+  tth[43] = 0;
+
+  for(i--; i>=0; i--) {
+    char *fl = fl_list_path(res[i]);
+    // Windows style path delimiters... why!?
+    char *tmp = fl;
+    char *size = NULL;
+    for(; *tmp; tmp++)
+      if(*tmp == '/')
+        *tmp = '\\';
+    // TODO: how is a space in the path encoded? And in what encoding should the path really be? UTF-8 or hub?
+    tmp = nmdc_encode_and_escape(hub, fl);
+    if(res[i]->isfile) {
+      base32_encode(res[i]->tth, tth+4);
+      size = g_strdup_printf("\05%"G_GUINT64_FORMAT, res[i]->size);
+    }
+    net_sendf(hub->net, "$SR %s %s%s %d/%d\05%s (%s)\05%s",
+      hub->nick_hub, tmp, size ? size : "", slots_free, slots, res[i]->isfile ? tth : hub->hubname_hub, hubaddr, from+4);
+    g_free(size);
+    g_free(tmp);
+  }
+}
+
+
 static void handle_cmd(struct net *n, char *cmd) {
   struct nmdc_hub *hub = n->handle;
   GMatchInfo *nfo;
@@ -333,6 +418,7 @@ static void handle_cmd(struct net *n, char *cmd) {
   CMDREGEX(to, "To: ([^ $]+) From: ([^ $]+) \\$(.+)");
   CMDREGEX(forcemove, "ForceMove (.+)");
   CMDREGEX(connecttome, "ConnectToMe ([^ $]+) ([0-9]{1,3}(?:\\.[0-9]{1,3}){3}:[0-9]+)"); // TODO: IPv6
+  CMDREGEX(search, "Search (Hub:(?:[^ $]+)|(?:[0-9]{1,3}(?:\\.[0-9]{1,3}){3}:[0-9]+)) ([TF])\\?([TF])\\?([0-9]+)\\?([1-9])\\?(.+)");
 
   // $Lock
   if(g_regex_match(lock, cmd, 0, &nfo)) { // 1 = lock
@@ -445,9 +531,8 @@ static void handle_cmd(struct net *n, char *cmd) {
 
   // $HubName
   if(g_regex_match(hubname, cmd, 0, &nfo)) { // 1 = name
-    char *name = g_match_info_fetch(nfo, 1);
-    hub->hubname = nmdc_unescape_and_decode(hub, name);
-    g_free(name);
+    hub->hubname_hub = g_match_info_fetch(nfo, 1);
+    hub->hubname = nmdc_unescape_and_decode(hub, hub->hubname_hub);
   }
   g_match_info_free(nfo);
 
@@ -490,6 +575,24 @@ static void handle_cmd(struct net *n, char *cmd) {
       nmdc_cc_connect(nmdc_cc_create(hub), addr);
     g_free(me);
     g_free(addr);
+  }
+  g_match_info_free(nfo);
+
+  // $Search
+  if(g_regex_match(search, cmd, 0, &nfo)) { // 1=from, 2=sizerestrict, 3=ismax, 4=size, 5=type, 6=query
+    char *from = g_match_info_fetch(nfo, 1);
+    char *sizerestrict = g_match_info_fetch(nfo, 2);
+    char *ismax = g_match_info_fetch(nfo, 3);
+    char *size = g_match_info_fetch(nfo, 4);
+    char *type = g_match_info_fetch(nfo, 5);
+    char *query = g_match_info_fetch(nfo, 6);
+    handle_search(hub, from, sizerestrict[0] == 'F' ? 0 : ismax[0] == 'T' ? -1 : 1, g_ascii_strtoull(size, NULL, 10), type[0]-'0', query);
+    g_free(from);
+    g_free(sizerestrict);
+    g_free(ismax);
+    g_free(size);
+    g_free(type);
+    g_free(query);
   }
   g_match_info_free(nfo);
 
@@ -591,6 +694,7 @@ void nmdc_disconnect(struct nmdc_hub *hub, gboolean recon) {
   g_free(hub->nick);     hub->nick = NULL;
   g_free(hub->nick_hub); hub->nick_hub = NULL;
   g_free(hub->hubname);  hub->hubname = NULL;
+  g_free(hub->hubname_hub);  hub->hubname_hub = NULL;
   g_free(hub->myinfo_last); hub->myinfo_last = NULL;
   hub->nick_valid = hub->state = hub->sharecount = hub->sharesize = hub->supports_nogetinfo = 0;
   if(!recon) {

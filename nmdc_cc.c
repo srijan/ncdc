@@ -183,7 +183,8 @@ static void handle_adcget(struct nmdc_cc *cc, char *type, char *id, guint64 star
   } else if(strncmp(id, "TTH/", 4) == 0 && strlen(id) == 4+39) {
     char root[24];
     base32_decode(id+4, root);
-    f = fl_local_from_tth(root);
+    GSList *l = fl_local_from_tth(root);
+    f = l ? l->data : NULL;
   }
 
   if(f) {

@@ -156,6 +156,23 @@ gboolean fl_list_is_child(const struct fl_list *parent, const struct fl_list *ch
 }
 
 
+// Get the virtual path to a file
+char *fl_list_path(struct fl_list *fl) {
+  if(!fl->parent)
+    return g_strdup("/");
+  char *path = g_strdup(fl->name);
+  struct fl_list *cur = fl->parent;
+  while(cur->parent) {
+    char *tmp = path;
+    path = g_build_filename(cur->name, path, NULL);
+    g_free(tmp);
+    cur = cur->parent;
+  }
+  path = g_build_filename("/", path, NULL);
+  return path;
+}
+
+
 // Resolves a path string (Either absolute or relative to root). Does not
 // support stuff like ./ and ../, and '/' is assumed to refer to the given
 // root. (So '/dir' and 'dir' are simply equivalent)
@@ -199,7 +216,7 @@ void fl_list_suggest(struct fl_list *root, char *opath, char **sug) {
     // Note: performance can be improved by using _search() instead
     GSequenceIter *iter;
     for(iter=g_sequence_get_begin_iter(parent->sub); i<20 && !g_sequence_iter_is_end(iter); iter=g_sequence_iter_next(iter)) {
-      struct fl_list *n = fl_list_copy(g_sequence_get(iter));
+      struct fl_list *n = g_sequence_get(iter);
       if(strncmp(n->name, name, len) == 0)
         sug[i++] = n->isfile ? g_strconcat(path, "/", n->name, NULL) : g_strconcat(path, "/", n->name, "/", NULL);
     }
@@ -208,6 +225,59 @@ void fl_list_suggest(struct fl_list *root, char *opath, char **sug) {
     g_free(path);
   else
     g_free(name);
+}
+
+
+gboolean fl_list_search_match_name(struct fl_list *fl, char **ext, char **inc) {
+  for(; *inc; inc++)
+    if(G_LIKELY(!strstr(fl->name, *inc))) // TODO: case-insensitive
+      return FALSE;
+  if(!*ext)
+    return TRUE;
+  char *l = rindex(fl->name, '.');
+  if(G_UNLIKELY(!l || !l[1]))
+    return FALSE;
+  l++;
+  for(; *ext; ext++)
+    if(G_UNLIKELY(g_ascii_strcasecmp(l, *ext) == 0))
+      return TRUE;
+  return FALSE;
+}
+
+
+#if INTERFACE
+
+#define fl_list_search_matches(fl, size_m, s, isdir, ext, inc) \
+  ((((isdir) && !(fl)->isfile) || (!(isdir) && (fl)->isfile && (fl)->hastth))\
+    && (!(size_m) || ((size_m) < 0 && (fl)->size < (s)) || ((size_m) > 0 && (fl)->size > (s))) && fl_list_search_match_name(fl, ext, inc))
+
+#endif
+
+
+// Recursive depth-first search through the list, used for replying to non-TTH
+// $Search requests. Not exactly fast, but what did you expect? :-(
+int fl_list_search(struct fl_list *parent, int size_m, guint64 size, gboolean isdir, char **ext, char **inc, struct fl_list **res, int max) {
+  if(!parent || !parent->sub)
+    return 0;
+  GSequenceIter *iter;
+  // weed out stuff from inc if it's already matched in parent (I'm assuming
+  // that stuff matching the parent of parent has already been removed)
+  char *ninc[g_strv_length(inc)];
+  int i = 0;
+  for(; *inc; inc++)
+    if(G_LIKELY(!parent->name || !strstr(parent->name, *inc))) // TODO: case-insensitive
+      ninc[i++] = *inc;
+  ninc[i] = NULL;
+  // loop through the directory
+  i = 0;
+  for(iter=g_sequence_get_begin_iter(parent->sub); i<max && !g_sequence_iter_is_end(iter); iter=g_sequence_iter_next(iter)) {
+    struct fl_list *n = g_sequence_get(iter);
+    if(fl_list_search_matches(n, size_m, size, isdir, ext, ninc))
+      res[i++] = n;
+    if(!n->isfile && i < max)
+      i += fl_list_search(n, size_m, size, isdir, ext, ninc, res+i, max-i);
+  }
+  return i;
 }
 
 

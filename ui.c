@@ -706,20 +706,23 @@ void ui_init() {
 
 
 static void ui_draw_status() {
-  ui_msg_updated = FALSE;
-  if(ui_msg_text) {
-    mvaddstr(winrows-1, 0, ui_msg_text);
-    return;
-  }
+  char buf[100];
+
   if(fl_refresh_queue && fl_refresh_queue->head)
     mvaddstr(winrows-1, 0, "[Refreshing share]");
   else if(fl_hash_queue && g_hash_table_size(fl_hash_queue)) {
-    char *tmp = g_strdup_printf("[Hashing: %d / %s / %.2f MiB/s]",
+    sprintf(buf, "[Hashing: %d / %s / %.2f MiB/s]",
       g_hash_table_size(fl_hash_queue), str_formatsize(fl_hash_queue_size), ((float)ratecalc_get(&fl_hash_rate)/(1024*1024)));
-    mvaddstr(winrows-1, 0, tmp);
-    g_free(tmp);
+    mvaddstr(winrows-1, 0, buf);
   }
-  mvaddstr(winrows-1, wincols-14, "Here be stats");
+  sprintf(buf, "[S: %2d/%2d]", nmdc_cc_slots_in_use(), conf_slots());
+  mvaddstr(winrows-1, wincols-11, buf);
+
+  ui_msg_updated = FALSE;
+  if(ui_msg_text) {
+    mvaddstr(winrows-1, 0, ui_msg_text);
+    mvaddstr(winrows-1, str_columns(ui_msg_text), "   ");
+  }
 }
 
 

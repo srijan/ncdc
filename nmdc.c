@@ -276,9 +276,9 @@ void nmdc_send_myinfo(struct nmdc_hub *hub) {
       hubs++;
   }
 
-  // TODO: sharesize, mode, slots and "open new slot when upload is slower than.." stuff. When implemented.
-  tmp = g_strdup_printf("$MyINFO $ALL %s %s<ncdc V:%s,M:P,H:%d/0/0,S:1>$ $%s\01$%s$0$",
-    hub->nick_hub, desc, VERSION, hubs, conn, mail);
+  // TODO: mode and "open new slot when upload is slower than.." stuff. When implemented.
+  tmp = g_strdup_printf("$MyINFO $ALL %s %s<ncdc V:%s,M:P,H:%d/0/0,S:%d>$ $%s\01$%s$%"G_GUINT64_FORMAT"$",
+    hub->nick_hub, desc, VERSION, hubs, conf_slots(), conn, mail, fl_local_list_size);
   g_free(desc);
   g_free(conn);
   g_free(mail);

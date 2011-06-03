@@ -719,7 +719,7 @@ static void ui_draw_status() {
   // And protocol overhead isn't very significant.
   sprintf(buf, "[U:%6.0f KiB/s]", ((float)ratecalc_get(&net_out))/1024.0f);
   mvaddstr(winrows-1, wincols-28, buf);
-  sprintf(buf, "[S: %2d/%2d]", nmdc_cc_slots_in_use(), conf_slots());
+  sprintf(buf, "[S:%3d/%3d]", nmdc_cc_slots_in_use(), conf_slots());
   mvaddstr(winrows-1, wincols-11, buf);
 
   ui_msg_updated = FALSE;

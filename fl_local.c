@@ -39,6 +39,7 @@ time_t          fl_refresh_last = 0;
 static gboolean fl_needflush = FALSE;
 // index of the files in fl_local_list. Key = TTH root, value = GSList of files
 static GHashTable *fl_hash_index;
+guint64         fl_local_list_size; // total share size, minus duplicate files
 
 static GThreadPool *fl_scan_pool;
 static GThreadPool *fl_hash_pool;
@@ -232,6 +233,7 @@ char *fl_hashdat_get(const char *tth, int *len) {
 
 
 // Hash index interface (these operate on both fl_hash_index and the above hashdata.dat)
+// These functions are also responsible for updating fl_local_list_size.
 
 // low-level insert-into-index function
 static void fl_hashindex_insert(struct fl_list *fl) {
@@ -241,6 +243,7 @@ static void fl_hashindex_insert(struct fl_list *fl) {
   } else {
     cur = g_slist_prepend(cur, fl);
     g_hash_table_insert(fl_hash_index, fl->tth, cur);
+    fl_local_list_size += fl->size;
   }
 }
 
@@ -279,6 +282,7 @@ static void fl_hashindex_del(struct fl_list *fl) {
   if(!cur) {
     fl_hashdat_del(fl->tth);
     g_hash_table_remove(fl_hash_index, fl->tth);
+    fl_local_list_size -= fl->size;
   // there's another file with the same TTH.
   } else
     g_hash_table_replace(fl_hash_index, ((struct fl_list *)cur->data)->tth, cur);

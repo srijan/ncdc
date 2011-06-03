@@ -76,6 +76,10 @@ GKeyFile *conf_file;
   !g_key_file_has_key(conf_file, "global", "autorefresh", NULL) ? 60\
     : g_key_file_get_integer(conf_file, "global", "autorefresh", NULL))
 
+#define conf_slots() (\
+  !g_key_file_has_key(conf_file, "global", "slots", NULL) ? 10\
+    : g_key_file_get_integer(conf_file, "global", "slots", NULL))
+
 #endif
 
 

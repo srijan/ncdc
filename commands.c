@@ -235,6 +235,21 @@ static void set_autorefresh(char *group, char *key, char *val) {
 }
 
 
+static void set_slots(char *group, char *key, char *val) {
+  if(!val)
+    UNSET(group, key);
+  else {
+    long v = strtol(val, NULL, 10);
+    if((!v && errno == EINVAL) || v < INT_MIN || v > INT_MAX || v < 0)
+      ui_logwindow_add(tab->log, "Invalid number.");
+    else {
+      g_key_file_set_integer(conf_file, group, key, v);
+      get_int(group, key);
+    }
+  }
+}
+
+
 // the settings list
 // TODO: help text / documentation?
 static struct setting settings[] = {
@@ -246,6 +261,7 @@ static struct setting settings[] = {
   { "encoding",      NULL,     get_string, set_encoding,    set_encoding_sug },
   { "nick",          NULL,     get_string, set_nick,        NULL             }, // global.nick may not be /unset
   { "show_joinquit", NULL,     get_bool,   set_bool,        set_bool_sug     },
+  { "slots",         "global", get_int,    set_slots,       NULL             },
   { NULL }
 };
 

@@ -62,6 +62,21 @@ void nmdc_cc_remove_hub(struct nmdc_hub *hub) {
 }
 
 
+// Can be cached if performance is an issue. Note that even file transfers that
+// do not require a slot are still counted as taking a slot. For this reason,
+// the return value can be larger than the configured number of slots. This
+// also means that an upload that requires a slot will not be granted if there
+// are many transfers active that don't require a slot.
+int nmdc_cc_slots_in_use() {
+  int num = 0;
+  GList *n;
+  for(n=nmdc_cc_list; n; n=n->next)
+    if(((struct nmdc_cc *)n->data)->net->file_left)
+      num++;
+  return num;
+}
+
+
 // ADC parameter unescaping, required for $ADCGET
 static char *adc_unescape(const char *str) {
   char *dest = g_new0(char, strlen(str));
@@ -111,7 +126,6 @@ static void handle_error(struct net *n, int action, GError *err) {
 
 
 // TODO:
-// - disallow the transfer if we don't have any free slots
 // - id = files.xml? (Required by ADC, but I doubt it's used)
 // - type = list? (Also required by ADC, but is this used?)
 static void handle_adcget(struct nmdc_cc *cc, char *type, char *id, guint64 start, gint64 bytes) {
@@ -143,14 +157,16 @@ static void handle_adcget(struct nmdc_cc *cc, char *type, char *id, guint64 star
   }
 
   // get path (for file uploads)
-
   char *path = NULL;
   struct fl_list *f = NULL;
+  gboolean needslot = TRUE;
+
   // files.xml.bz2
-  if(strcmp(id, "files.xml.bz2") == 0)
+  if(strcmp(id, "files.xml.bz2") == 0) {
     path = g_strdup(fl_local_list_file);
+    needslot = FALSE;
   // / (path in the nameless root - assumed to be UTF-8)
-  else if(id[0] == '/' && fl_local_list) {
+  } else if(id[0] == '/' && fl_local_list) {
     f = fl_list_from_path(fl_local_list, id);
   // TTH/
   } else if(strncmp(id, "TTH/", 4) == 0 && strlen(id) == 4+39) {
@@ -174,13 +190,18 @@ static void handle_adcget(struct nmdc_cc *cc, char *type, char *id, guint64 star
   }
   if(bytes < 0 || bytes > st.st_size-start)
     bytes = st.st_size-start;
+  if(needslot && st.st_size < 16*1024)
+    needslot = FALSE;
 
   // send
-  char *tmp = adc_escape(id);
-  net_sendf(cc->net, "$ADCSND %s %s %"G_GUINT64_FORMAT" %"G_GINT64_FORMAT, type, tmp, start, bytes);
-  net_sendfile(cc->net, path, start, bytes);
-  g_free(tmp);
-  g_free(path);
+  if(!needslot || nmdc_cc_slots_in_use() < conf_slots()) {
+    char *tmp = adc_escape(id);
+    net_sendf(cc->net, "$ADCSND %s %s %"G_GUINT64_FORMAT" %"G_GINT64_FORMAT, type, tmp, start, bytes);
+    net_sendfile(cc->net, path, start, bytes);
+    g_free(tmp);
+    g_free(path);
+  } else
+    net_send(cc->net, "$MaxedOut");
 }
 
 

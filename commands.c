@@ -594,7 +594,7 @@ static void c_disconnect(char *args) {
   else if(tab->hub->state == HUBS_IDLE)
     ui_logwindow_add(tab->log, "Not connected.");
   else
-    nmdc_disconnect(tab->hub);
+    nmdc_disconnect(tab->hub, FALSE);
 }
 
 
@@ -606,7 +606,7 @@ static void c_reconnect(char *args) {
     ui_logwindow_add(tab->log, "This command can only be used on hub tabs.");
   else {
     if(tab->hub->state != HUBS_IDLE)
-      nmdc_disconnect(tab->hub);
+      nmdc_disconnect(tab->hub, FALSE);
     c_connect(""); // also checks for the existence of "hubaddr"
   }
 }

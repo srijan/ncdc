@@ -67,6 +67,8 @@ struct nmdc_hub {
   gboolean supports_nogetinfo;
   // MyINFO send timer (event loop source id)
   guint myinfo_timer;
+  // reconnect timer (30 sec.)
+  guint reconnect_timer;
   // last MyINFO string
   char *myinfo_last;
 };
@@ -494,19 +496,19 @@ static void handle_cmd(struct net *n, char *cmd) {
   // $GetPass
   if(strncmp(cmd, "$GetPass", 8) == 0) {
     ui_logwindow_add(hub->tab->log, "Hub requires a password. This version of ncdc does not support passworded login yet.");
-    nmdc_disconnect(hub);
+    nmdc_disconnect(hub, FALSE);
   }
 
   // $ValidateDenide
   if(strncmp(cmd, "$ValidateDenide", 15) == 0) {
     ui_logwindow_add(hub->tab->log, "Username invalid or already taken.");
-    nmdc_disconnect(hub);
+    nmdc_disconnect(hub, TRUE);
   }
 
   // $HubIsFull
   if(strncmp(cmd, "$HubIsFull", 10) == 0) {
     ui_logwindow_add(hub->tab->log, "Hub is full.");
-    nmdc_disconnect(hub);
+    nmdc_disconnect(hub, TRUE);
   }
 
   // global hub message
@@ -524,6 +526,13 @@ static gboolean check_myinfo(gpointer data) {
 }
 
 
+static gboolean reconnect_timer(gpointer dat) {
+  nmdc_connect(dat);
+  ((struct nmdc_hub *)dat)->reconnect_timer = 0;
+  return FALSE;
+}
+
+
 static void handle_error(struct net *n, int action, GError *err) {
   struct nmdc_hub *hub = n->handle;
 
@@ -532,16 +541,17 @@ static void handle_error(struct net *n, int action, GError *err) {
 
   switch(action) {
   case NETERR_CONN:
-    ui_logwindow_printf(hub->tab->log, "Could not connect to hub: %s", err->message);
+    ui_logwindow_printf(hub->tab->log, "Could not connect to hub: %s. Wating 30 seconds before retrying.", err->message);
     hub->state = HUBS_IDLE;
+    hub->reconnect_timer = g_timeout_add_seconds(30, reconnect_timer, hub);
     break;
   case NETERR_RECV:
     ui_logwindow_printf(hub->tab->log, "Read error: %s", err->message);
-    nmdc_disconnect(hub);
+    nmdc_disconnect(hub, TRUE);
     break;
   case NETERR_SEND:
     ui_logwindow_printf(hub->tab->log, "Write error: %s", err->message);
-    nmdc_disconnect(hub);
+    nmdc_disconnect(hub, TRUE);
     break;
   }
 }
@@ -575,7 +585,7 @@ void nmdc_connect(struct nmdc_hub *hub) {
 }
 
 
-void nmdc_disconnect(struct nmdc_hub *hub) {
+void nmdc_disconnect(struct nmdc_hub *hub, gboolean recon) {
   net_disconnect(hub->net);
   g_hash_table_remove_all(hub->users);
   g_free(hub->nick);     hub->nick = NULL;
@@ -583,13 +593,22 @@ void nmdc_disconnect(struct nmdc_hub *hub) {
   g_free(hub->hubname);  hub->hubname = NULL;
   g_free(hub->myinfo_last); hub->myinfo_last = NULL;
   hub->nick_valid = hub->state = hub->sharecount = hub->sharesize = hub->supports_nogetinfo = 0;
-  ui_logwindow_printf(hub->tab->log, "Disconnected.");
+  if(!recon) {
+    ui_logwindow_printf(hub->tab->log, "Disconnected.");
+    if(hub->reconnect_timer) {
+      g_source_remove(hub->reconnect_timer);
+      hub->reconnect_timer = 0;
+    }
+  } else {
+    ui_logwindow_printf(hub->tab->log, "Connection lost. Waiting 30 seconds before reconnecting.");
+    hub->reconnect_timer = g_timeout_add_seconds(30, reconnect_timer, hub);
+  }
 }
 
 
 void nmdc_free(struct nmdc_hub *hub) {
   nmdc_cc_remove_hub(hub);
-  nmdc_disconnect(hub);
+  nmdc_disconnect(hub, FALSE);
   net_free(hub->net);
   g_hash_table_unref(hub->users);
   g_source_remove(hub->myinfo_timer);

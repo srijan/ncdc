@@ -288,6 +288,20 @@ char *str_formatsize(guint64 size) {
 }
 
 
+// case-insensitive substring match
+char *str_casestr(const char *haystack, const char *needle) {
+  gsize hlen = strlen(haystack);
+  gsize nlen = strlen(needle);
+
+  while(hlen-- >= nlen) {
+    if(!g_strncasecmp(haystack, needle, nlen))
+      return (char*)haystack;
+    haystack++;
+  }
+  return NULL;
+}
+
+
 // Prefixes all strings in the array-of-strings with a string, obtained by
 // concatenating all arguments together. Last argument must be NULL.
 void strv_prefix(char **arr, const char *str, ...) {

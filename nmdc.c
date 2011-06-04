@@ -326,7 +326,7 @@ static void handle_search(struct nmdc_hub *hub, char *from, int size_m, guint64 
   };
   int max = from[0] == 'H' ? 5 : 10;
   struct fl_list *res[max];
-  gboolean isdir = type == 8;
+  int filedir = type == 1 ? 3 : type == 8 ? 2 : 1;
   char **ext = exts[type-1];
   char **inc = { NULL };
   int i = 0;
@@ -347,7 +347,7 @@ static void handle_search(struct nmdc_hub *hub, char *from, int size_m, guint64 
     // it still has to match the other requirements...
     for(; i<max && l; l=l->next) {
       struct fl_list *c = l->data;
-      if(fl_list_search_matches(c, size_m, size, isdir, ext, inc))
+      if(fl_list_search_matches(c, size_m, size, filedir, ext, inc))
         res[i++] = c;
     }
 
@@ -360,7 +360,7 @@ static void handle_search(struct nmdc_hub *hub, char *from, int size_m, guint64 
     tmp = nmdc_unescape_and_decode(hub, query);
     inc = g_strsplit(tmp, " ", 0);
     g_free(tmp);
-    i = fl_list_search(fl_local_list, size_m, size, isdir, ext, inc, res, max);
+    i = fl_list_search(fl_local_list, size_m, size, filedir, ext, inc, res, max);
     g_strfreev(inc);
   }
 

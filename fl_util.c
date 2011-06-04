@@ -230,7 +230,7 @@ void fl_list_suggest(struct fl_list *root, char *opath, char **sug) {
 
 gboolean fl_list_search_match_name(struct fl_list *fl, char **ext, char **inc) {
   for(; *inc; inc++)
-    if(G_LIKELY(!strstr(fl->name, *inc))) // TODO: case-insensitive
+    if(G_LIKELY(!str_casestr(fl->name, *inc)))
       return FALSE;
   if(!*ext)
     return TRUE;
@@ -247,8 +247,8 @@ gboolean fl_list_search_match_name(struct fl_list *fl, char **ext, char **inc) {
 
 #if INTERFACE
 
-#define fl_list_search_matches(fl, size_m, s, isdir, ext, inc) \
-  ((((isdir) && !(fl)->isfile) || (!(isdir) && (fl)->isfile && (fl)->hastth))\
+#define fl_list_search_matches(fl, size_m, s, filedir, ext, inc) \
+  (((((filedir) & 2) && !(fl)->isfile) || (((filedir) & 1) && (fl)->isfile && (fl)->hastth))\
     && (!(size_m) || ((size_m) < 0 && (fl)->size < (s)) || ((size_m) > 0 && (fl)->size > (s))) && fl_list_search_match_name(fl, ext, inc))
 
 #endif
@@ -256,7 +256,7 @@ gboolean fl_list_search_match_name(struct fl_list *fl, char **ext, char **inc) {
 
 // Recursive depth-first search through the list, used for replying to non-TTH
 // $Search requests. Not exactly fast, but what did you expect? :-(
-int fl_list_search(struct fl_list *parent, int size_m, guint64 size, gboolean isdir, char **ext, char **inc, struct fl_list **res, int max) {
+int fl_list_search(struct fl_list *parent, int size_m, guint64 size, int filedir, char **ext, char **inc, struct fl_list **res, int max) {
   if(!parent || !parent->sub)
     return 0;
   GSequenceIter *iter;
@@ -265,17 +265,17 @@ int fl_list_search(struct fl_list *parent, int size_m, guint64 size, gboolean is
   char *ninc[g_strv_length(inc)];
   int i = 0;
   for(; *inc; inc++)
-    if(G_LIKELY(!parent->name || !strstr(parent->name, *inc))) // TODO: case-insensitive
+    if(G_LIKELY(!parent->name || !str_casestr(parent->name, *inc)))
       ninc[i++] = *inc;
   ninc[i] = NULL;
   // loop through the directory
   i = 0;
   for(iter=g_sequence_get_begin_iter(parent->sub); i<max && !g_sequence_iter_is_end(iter); iter=g_sequence_iter_next(iter)) {
     struct fl_list *n = g_sequence_get(iter);
-    if(fl_list_search_matches(n, size_m, size, isdir, ext, ninc))
+    if(fl_list_search_matches(n, size_m, size, filedir, ext, ninc))
       res[i++] = n;
     if(!n->isfile && i < max)
-      i += fl_list_search(n, size_m, size, isdir, ext, ninc, res+i, max-i);
+      i += fl_list_search(n, size_m, size, filedir, ext, ninc, res+i, max-i);
   }
   return i;
 }

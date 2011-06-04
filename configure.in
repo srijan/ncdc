@@ -1,5 +1,6 @@
 
 AC_INIT([ncdc], [0.1], [projects@yorhel.nl])
+AC_CONFIG_SRCDIR([src/ncdc.h])
 AC_CONFIG_HEADER([config.h])
 AM_INIT_AUTOMAKE([foreign])
 
@@ -75,7 +76,7 @@ PKG_CHECK_MODULES([DEPS], [
 ])
 
 
-AC_OUTPUT([Makefile])
+AC_OUTPUT([Makefile src/Makefile])
 
 
 # Notify user about missing makeheaders

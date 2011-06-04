@@ -1,0 +1,23 @@
+
+bin_PROGRAMS = ncdc
+ncdc_SOURCES = main.c fl_local.c fl_util.c commands.c util.c ui.c ui_util.c nmdc.c nmdc_cc.c net.c tth.c
+auto_headers = $(ncdc_SOURCES:.c=.h)
+noinst_HEADERS = ncdc.h ${auto_headers}
+ncdc_CFLAGS = $(DEPS_CFLAGS)
+ncdc_LDFLAGS = $(DEPS_LIBS)
+
+# only clean header files when makeheaders is installed
+if USE_MH
+MOSTLYCLEANFILES = $(auto_headers)
+endif
+
+
+${auto_headers}: %.h: %.c
+if USE_MH
+	makeheaders $<
+else
+	@echo "WARNING: makeheaders not installed, not generating header file."
+endif
+
+${ncdc_OBJECTS}: ${auto_headers}
+

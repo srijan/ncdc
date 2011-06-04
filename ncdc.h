@@ -57,6 +57,7 @@ struct ui_textinput;
 #include "main.h"
 #include "nmdc.h"
 #include "nmdc_cc.h"
+#include "net.h"
 #include "tth.h"
 #include "ui.h"
 #include "ui_util.h"

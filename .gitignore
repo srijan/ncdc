@@ -17,6 +17,7 @@ commands.h
 fl_local.h
 fl_util.h
 main.h
+net.h
 nmdc.h
 nmdc_cc.h
 tth.h

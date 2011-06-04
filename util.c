@@ -657,14 +657,29 @@ struct net {
     g_free(n);\
   } while(0)
 
-#define net_init_ratecalc() do {\
-    ratecalc_init(&net_in, 10);\
-    ratecalc_init(&net_out, 10);\
-    ratecalc_register(&net_in);\
-    ratecalc_register(&net_out);\
-  } while(0)
-
 #endif
+
+
+
+// Some global stuff for sending UDP packets
+
+struct net_udp { GSocketAddress *dest; char *msg; int msglen; };
+static GSocket *net_udp_sock;
+static GQueue *net_udp_queue;
+
+
+// initialize some global structures
+void net_init_global() {
+  ratecalc_init(&net_in, 10);
+  ratecalc_init(&net_out, 10);
+  ratecalc_register(&net_in);
+  ratecalc_register(&net_out);
+
+  // TODO: IPv6?
+  net_udp_sock = g_socket_new(G_SOCKET_FAMILY_IPV4, G_SOCKET_TYPE_DATAGRAM, G_SOCKET_PROTOCOL_UDP, NULL);
+  g_socket_set_blocking(net_udp_sock, FALSE);
+  net_udp_queue = g_queue_new();
+}
 
 
 static void net_consume_input(struct net *n) {
@@ -920,5 +935,70 @@ void net_sendfile(struct net *n, const char *path, guint64 offset, guint64 lengt
   n->file_offset = offset;
   n->file_left = length;
   net_send_do(n);
+}
+
+
+static gboolean net_udp_handle_out(GSocket *sock, GIOCondition cond, gpointer dat) {
+  struct net_udp *m = g_queue_pop_head(net_udp_queue);
+  if(!m)
+    return FALSE;
+  if(g_socket_send_to(net_udp_sock, m->dest, m->msg, m->msglen, NULL, NULL) != m->msglen)
+    g_warning("Short write for UDP message.");
+  else {
+    char *a = g_inet_address_to_string(g_inet_socket_address_get_address(G_INET_SOCKET_ADDRESS(m->dest)));
+    g_debug("UDP:%s:%d> %s", a, g_inet_socket_address_get_port(G_INET_SOCKET_ADDRESS(m->dest)), m->msg);
+    g_free(a);
+
+    g_free(m->msg);
+    g_object_unref(m->dest);
+    g_slice_free(struct net_udp, m);
+  }
+  return net_udp_queue->head ? TRUE : FALSE;
+}
+
+
+// dest is assumed to be a valid IPv4 address with an optional port ("x.x.x.x" or "x.x.x.x:p")
+void net_udp_send_raw(const char *dest, const char *msg, int len) {
+  char *destc = g_strdup(dest);
+  char *port_str = index(destc, ':');
+  long port = 412;
+  if(port_str) {
+    *port_str = 0;
+    port_str++;
+    port = strtol(port_str, NULL, 10);
+    if(port < 0 || port > 0xFFFF) {
+      g_free(destc);
+      return;
+    }
+  }
+
+  GInetAddress *iaddr = g_inet_address_new_from_string(destc);
+  g_free(destc);
+  if(!iaddr)
+    return;
+
+  struct net_udp *m = g_slice_new0(struct net_udp);
+  m->msg = g_strdup(msg);
+  m->msglen = len;
+  m->dest = G_SOCKET_ADDRESS(g_inet_socket_address_new(iaddr, port));
+  g_object_unref(iaddr);
+
+  g_queue_push_tail(net_udp_queue, m);
+  if(net_udp_queue->head == net_udp_queue->tail) {
+    GSource *src = g_socket_create_source(net_udp_sock, G_IO_OUT, NULL);
+    g_source_set_callback(src, (GSourceFunc)net_udp_handle_out, NULL, NULL);
+    g_source_attach(src, NULL);
+    g_source_unref(src);
+  }
+}
+
+
+void net_udp_sendf(const char *dest, const char *fmt, ...) {
+  va_list va;
+  va_start(va, fmt);
+  char *str = g_strdup_vprintf(fmt, va);
+  va_end(va);
+  net_udp_send_raw(dest, str, strlen(str));
+  g_free(str);
 }
 

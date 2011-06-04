@@ -331,10 +331,6 @@ static void handle_search(struct nmdc_hub *hub, char *from, int size_m, guint64 
   char **inc = { NULL };
   int i = 0;
 
-  // TODO: also implement active search replies
-  if(from[0] != 'H')
-    return;
-
   // TTH lookup (YAY! this is fast!)
   if(type == 9) {
     if(strncmp(query, "TTH:", 4) != 0 || strlen(query) != 4+29) {
@@ -384,14 +380,18 @@ static void handle_search(struct nmdc_hub *hub, char *from, int size_m, guint64 
     for(; *tmp; tmp++)
       if(*tmp == '/')
         *tmp = '\\';
-    // TODO: how is a space in the path encoded? And in what encoding should the path really be? UTF-8 or hub?
+    // TODO: In what encoding should the path really be? UTF-8 or hub?
     tmp = nmdc_encode_and_escape(hub, fl);
     if(res[i]->isfile) {
       base32_encode(res[i]->tth, tth+4);
       size = g_strdup_printf("\05%"G_GUINT64_FORMAT, res[i]->size);
     }
-    net_sendf(hub->net, "$SR %s %s%s %d/%d\05%s (%s)\05%s",
-      hub->nick_hub, tmp, size ? size : "", slots_free, slots, res[i]->isfile ? tth : hub->hubname_hub, hubaddr, from+4);
+    char *msg = g_strdup_printf("$SR %s %s%s %d/%d\05%s (%s)",
+      hub->nick_hub, tmp, size ? size : "", slots_free, slots, res[i]->isfile ? tth : hub->hubname_hub, hubaddr);
+    if(from[0] == 'H')
+      net_sendf(hub->net, "%s\05%s", msg, from+4);
+    else // TODO: send multiple $SR's in a single UDP message? What do the other clients do?
+      net_udp_sendf(from, "%s|", msg);
     g_free(size);
     g_free(tmp);
   }

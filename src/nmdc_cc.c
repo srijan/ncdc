@@ -90,7 +90,7 @@ static struct nmdc_cc *nmdc_cc_get(struct nmdc_hub *hub, const char *user) {
 
 // ADC parameter unescaping, required for $ADCGET
 static char *adc_unescape(const char *str) {
-  char *dest = g_new0(char, strlen(str));
+  char *dest = g_new(char, strlen(str)+1);
   char *tmp = dest;
   while(*str) {
     if(*str == '\\') {
@@ -110,6 +110,7 @@ static char *adc_unescape(const char *str) {
     tmp++;
     str++;
   }
+  *tmp = 0;
   return dest;
 }
 

@@ -328,12 +328,12 @@ static void handle_search(struct nmdc_hub *hub, char *from, int size_m, guint64 
   struct fl_list *res[max];
   int filedir = type == 1 ? 3 : type == 8 ? 2 : 1;
   char **ext = exts[type-1];
-  char **inc = { NULL };
+  char **inc = NULL;
   int i = 0;
 
   // TTH lookup (YAY! this is fast!)
   if(type == 9) {
-    if(strncmp(query, "TTH:", 4) != 0 || strlen(query) != 4+29) {
+    if(strncmp(query, "TTH:", 4) != 0 || strlen(query) != 4+39) {
       g_warning("Invalid TTH $Search for %s", from);
       return;
     }
@@ -392,6 +392,8 @@ static void handle_search(struct nmdc_hub *hub, char *from, int size_m, guint64 
       net_sendf(hub->net, "%s\05%s", msg, from+4);
     else // TODO: send multiple $SR's in a single UDP message? What do the other clients do?
       net_udp_sendf(from, "%s|", msg);
+    g_free(fl);
+    g_free(msg);
     g_free(size);
     g_free(tmp);
   }

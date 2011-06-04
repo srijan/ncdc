@@ -160,15 +160,17 @@ gboolean fl_list_is_child(const struct fl_list *parent, const struct fl_list *ch
 char *fl_list_path(struct fl_list *fl) {
   if(!fl->parent)
     return g_strdup("/");
-  char *path = g_strdup(fl->name);
+  char *tmp, *path = g_strdup(fl->name);
   struct fl_list *cur = fl->parent;
   while(cur->parent) {
-    char *tmp = path;
+    tmp = path;
     path = g_build_filename(cur->name, path, NULL);
     g_free(tmp);
     cur = cur->parent;
   }
+  tmp = path;
   path = g_build_filename("/", path, NULL);
+  g_free(tmp);
   return path;
 }
 
@@ -229,10 +231,10 @@ void fl_list_suggest(struct fl_list *root, char *opath, char **sug) {
 
 
 gboolean fl_list_search_match_name(struct fl_list *fl, char **ext, char **inc) {
-  for(; *inc; inc++)
+  for(; inc&&*inc; inc++)
     if(G_LIKELY(!str_casestr(fl->name, *inc)))
       return FALSE;
-  if(!*ext)
+  if(!ext || !*ext)
     return TRUE;
   char *l = rindex(fl->name, '.');
   if(G_UNLIKELY(!l || !l[1]))

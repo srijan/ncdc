@@ -320,7 +320,9 @@ static void handle_connect(GObject *src, GAsyncResult *res, gpointer dat) {
   } else {
     n->conn = conn;
     n->sock = g_socket_connection_get_socket(n->conn);
+#if GLIB_CHECK_VERSION(2, 26, 0)
     g_socket_set_timeout(n->sock, 0);
+#endif
     time(&(n->timeout_last));
     n->timeout_src = g_timeout_add_seconds(5, handle_timer, n);
     if(n->keepalive)
@@ -341,7 +343,9 @@ void net_connect(struct net *n, const char *addr, unsigned short defport, void (
 
   GSocketClient *sc = g_socket_client_new();
   // set a timeout on the connect, regardless of the value of keepalive
+#if GLIB_CHECK_VERSION(2, 26, 0)
   g_socket_client_set_timeout(sc, 30);
+#endif
   g_socket_client_connect_to_host_async(sc, addr, defport, n->cancel, handle_connect, n);
   g_object_unref(sc);
 }

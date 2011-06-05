@@ -12,6 +12,8 @@ MOSTLYCLEANFILES = $(auto_headers)
 endif
 
 
+# This trick seems to work only with GNU make. I have no idea how to do this in
+# a portable way, other than writing a separate rule for each header file. :-(
 ${auto_headers}: %.h: %.c
 if USE_MH
 	makeheaders $<

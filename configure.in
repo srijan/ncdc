@@ -76,7 +76,7 @@ PKG_CHECK_MODULES([DEPS], [
 ])
 
 
-AC_OUTPUT([Makefile src/Makefile])
+AC_OUTPUT([GNUmakefile src/GNUmakefile])
 
 
 # Notify user about missing makeheaders

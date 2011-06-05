@@ -24,7 +24,7 @@ BUILDING
   To build ncdc from this repository (there are no packaged versions yet), you
   will need the following:
 
-  - autotools and make and stuff
+  - GNU make and autotools
   - A C compiler, obviously
   - Header files for the above REQUIREMENTS
   - The 'makeheaders' program, which is assumed to be in your $PATH
@@ -34,7 +34,7 @@ BUILDING
 
     autoreconf -i
     ./configure --prefix=/usr
-    make
+    make (or gmake)
 
   And optionally 'make install' if you want.
 

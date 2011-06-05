@@ -41,7 +41,9 @@ struct ui_tab {
   char *name;
   struct ui_logwindow *log;    // MAIN, HUB, MSG
   struct nmdc_hub *hub;        // HUB, USERLIST, MSG
-  struct ui_tab *userlist_tab; // HUB
+  // HUB
+  struct ui_tab *userlist_tab;
+  gboolean hub_joincomplete;
   // MSG
   struct nmdc_user *msg_user;
   char *msg_uname;
@@ -188,6 +190,14 @@ static void ui_msg_joinquit(struct ui_tab *tab, gboolean join, struct nmdc_user 
 
 // Hub tab
 
+#if INTERFACE
+// change types for ui_hub_userchange()
+#define UIHUB_UC_JOIN 0
+#define UIHUB_UC_QUIT 1
+#define UIHUB_UC_NFO 2
+#endif
+
+
 struct ui_tab *ui_hub_create(const char *name) {
   struct ui_tab *tab = g_new0(struct ui_tab, 1);
   // NOTE: tab name is also used as configuration group
@@ -290,26 +300,27 @@ struct ui_tab *ui_hub_getmsg(struct ui_tab *tab, struct nmdc_user *user) {
 }
 
 
-void ui_hub_joinquit(struct ui_tab *tab, gboolean join, struct nmdc_user *user) {
+void ui_hub_userchange(struct ui_tab *tab, int change, struct nmdc_user *user) {
   // notify msg tab, if any
-  struct ui_tab *t = ui_hub_getmsg(tab, user);
-  if(t)
-    ui_msg_joinquit(t, join, user);
+  if(change == UIHUB_UC_JOIN || change == UIHUB_UC_QUIT) {
+    struct ui_tab *t = ui_hub_getmsg(tab, user);
+    if(t)
+      ui_msg_joinquit(t, change == UIHUB_UC_JOIN, user);
+  }
 
   // notify the userlist, when it is open
   if(tab->userlist_tab)
-    ui_userlist_joinquit(tab->userlist_tab, join, user);
+    ui_userlist_userchange(tab->userlist_tab, change, user);
 
   // display the join/quit, when requested
   gboolean log = conf_hub_get(boolean, tab->name, "show_joinquit");
-  if(join) {
-    if(log && tab->hub->sharecount == g_hash_table_size(tab->hub->users)
+  if(change == UIHUB_UC_NFO && !user->isjoined) {
+    user->isjoined = TRUE;
+    if(log && tab->hub->joincomplete
         && (!tab->hub->nick_valid || strcmp(tab->hub->nick_hub, user->name_hub) != 0))
       ui_logwindow_printf(tab->log, "%s has joined.", user->name);
-  } else {
-    if(log)
-      ui_logwindow_printf(tab->log, "%s has quit.", user->name);
-  }
+  } else if(change == UIHUB_UC_QUIT && log)
+    ui_logwindow_printf(tab->log, "%s has quit.", user->name);
 }
 
 
@@ -553,8 +564,8 @@ static void ui_userlist_key(struct ui_tab *tab, guint64 key) {
 }
 
 
-void ui_userlist_joinquit(struct ui_tab *tab, gboolean join, struct nmdc_user *user) {
-  if(join) {
+void ui_userlist_userchange(struct ui_tab *tab, int change, struct nmdc_user *user) {
+  if(change == UIHUB_UC_JOIN) {
     gboolean topisbegin = g_sequence_iter_is_begin(tab->user_top);
     gboolean selisbegin = g_sequence_iter_is_begin(tab->user_sel);
     user->iter = g_sequence_insert_sorted(tab->users, user, ui_userlist_sort_func, tab);
@@ -563,7 +574,7 @@ void ui_userlist_joinquit(struct ui_tab *tab, gboolean join, struct nmdc_user *u
       tab->user_top = user->iter;
     if(selisbegin != g_sequence_iter_is_begin(tab->user_sel))
       tab->user_sel = user->iter;
-  } else {
+  } else if(change == UIHUB_UC_QUIT) {
     g_assert(g_sequence_get(user->iter) == (gpointer)user);
     // update top/sel in case we are removing one of them
     if(user->iter == tab->user_top)
@@ -576,12 +587,8 @@ void ui_userlist_joinquit(struct ui_tab *tab, gboolean join, struct nmdc_user *u
         tab->user_sel = g_sequence_iter_prev(user->iter);
     }
     g_sequence_remove(user->iter);
-  }
-}
-
-
-void ui_userlist_userupdate(struct ui_tab *tab, struct nmdc_user *user) {
-  g_sequence_sort_changed(user->iter, ui_userlist_sort_func, tab);
+  } else
+    g_sequence_sort_changed(user->iter, ui_userlist_sort_func, tab);
 }
 
 

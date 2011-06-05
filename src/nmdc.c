@@ -34,6 +34,7 @@
 struct nmdc_user {
   gboolean hasinfo : 1;
   gboolean isop : 1;
+  gboolean isjoined : 1; // managed by ui_hub_userchange()
   char *name;     // UTF-8
   char *name_hub; // hub-encoded (used as hash key)
   char *desc;
@@ -72,6 +73,9 @@ struct nmdc_hub {
   guint reconnect_timer;
   // last MyINFO string
   char *myinfo_last;
+  // whether we've fetched the complete user list (and their $MyINFO's)
+  gboolean received_nicklist; // true on first $NickList or $OpList
+  gboolean joincomplete;
 };
 
 #endif
@@ -171,7 +175,7 @@ static struct nmdc_user *user_add(struct nmdc_hub *hub, const char *name) {
   u->name_hub = g_strdup(name);
   u->name = nmdc_charset_convert(hub, TRUE, name);
   g_hash_table_insert(hub->users, u->name_hub, u);
-  ui_hub_joinquit(hub->tab, TRUE, u);
+  ui_hub_userchange(hub->tab, UIHUB_UC_JOIN, u);
   return u;
 }
 
@@ -246,8 +250,7 @@ static void user_myinfo(struct nmdc_hub *hub, struct nmdc_user *u, const char *s
     u->sharesize = g_ascii_strtoull(share, NULL, 10);
     g_free(share);
     u->hasinfo = TRUE;
-    if(hub->tab->userlist_tab)
-      ui_userlist_userupdate(hub->tab->userlist_tab, u);
+    ui_hub_userchange(hub->tab, UIHUB_UC_NFO, u);
   } else
     g_critical("Don't understand MyINFO string: %s", str);
   g_match_info_free(nfo);
@@ -474,9 +477,9 @@ static void handle_cmd(struct net *n, char *cmd) {
     char *nick = g_match_info_fetch(nfo, 1);
     struct nmdc_user *u = g_hash_table_lookup(hub->users, nick);
     if(u) {
+      ui_hub_userchange(hub->tab, UIHUB_UC_QUIT, u);
       hub->sharecount--;
       hub->sharesize -= u->sharesize;
-      ui_hub_joinquit(hub->tab, FALSE, u);
       g_hash_table_remove(hub->users, nick);
     }
     g_free(nick);
@@ -495,6 +498,7 @@ static void handle_cmd(struct net *n, char *cmd) {
       if(!u->hasinfo && !hub->supports_nogetinfo)
         net_sendf(hub->net, "$GetINFO %s %s", *cur, hub->nick_hub);
     }
+    hub->received_nicklist = TRUE;
     g_strfreev(list);
   }
   g_match_info_free(nfo);
@@ -508,6 +512,7 @@ static void handle_cmd(struct net *n, char *cmd) {
     char **cur;
     for(cur=list; *cur&&**cur; cur++)
       user_add(hub, *cur)->isop = TRUE;
+    hub->received_nicklist = TRUE;
     g_strfreev(list);
   }
   g_match_info_free(nfo);
@@ -526,6 +531,8 @@ static void handle_cmd(struct net *n, char *cmd) {
       hub->sharecount--;
     else
       hub->sharesize += u->sharesize;
+    if(hub->received_nicklist && !hub->joincomplete && hub->sharecount == g_hash_table_size(hub->users))
+      hub->joincomplete = TRUE;
     g_free(str);
     g_free(nick);
   }
@@ -698,7 +705,8 @@ void nmdc_disconnect(struct nmdc_hub *hub, gboolean recon) {
   g_free(hub->hubname);  hub->hubname = NULL;
   g_free(hub->hubname_hub);  hub->hubname_hub = NULL;
   g_free(hub->myinfo_last); hub->myinfo_last = NULL;
-  hub->nick_valid = hub->state = hub->sharecount = hub->sharesize = hub->supports_nogetinfo = 0;
+  hub->nick_valid = hub->received_nicklist = hub->joincomplete = hub->state
+    = hub->sharecount = hub->sharesize = hub->supports_nogetinfo = 0;
   if(!recon) {
     ui_logwindow_printf(hub->tab->log, "Disconnected.");
     if(hub->reconnect_timer) {

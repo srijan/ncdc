@@ -353,18 +353,18 @@ void tth_init(struct tth_ctx *ctx, guint64 filesize) {
 }
 
 
-// 'leaf' is also used for temporary storage, so don't rely on it's value after
-// calling this function.
-static int tth_stack_leaf(struct tth_ctx *ctx, char *leaf) {
+static int tth_stack_leaf(struct tth_ctx *ctx, const char *leaf) {
   int pos = 0;
+  char tmp[24];
   guint64 it;
+  memcpy(tmp, leaf, 24);
   // This trick uses the leaf number to determine when it needs to combine
   // with a previous hash (idea borrowed from RHash)
   for(it=1; it & ctx->leafnum; it <<= 1) {
-    tth_combine(ctx->stack[pos], leaf, leaf);
+    tth_combine(ctx->stack[pos], tmp, tmp);
     pos++;
   }
-  memcpy(ctx->stack[pos], leaf, 24);
+  memcpy(ctx->stack[pos], tmp, 24);
   ctx->leafnum++;
   return pos;
 }

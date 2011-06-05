@@ -99,6 +99,8 @@ struct net {
   time_t timeout_last;
   // some pointer for use by the user
   void *handle;
+  // reference counter
+  int ref;
 };
 
 
@@ -131,15 +133,20 @@ struct net {
   } while(0)
 
 
-// Should not be called while connected.
-#define net_free(n) do {\
-    if((n)->timeout_src)\
-      g_source_remove((n)->timeout_src);\
-    g_object_unref((n)->cancel);\
-    g_string_free((n)->out, TRUE);\
-    g_string_free((n)->in, TRUE);\
-    g_free(n);\
+#define net_ref(n) g_atomic_int_inc(&((n)->ref))
+
+#define net_unref(n) do {\
+    if(g_atomic_int_dec_and_test(&((n)->ref))) {\
+      net_disconnect(n);\
+      if((n)->timeout_src)\
+        g_source_remove((n)->timeout_src);\
+      g_object_unref((n)->cancel);\
+      g_string_free((n)->out, TRUE);\
+      g_string_free((n)->in, TRUE);\
+      g_free(n);\
+    }\
   } while(0)
+
 
 #endif
 
@@ -171,8 +178,12 @@ static void consume_input(struct net *n) {
   char *sep;
   gssize consumed = 0;
 
+  // we need to be able to access the net object after calling a callback that
+  // may do an unref().
+  net_ref(n);
+
   // TODO: set a maximum length on a single message to prevent unbounded buffer growth
-  while((sep = strchr(str, n->eom[0]))) {
+  while(n->conn && (sep = strchr(str, n->eom[0]))) {
     consumed += 1 + sep - str;
     *sep = 0;
     g_debug("%s< %s", net_remoteaddr(n), str);
@@ -182,6 +193,7 @@ static void consume_input(struct net *n) {
   }
   if(consumed)
     g_string_erase(n->in, 0, consumed);
+  net_unref(n);
 }
 
 
@@ -386,6 +398,7 @@ char *net_remoteaddr(struct net *n) {
 
 struct net *net_create(char term, void *han, gboolean keepalive, void (*rfunc)(struct net *, char *), void (*errfunc)(struct net *, int, GError *)) {
   struct net *n = g_new0(struct net, 1);
+  n->ref = 1;
   n->in  = g_string_sized_new(1024);
   n->out = g_string_sized_new(1024);
   n->cancel = g_cancellable_new();
@@ -439,6 +452,7 @@ void net_sendfile(struct net *n, const char *path, guint64 offset, guint64 lengt
   n->file_left = length;
   send_do(n);
 }
+
 
 
 static gboolean udp_handle_out(GSocket *sock, GIOCondition cond, gpointer dat) {

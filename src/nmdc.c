@@ -715,7 +715,7 @@ void nmdc_disconnect(struct nmdc_hub *hub, gboolean recon) {
 void nmdc_free(struct nmdc_hub *hub) {
   nmdc_cc_remove_hub(hub);
   nmdc_disconnect(hub, FALSE);
-  net_free(hub->net);
+  net_unref(hub->net);
   g_hash_table_unref(hub->users);
   g_source_remove(hub->myinfo_timer);
   g_free(hub);

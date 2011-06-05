@@ -32,8 +32,11 @@
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-#ifdef HAVE_SYS_SENDFILE_H
+#ifdef HAVE_LINUX_SENDFILE
 # include <sys/sendfile.h>
+#elif HAVE_BSD_SENDFILE
+# include <sys/socket.h>
+# include <sys/uio.h>
 #endif
 
 
@@ -74,7 +77,7 @@ struct net {
   // sending a file
   int file_fd;
   gint64 file_left;
-  off_t file_offset;
+  guint64 file_offset;
   // receive callback
   void (*cb_rcv)(struct net *, char *);
   // on-connect callback
@@ -230,19 +233,34 @@ static gboolean handle_input(GSocket *sock, GIOCondition cond, gpointer dat) {
 // TODO: do this in a separate thread to avoid blocking on HDD reads
 static gboolean handle_sendfile(struct net *n) {
 #ifdef HAVE_SENDFILE
-  ssize_t r = sendfile(g_socket_get_fd(n->sock), n->file_fd, &(n->file_offset), MIN((size_t)n->file_left, INT_MAX));
+
+#ifdef HAVE_LINUX_SENDFILE
+  off_t off = n->file_offset;
+  ssize_t r = sendfile(g_socket_get_fd(n->sock), n->file_fd, &off, MIN((size_t)n->file_left, INT_MAX));
+  if(r >= 0)
+    n->file_offset = off;
+#elif HAVE_BSD_SENDFILE
+  off_t len = 0;
+  gint64 r = sendfile(n->file_fd, g_socket_get_fd(n->sock), (off_t)n->file_offset, MIN((size_t)n->file_left, INT_MAX), NULL, &len, 0);
+  // a partial write results in an EAGAIN error on BSD, even though this isn't
+  // really an error condition at all.
+  if(r != -1 || (r == -1 && errno == EAGAIN)) {
+    r = len;
+    n->file_offset += r;
+  }
+#endif
 
   if(r >= 0) {
     n->file_left -= r;
     ratecalc_add(&net_out, r);
     return TRUE;
 
-  } else if(errno == EAGAIN)
+  } else if(errno == EAGAIN || errno == EINTR)
     return TRUE;
 
   // non-sendfile() fallback
   else if(errno == ENOTSUP || errno == ENOSYS || errno == EINVAL) {
-#endif
+#endif // HAVE_SENDFILE
     GError *err = NULL;
     char buf[10240];
     g_return_val_if_fail(lseek(n->file_fd, n->file_offset, SEEK_SET) != (off_t)-1, FALSE);

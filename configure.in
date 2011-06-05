@@ -10,15 +10,13 @@ AC_PROG_CC
 AC_PROG_INSTALL
 AC_PROG_RANLIB
 
-
-# I want a large st_size in struct stat!
 AC_SYS_LARGEFILE
 
 
 # Check for makeheaders. Not having makeheaders is fatal if no header files are
 # present in this distribution. (Only main.h is checked, though)
 AC_CHECK_PROG([have_mh],[makeheaders],[yes],[no])
-if test \( "x$have_mh" = "xno" \) -a \( ! -f "$srcdir/main.h" \) ; then
+if test \( "x$have_mh" = "xno" \) -a \( ! -f "$srcdir/src/main.h" \) ; then
   AC_MSG_ERROR([Could not find the makeheaders program.])
 fi
 AM_CONDITIONAL([USE_MH], [test "x$have_mh" = "xyes"])
@@ -36,17 +34,68 @@ if test "x$have_nch" = "xno"; then
 fi
 
 
+# Require a large off_t
+AC_CHECK_SIZEOF([off_t])
+if test "$ac_cv_sizeof_off_t" -lt 8; then
+  AC_MSG_ERROR([No large file support available in this system.])
+fi
+
+
 # Check for library functions.
 AC_CHECK_FUNCS(
   [setlocale sigaction],[],
   AC_MSG_ERROR([Required function missing]))
 
 
+
 # Check for sendfile() support (not required)
-# TODO: test this on more than only Linux, and perhaps add a --disable-sendfile option
-# TODO: check for 64-bit off_t. AC_SYS_LARGEFILE should do this, but I believe it could fail...
-AC_CHECK_HEADERS([sys/sendfile.h])
-AC_CHECK_FUNCS([sendfile])
+# The following checks are based on ProFTPD's configure.in, except ncdc only
+# supports the Linux and BSD variant at the moment, as those are the only two I
+# have tested so far.
+
+AC_CACHE_CHECK([which sendfile() implementation to use], pr_cv_sendfile_func,
+  pr_cv_sendfile_func="none"
+
+  # Linux
+  if test "$pr_cv_sendfile_func" = "none"; then
+    AC_LINK_IFELSE([AC_LANG_PROGRAM(
+      [[ #include <sys/types.h>
+         #include <sys/sendfile.h>
+         #include <unistd.h> ]],
+      [[ int i=0;
+         off_t o=0;
+         size_t c=0;
+         (void)sendfile(i,i,&o,c); ]])],
+      [pr_cv_sendfile_func="Linux"])
+  fi
+
+  # BSD
+  if test "$pr_cv_sendfile_func" = "none"; then
+    AC_LINK_IFELSE([AC_LANG_PROGRAM(
+      [[ #include <sys/types.h>
+         #include <sys/socket.h>
+         #include <sys/uio.h> ]],
+      [[ int i=0;
+         off_t o=0;
+         size_t n=0;
+         struct sf_hdtr h={};
+         (void)sendfile(i,i,o,n,&h,&o,i); ]])],
+      [pr_cv_sendfile_func="BSD"])
+  fi
+)
+
+# set defines
+if test "$pr_cv_sendfile_func" != none; then
+  AC_DEFINE(HAVE_SENDFILE, 1, [Define if sendfile support.])
+fi
+
+case "$pr_cv_sendfile_func" in
+  "Linux")
+    AC_DEFINE(HAVE_LINUX_SENDFILE, 1, [Define if using Linux sendfile support.]);;
+  "BSD")
+    AC_DEFINE(HAVE_BSD_SENDFILE,   1, [Define if using BSD sendfile support.]);;
+esac
+
 
 
 # Check for ncursesw

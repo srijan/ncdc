@@ -354,6 +354,7 @@ void nmdc_cc_connect(struct nmdc_cc *cc, const char *addr) {
 // this is a disconnect-and-free
 void nmdc_cc_disconnect(struct nmdc_cc *cc) {
   nmdc_cc_list = g_list_remove(nmdc_cc_list, cc);
+  net_disconnect(cc->net);
   net_unref(cc->net);
   g_free(cc->nick_raw);
   g_free(cc->nick);

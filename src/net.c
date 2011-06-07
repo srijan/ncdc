@@ -140,6 +140,8 @@ struct net {
       net_disconnect(n);\
       if((n)->timeout_src)\
         g_source_remove((n)->timeout_src);\
+      if((n)->file_left)\
+        close((n)->file_fd);\
       g_object_unref((n)->cancel);\
       g_string_free((n)->out, TRUE);\
       g_string_free((n)->in, TRUE);\
@@ -308,7 +310,10 @@ static gboolean handle_output(GSocket *sock, GIOCondition cond, gpointer dat) {
 
   // send a file
   } else if(n->file_left) {
-    if(handle_sendfile(n) && (n->out->len || n->file_left))
+    gboolean c = handle_sendfile(n) && (n->out->len || n->file_left);
+    if(!n->file_left)
+      close(n->file_fd);
+    if(c)
       return TRUE;
   }
 
@@ -447,6 +452,7 @@ void net_sendf(struct net *n, const char *fmt, ...) {
 // TODO: error reporting?
 // Note: the net_send() family shouldn't be used while the file is being sent.
 void net_sendfile(struct net *n, const char *path, guint64 offset, guint64 length) {
+  g_return_if_fail(!n->file_offset);
   g_return_if_fail((n->file_fd = open(path, O_RDONLY)) >= 0);
   n->file_offset = offset;
   n->file_left = length;

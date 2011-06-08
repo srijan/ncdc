@@ -452,7 +452,7 @@ void net_sendf(struct net *n, const char *fmt, ...) {
 // TODO: error reporting?
 // Note: the net_send() family shouldn't be used while the file is being sent.
 void net_sendfile(struct net *n, const char *path, guint64 offset, guint64 length) {
-  g_return_if_fail(!n->file_offset);
+  g_return_if_fail(!n->file_left);
   g_return_if_fail((n->file_fd = open(path, O_RDONLY)) >= 0);
   n->file_offset = offset;
   n->file_left = length;

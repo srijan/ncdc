@@ -98,13 +98,23 @@ void conf_init() {
   g_free(logs);
 
   // make sure that there is no other ncdc instance working with the same config directory
-  char *lock_file = g_build_filename(conf_dir, "lock", NULL);
-  int lock_fd = g_open(lock_file, O_WRONLY|O_CREAT, 0600);
-  if(lock_fd < 0 || flock(lock_fd, LOCK_EX|LOCK_NB))
+  char *ver_file = g_build_filename(conf_dir, "version", NULL);
+  int ver_fd = g_open(ver_file, O_WRONLY|O_CREAT, 0600);
+  if(ver_fd < 0 || flock(ver_fd, LOCK_EX|LOCK_NB))
     g_error("Unable to open lock file. Is another instance of ncdc running with the same configuration directory?");
-  g_free(lock_file);
+
+  // check data directory version
+  // version = major, minor
+  //   minor = forward & backward compatible, major only backward.
+  char dir_ver[2] = {1, 0};
+  if(read(ver_fd, dir_ver, 2) < 2)
+    if(write(ver_fd, dir_ver, 2) < 2)
+      g_error("Could not write to '%s': %s", ver_file, g_strerror(errno));
+  g_free(ver_file);
   // Don't close the above file. Keep it open and let the OS close it (and free
   // the lock) when ncdc is closed, was killed or has crashed.
+  if(dir_ver[0] > 1)
+    g_error("Incompatible data directory. Please upgrade ncdc or use a different directory.");
 
   // load config file (or create it)
   conf_file = g_key_file_new();

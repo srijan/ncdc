@@ -476,7 +476,7 @@ void base32_decode(const char *from, char *to) {
 /* How to use this:
  * From main thread:
  *   struct ratecalc thing;
- *   ratecalc_init(&thing, numsamples);
+ *   ratecalc_init(&thing);
  *   ratecalc_register(&thing);
  * From any thread (usually some worker thread):
  *   ratecalc_add(&thing, bytes);
@@ -485,16 +485,14 @@ void base32_decode(const char *from, char *to) {
  *   ratecalc_reset(&thing);
  *   ratecalc_unregister(&thing);
  *
- * ratecalc_calc() should be called with a regular interval
+ * ratecalc_calc() should be called with a one-second interval
  */
 
 #if INTERFACE
 
 struct ratecalc {
   int counter;
-  int samples[10];
-  char num;
-  char got;
+  int rate;
   char isreg;
 };
 
@@ -502,11 +500,11 @@ struct ratecalc {
 
 #define ratecalc_reset(rc) do {\
     g_atomic_int_set(&((rc)->counter), 0);\
-    (rc)->got = 0;\
+    (rc)->rate = 0;\
   } while(0)
 
-#define ratecalc_init(rc, n) do {\
-    (rc)->num = n;\
+#define ratecalc_init(rc) do {\
+    ratecalc_unregister(rc);\
     ratecalc_reset(rc);\
   } while(0)
 
@@ -520,44 +518,20 @@ struct ratecalc {
     (rc)->isreg = 0;\
   } while(0)
 
+#define ratecalc_get(rc) ((rc)->rate)
+
+#define ratecalc_calc() do {\
+    GSList *n; int cur; struct ratecalc *rc;\
+    for(n=ratecalc_list; n; n=n->next) {\
+      rc = n->data;\
+      do {\
+        cur = g_atomic_int_get(&(rc->counter));\
+      } while(!g_atomic_int_compare_and_exchange(&(rc->counter), cur, 0));\
+      rc->rate = cur + ((rc->rate - cur) / 2);\
+    }\
+  } while(0)
+
 #endif
 
 GSList *ratecalc_list = NULL;
-static int ratecalc_ms[10];
-
-
-int ratecalc_get(struct ratecalc *rc) {
-  int i;
-  guint64 r = 0, ms = 0;
-  for(i=0; i<rc->got; i++) {
-    ms += ratecalc_ms[i];
-    r += rc->samples[i];
-  }
-  return (r*1000) / (ms?ms:1000);
-}
-
-
-void ratecalc_calc() {
-  // fix time
-  static GTimer *tm = NULL;
-  if(!tm) {
-    tm = g_timer_new();
-    return;
-  }
-  double el = g_timer_elapsed(tm, NULL);
-  g_timer_start(tm);
-  memmove(ratecalc_ms+1, ratecalc_ms, 9*4);
-  ratecalc_ms[0] = el * 1000.0;
-
-  // sample and reset the counters
-  GSList *n;
-  for(n=ratecalc_list; n; n=n->next) {
-    struct ratecalc *rc = n->data;
-    memmove(rc->samples+1, rc->samples, MIN(rc->got, rc->num-1)*4);
-    do {
-      rc->samples[0] = g_atomic_int_get(&(rc->counter));
-    } while(!g_atomic_int_compare_and_exchange(&(rc->counter), rc->samples[0], 0));
-    rc->got = MIN(rc->got+1, rc->num);
-  }
-}
 

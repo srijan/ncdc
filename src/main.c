@@ -153,6 +153,7 @@ static gboolean stdin_read(GIOChannel *src, GIOCondition cond, gpointer dat) {
 
 
 static gboolean one_second_timer(gpointer dat) {
+  // TODO: ratecalc_calc() requires fairly precise timing, perhaps do this in a separate thread?
   ratecalc_calc();
   ui_draw();
   return TRUE;
@@ -298,7 +299,7 @@ int main(int argc, char **argv) {
   GIOChannel *in = g_io_channel_unix_new(STDIN_FILENO);
   g_io_add_watch(in, G_IO_IN, stdin_read, NULL);
 
-  g_timeout_add_seconds(1, one_second_timer, NULL);
+  g_timeout_add_seconds_full(G_PRIORITY_HIGH, 1, one_second_timer, NULL, NULL);
   g_timeout_add(100, screen_update_check, NULL);
 
   g_main_loop_run(main_loop);

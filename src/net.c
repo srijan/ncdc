@@ -163,8 +163,8 @@ static GQueue *net_udp_queue;
 
 // initialize some global structures
 void net_init_global() {
-  ratecalc_init(&net_in, 10);
-  ratecalc_init(&net_out, 10);
+  ratecalc_init(&net_in);
+  ratecalc_init(&net_out);
   ratecalc_register(&net_in);
   ratecalc_register(&net_out);
 

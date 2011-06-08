@@ -846,7 +846,7 @@ void fl_init() {
   // Even though the keys are the tth roots, we can just use g_int_hash. The
   // first four bytes provide enough unique data anyway.
   fl_hash_index = g_hash_table_new(g_int_hash, fl_init_hash_equal);
-  ratecalc_init(&fl_hash_rate, 10);
+  ratecalc_init(&fl_hash_rate);
 
   // flush unsaved data to disk every 60 seconds
   g_timeout_add_seconds_full(G_PRIORITY_LOW, 60, fl_flush, NULL, NULL);

@@ -549,8 +549,6 @@ static gboolean fl_hash_done(gpointer dat) {
 
   // update file and hash info
   fl_hashindex_sethash(fl, args->root, args->lastmod, args->blocksize, args->blocks);
-
-  ui_msgf(UIMSG_MAIN, "Finished hashing %s. [%.2f MiB/s]", fl->name, ((double)fl->size)/(1024.0*1024.0)/args->time);
   fl_needflush = TRUE;
 
 fl_hash_done_f:

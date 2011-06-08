@@ -231,8 +231,8 @@ static void handle_mynick(struct nmdc_cc *cc, const char *nick) {
   }
 
   // don't allow multiple connections from the same user
-  if(nmdc_cc_get(cc->hub, cc->nick)) {
-    g_warning("User %s attemted to connect more than once.", cc->nick);
+  if(nmdc_cc_get(cc->hub, nick)) {
+    g_warning("User %s attemted to connect more than once.", nick);
     nmdc_cc_disconnect(cc);
     return;
   }

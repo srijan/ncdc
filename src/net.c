@@ -207,16 +207,16 @@ static void consume_input(struct net *n) {
       return TRUE;\
     }\
     if(err) {\
+      src = 0;\
       n->cb_err(n, action, err);\
       g_error_free(err);\
-      src = 0;\
       return FALSE;\
     }\
     if(ret == 0) {\
+      src = 0;\
       g_set_error_literal(&err, 1, 0, "Remote disconnected.");\
       n->cb_err(n, action, err);\
       g_error_free(err);\
-      src = 0;\
       return FALSE;\
     }\
   } while(0)

@@ -33,6 +33,8 @@
 #include <string.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <gdbm.h>
+#include <libxml/xmlversion.h>
 
 
 
@@ -165,6 +167,43 @@ static gboolean screen_update_check(gpointer dat) {
 
 void ncdc_quit() {
   g_main_loop_quit(main_loop);
+}
+
+
+char *ncdc_version() {
+  static GString *ver = NULL;
+  static char *msg =
+    "%s %s (built %s %s)\n"
+    "Sendfile support: "
+#ifdef HAVE_SENDFILE
+     "yes (%s)\n"
+#else
+     "no\n"
+#endif
+    "Libraries:\n"
+    "  GLib %d.%d.%d (%d.%d.%d)\n"
+    "  Libxml2 %s\n"
+#ifdef NCURSES_VERSION
+    "  ncurses %s\n"
+#endif
+    "  %s"; // GDBM
+  if(ver)
+    return ver->str;
+  ver = g_string_new("");
+  g_string_printf(ver, msg, PACKAGE_NAME, PACKAGE_VERSION,
+    __DATE__, __TIME__,
+#ifdef HAVE_LINUX_SENDFILE
+    "Linux",
+#elif HAVE_BSD_SENDFILE
+    "BSD",
+#endif
+    GLIB_MAJOR_VERSION, GLIB_MINOR_VERSION, GLIB_MICRO_VERSION, glib_major_version, glib_minor_version, glib_micro_version,
+    LIBXML_DOTTED_VERSION,
+#ifdef NCURSES_VERSION
+    NCURSES_VERSION,
+#endif
+    gdbm_version);
+  return ver->str;
 }
 
 

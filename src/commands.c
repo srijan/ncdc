@@ -814,6 +814,18 @@ static void nick_sug(char *args, char **sug) {
 }
 
 
+static void c_version(char *args) {
+  g_return_if_fail(tab->log);
+  if(args[0])
+    ui_logwindow_add(tab->log, "This command does not accept any arguments.");
+  else {
+    ui_logwindow_add(tab->log, "");
+    ui_logwindow_add(tab->log, ncdc_version());
+    ui_logwindow_add(tab->log, "");
+  }
+}
+
+
 // definition of the command list
 static struct cmd cmds[] = {
   { "clear", c_clear, NULL,
@@ -913,6 +925,10 @@ static struct cmd cmds[] = {
   { "userlist", c_userlist, NULL,
     NULL, "Open the user list.",
     "" // TODO?
+  },
+  { "version", c_version, NULL,
+    NULL, "Display version information.",
+    ""
   },
   { "", NULL }
 };

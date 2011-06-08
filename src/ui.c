@@ -53,6 +53,7 @@ struct ui_tab {
   GSequenceIter *user_top;
   gboolean user_reverse;
   gboolean user_sort_share;
+  gboolean user_opfirst;
   gboolean user_hide_desc;
   gboolean user_hide_tag;
   gboolean user_hide_mail;
@@ -351,14 +352,15 @@ void ui_hub_userlist_open(struct ui_tab *tab) {
 
 // Userlist tab
 
-// TODO: sort OPs before normal users?
 static gint ui_userlist_sort_func(gconstpointer da, gconstpointer db, gpointer dat) {
   const struct nmdc_user *a = da;
   const struct nmdc_user *b = db;
   struct ui_tab *tab = dat;
   int o = 0;
+  if(!o && tab->user_opfirst && !a->isop != !b->isop)
+    return a->isop && !b->isop ? -1 : 1;
   if(!o && tab->user_sort_share)
-    o = a->sharesize > b->sharesize ? 1 : -1;
+    o = a->sharesize > b->sharesize ? 1 : a->sharesize < b->sharesize ? -1 : 0;
   if(!o) // TODO: this is noticably slow on large hubs, cache g_utf8_collate_key()
     o = g_utf8_collate(a->name, b->name);
   if(!o)
@@ -374,6 +376,7 @@ struct ui_tab *ui_userlist_create(struct nmdc_hub *hub) {
   tab->name = g_strdup_printf("@%s", hub->tab->name+1);
   tab->type = UIT_USERLIST;
   tab->hub = hub;
+  tab->user_opfirst = TRUE;
   tab->users = g_sequence_new(NULL);
   // populate the list
   // g_sequence_sort() uses insertion sort? in that case it is faster to insert
@@ -536,6 +539,10 @@ static void ui_userlist_key(struct ui_tab *tab, guint64 key) {
       tab->user_sort_share = tab->user_reverse = FALSE;
     sort = TRUE;
     break;
+  case INPT_CHAR('o'): // o (toggle sorting OPs before others)
+    tab->user_opfirst = !tab->user_opfirst;
+    sort = TRUE;
+    break;
   case INPT_CHAR('d'): // d (toggle description visibility)
     tab->user_hide_desc = !tab->user_hide_desc;
     break;
@@ -569,8 +576,8 @@ static void ui_userlist_key(struct ui_tab *tab, guint64 key) {
     g_sequence_sort(tab->users, ui_userlist_sort_func, tab);
     if(selisbegin)
       tab->user_sel = g_sequence_get_begin_iter(tab->users);
-    ui_msgf(UIMSG_TAB, "Ordering by %s (%s)", tab->user_sort_share ? "share size" : "nick",
-      tab->user_reverse ? "descending" : "ascending");
+    ui_msgf(UIMSG_TAB, "Ordering by %s (%s%s)", tab->user_sort_share ? "share size" : "user name",
+      tab->user_reverse ? "descending" : "ascending", tab->user_opfirst ? ", OPs first" : "");
   }
 }
 

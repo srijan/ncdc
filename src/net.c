@@ -234,7 +234,7 @@ static gboolean handle_input(GSocket *sock, GIOCondition cond, gpointer dat) {
   }
 
   GError *err = NULL;
-  gssize read = g_socket_receive(n->sock, n->in->str + n->in->len, n->in->allocated_len - n->in->len, NULL, &err);
+  gssize read = g_socket_receive(n->sock, n->in->str + n->in->len, n->in->allocated_len - n->in->len - 1, NULL, &err);
   handle_ioerr(n, n->in_src, read, err, NETERR_RECV);
   ratecalc_add(&net_in, read);
   n->in->len += read;

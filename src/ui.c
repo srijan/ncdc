@@ -283,7 +283,8 @@ static void ui_hub_key(struct ui_tab *tab, guint64 key) {
       ui_textinput_key(ui_global_textinput, key, &str) && str) {
     cmd_handle(str);
     g_free(str);
-  }
+  } else if(key == INPT_ALT('u'))
+    ui_hub_userlist_open(tab);
 }
 
 
@@ -332,6 +333,16 @@ void ui_hub_msg(struct ui_tab *tab, struct nmdc_user *user, const char *msg) {
     ui_tab_open(t);
   }
   ui_msg_msg(t, msg);
+}
+
+
+void ui_hub_userlist_open(struct ui_tab *tab) {
+  if(tab->userlist_tab)
+    ui_tab_cur = g_list_find(ui_tabs, tab->userlist_tab);
+  else {
+    tab->userlist_tab = ui_userlist_create(tab->hub);
+    ui_tab_open(tab->userlist_tab);
+  }
 }
 
 

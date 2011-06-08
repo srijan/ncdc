@@ -657,12 +657,8 @@ static void c_userlist(char *args) {
     ui_logwindow_add(tab->log, "This command does not accept any arguments.");
   else if(tab->type != UIT_HUB)
     ui_logwindow_add(tab->log, "This command can only be used on hub tabs.");
-  else if(tab->userlist_tab)
-    ui_tab_cur = g_list_find(ui_tabs, tab->userlist_tab);
-  else {
-    tab->userlist_tab = ui_userlist_create(tab->hub);
-    ui_tab_open(tab->userlist_tab);
-  }
+  else
+    ui_hub_userlist_open(tab);
 }
 
 
@@ -925,7 +921,7 @@ static struct cmd cmds[] = {
   },
   { "userlist", c_userlist, NULL,
     NULL, "Open the user list.",
-    "" // TODO?
+    "Opens the user list of the currently selected hub. Can also be accessed using Alt+u."
   },
   { "version", c_version, NULL,
     NULL, "Display version information.",

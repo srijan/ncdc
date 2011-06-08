@@ -553,6 +553,7 @@ static void c_open_sug(char *args, char **sug) {
   for(group=groups; i<20 && *group; group++)
     if(**group == '#' && (strncmp(args, *group, len) == 0 || strncmp(args, *group+1, len) == 0) && strlen(*group) != len)
       sug[i++] = g_strdup(*group);
+  g_strfreev(groups);
 }
 
 

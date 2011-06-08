@@ -432,8 +432,9 @@ struct fl_hash_args {
 // adding/removing items from the files-to-be-hashed queue
 #define fl_hash_queue_append(fl) do {\
     gboolean start = !g_hash_table_size(fl_hash_queue);\
+    if(start || !g_hash_table_lookup(fl_hash_queue, fl))\
+      fl_hash_queue_size += fl->size;\
     g_hash_table_insert(fl_hash_queue, fl, (void *)1);\
-    fl_hash_queue_size += fl->size;\
     if(start)\
       fl_hash_process();\
   } while(0)

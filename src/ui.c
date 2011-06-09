@@ -736,15 +736,15 @@ static void ui_draw_status() {
   if(fl_refresh_queue && fl_refresh_queue->head)
     mvaddstr(winrows-1, 0, "[Refreshing share]");
   else if(fl_hash_queue && g_hash_table_size(fl_hash_queue)) {
-    sprintf(buf, "[Hashing: %d / %s / %.2f MiB/s]",
-      g_hash_table_size(fl_hash_queue), str_formatsize(fl_hash_queue_size), ((float)ratecalc_get(&fl_hash_rate)/(1024*1024)));
+    g_snprintf(buf, 100, "[Hashing: %d / %s / %.2f MiB/s]",
+      g_hash_table_size(fl_hash_queue), str_formatsize(fl_hash_queue_size), ((float)ratecalc_get(&fl_hash_rate))/(1024.0f*1024.0f));
     mvaddstr(winrows-1, 0, buf);
   }
   // Note: Only upload is displayed, since we can't download yet anyway.
   // And protocol overhead isn't very significant.
-  sprintf(buf, "[U:%6.0f KiB/s]", ((float)ratecalc_get(&net_out))/1024.0f);
+  g_snprintf(buf, 100, "[U:%6d KiB/s]", ratecalc_get(&net_out)/1024);
   mvaddstr(winrows-1, wincols-28, buf);
-  sprintf(buf, "[S:%3d/%3d]", nmdc_cc_slots_in_use(), conf_slots());
+  g_snprintf(buf, 100, "[S:%3d/%3d]", nmdc_cc_slots_in_use(), conf_slots());
   mvaddstr(winrows-1, wincols-11, buf);
 
   ui_msg_updated = FALSE;

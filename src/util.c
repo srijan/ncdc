@@ -289,7 +289,7 @@ char *str_formatsize(guint64 size) {
   else if(r < 1023e9f) { c = 'G'; r/=1073741824.0f; }
   else if(r < 1023e12f){ c = 'T'; r/=1099511627776.0f; }
   else                 { c = 'P'; r/=1125899906842624.0f; }
-  sprintf(dat, "%6.2f %c%cB", r, c, c == ' ' ? ' ' : 'i');
+  g_snprintf(dat, 11, "%6.2f %c%cB", r, c, c == ' ' ? ' ' : 'i');
   return dat;
 }
 

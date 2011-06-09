@@ -394,7 +394,7 @@ char *net_remoteaddr(struct net *n) {
   GInetSocketAddress *addr = G_INET_SOCKET_ADDRESS(g_socket_connection_get_remote_address(n->conn, NULL));
   g_assert(addr);
   char *ip = g_inet_address_to_string(g_inet_socket_address_get_address(addr));
-  sprintf(a, "%s:%d", ip, g_inet_socket_address_get_port(addr));
+  g_snprintf(a, 100, "%s:%d", ip, g_inet_socket_address_get_port(addr));
   g_free(ip);
   g_object_unref(addr);
   return a;

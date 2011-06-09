@@ -215,8 +215,6 @@ void nmdc_user_suggest(struct nmdc_hub *hub, char *str, char **sug) {
 }
 
 
-#define ASSIGN_OR_FREE(lval, rval) do { if(rval[0]) lval = rval; else { lval =  NULL; g_free(rval); } } while(0)
-
 static void user_myinfo(struct nmdc_hub *hub, struct nmdc_user *u, const char *str) {
   static GRegex *nfo_reg = NULL;
   static GRegex *nfo_notag = NULL;
@@ -242,12 +240,15 @@ static void user_myinfo(struct nmdc_hub *hub, struct nmdc_user *u, const char *s
     //char *flag = g_match_info_fetch(nfo, 4); // currently ignored
     char *mail = g_match_info_fetch(nfo, 5);
     char *share = g_match_info_fetch(nfo, 6);
-    u->desc = desc[0] ? nmdc_unescape_and_decode(hub, desc) : NULL;
-    g_free(desc);
-    ASSIGN_OR_FREE(u->tag, tag);
-    ASSIGN_OR_FREE(u->conn, conn);
-    ASSIGN_OR_FREE(u->mail, mail);
     u->sharesize = g_ascii_strtoull(share, NULL, 10);
+    u->desc = desc[0] ? nmdc_unescape_and_decode(hub, desc) : NULL;
+    u->tag  = tag[0]  ? nmdc_unescape_and_decode(hub, tag)  : NULL;
+    u->conn = conn[0] ? nmdc_unescape_and_decode(hub, conn) : NULL;
+    u->mail = mail[0] ? nmdc_unescape_and_decode(hub, mail) : NULL;
+    g_free(desc);
+    g_free(tag);
+    g_free(conn);
+    g_free(mail);
     g_free(share);
     u->hasinfo = TRUE;
     ui_hub_userchange(hub->tab, UIHUB_UC_NFO, u);

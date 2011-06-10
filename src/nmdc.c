@@ -691,6 +691,11 @@ void nmdc_connect(struct nmdc_hub *hub) {
   char *addr = conf_hub_get(string, hub->tab->name, "hubaddr");
   g_assert(addr);
 
+  if(hub->reconnect_timer) {
+    g_source_remove(hub->reconnect_timer);
+    hub->reconnect_timer = 0;
+  }
+
   ui_logwindow_printf(hub->tab->log, "Connecting to %s...", addr);
   hub->state = HUBS_CONNECTING;
   net_connect(hub->net, addr, 411, handle_connect);

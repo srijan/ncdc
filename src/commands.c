@@ -608,9 +608,12 @@ static void c_disconnect(char *args) {
     ui_logwindow_add(tab->log, "This command does not accept any arguments.");
   else if(tab->type != UIT_HUB)
     ui_logwindow_add(tab->log, "This command can only be used on hub tabs.");
-  else if(tab->hub->state == HUBS_IDLE)
+  else if(tab->hub->state == HUBS_IDLE && !tab->hub->reconnect_timer)
     ui_logwindow_add(tab->log, "Not connected.");
-  else
+  else if(tab->hub->reconnect_timer) {
+    g_source_remove(tab->hub->reconnect_timer);
+    tab->hub->reconnect_timer = 0;
+  } else
     nmdc_disconnect(tab->hub, FALSE);
 }
 

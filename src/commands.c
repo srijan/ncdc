@@ -777,7 +777,7 @@ static void c_refresh(char *args) {
 }
 
 
-static void nick_sug(char *args, char **sug) {
+static void nick_sug(char *args, char **sug, gboolean append) {
   struct ui_tab *t = ui_tab_cur->data;
   if(!t->hub)
     return;
@@ -786,9 +786,29 @@ static void nick_sug(char *args, char **sug) {
   while(nick > args && *(nick-1) != ' ' && *(nick-1) != ',' && *(nick-1) != ':')
     nick--;
   nmdc_user_suggest(t->hub, nick, sug);
+  // optionally append ": " after the nick
+  if(append && nick == args) {
+    char **n;
+    for(n=sug; *n; n++) {
+      char *tmp = *n;
+      *n = g_strdup_printf("%s: ", tmp);
+      g_free(tmp);
+    }
+  }
+  // prefix
   *nick = 0;
   if(*args)
     strv_prefix(sug, args, NULL);
+}
+
+
+static void c_say_sug(char *args, char **sug) {
+  nick_sug(args, sug, TRUE);
+}
+
+
+static void c_msg_sug(char *args, char **sug) {
+  nick_sug(args, sug, FALSE);
 }
 
 
@@ -832,7 +852,7 @@ static struct cmd cmds[] = {
     "Use /help without arguments to list all the available commands.\n"
     "Use /help <command> to get information about a particular command."
   },
-  { "msg", c_msg, nick_sug,
+  { "msg", c_msg, c_msg_sug,
     "<user> [<message>]", "Send a private message.",
     "Send a private message to a user on the currently opened hub.\n"
     "When no message is given, the tab will be opened but no message will be sent."
@@ -858,7 +878,7 @@ static struct cmd cmds[] = {
     " Otherwise only the specified directory will be refreshed.\n\n"
     "The path argument can be either an absolute filesystem path or a virtual path within your share."
   },
-  { "say", c_say, nick_sug,
+  { "say", c_say, c_say_sug,
     "<message>", "Send a chat message.",
     "You normally don't have to use the /say command explicitly, any command not staring"
     " with '/' will automatically imply `/say <command>'. For example, typing `hello.'"

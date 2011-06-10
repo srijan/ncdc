@@ -384,6 +384,17 @@ static void handle_connect(GObject *src, GAsyncResult *res, gpointer dat) {
 void net_connect(struct net *n, const char *addr, unsigned short defport, void (*cb)(struct net *)) {
   n->cb_con = cb;
 
+  // From g_socket_client_connect_to_host() documentation:
+  //   "In general, host_and_port is expected to be provided by the user"
+  // But it doesn't properly give an error when the URL contains a space.
+  if(index(addr, ' ')) {
+    GError *err = NULL;
+    g_set_error_literal(&err, 1, G_IO_ERROR_INVALID_ARGUMENT, "Address may not contain a space.");
+    n->cb_err(n, NETERR_CONN, err);
+    g_error_free(err);
+    return;
+  }
+
   GSocketClient *sc = g_socket_client_new();
   // set a timeout on the connect, regardless of the value of keepalive
 #if GLIB_CHECK_VERSION(2, 26, 0)

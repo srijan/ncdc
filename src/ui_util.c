@@ -114,16 +114,6 @@ void ui_logwindow_add(struct ui_logwindow *lw, const char *msg) {
 }
 
 
-void ui_logwindow_printf(struct ui_logwindow *lw, const char *fmt, ...) {
-  va_list va;
-  va_start(va, fmt);
-  char *str = g_strdup_vprintf(fmt, va);
-  va_end(va);
-  ui_logwindow_add(lw, str);
-  g_free(str);
-}
-
-
 void ui_logwindow_clear(struct ui_logwindow *lw) {
   int i;
   for(i=0; i<LOGWIN_BUF; i++) {

@@ -61,10 +61,10 @@ static void get_string(char *group, char *key) {
   GError *err = NULL;
   char *str = g_key_file_get_string(conf_file, group, key, &err);
   if(!str) {
-    ui_logwindow_printf(tab->log, "%s.%s is not set.", group, key);
+    ui_mf(NULL, 0, "%s.%s is not set.", group, key);
     g_error_free(err);
   } else {
-    ui_logwindow_printf(tab->log, "%s.%s = %s", group, key, str);
+    ui_mf(NULL, 0, "%s.%s = %s", group, key, str);
     g_free(str);
   }
 }
@@ -74,10 +74,10 @@ static void get_bool(char *group, char *key) {
   GError *err = NULL;
   gboolean val = g_key_file_get_boolean(conf_file, group, key, &err);
   if(err) {
-    ui_logwindow_printf(tab->log, "%s.%s is not set.", group, key);
+    ui_mf(NULL, 0, "%s.%s is not set.", group, key);
     g_error_free(err);
   } else
-    ui_logwindow_printf(tab->log, "%s.%s = %s", group, key, val ? "true" : "false");
+    ui_mf(NULL, 0, "%s.%s = %s", group, key, val ? "true" : "false");
 }
 
 
@@ -85,30 +85,30 @@ static void get_int(char *group, char *key) {
   GError *err = NULL;
   int val = g_key_file_get_integer(conf_file, group, key, &err);
   if(err) {
-    ui_logwindow_printf(tab->log, "%s.%s is not set.", group, key);
+    ui_mf(NULL, 0, "%s.%s is not set.", group, key);
     g_error_free(err);
   } else
-    ui_logwindow_printf(tab->log, "%s.%s = %d", group, key, val);
+    ui_mf(NULL, 0, "%s.%s = %d", group, key, val);
 }
 
 
 #define UNSET(group, key) do {\
     g_key_file_remove_key(conf_file, group, key, NULL);\
-    ui_logwindow_printf(tab->log, "%s.%s reset.", group, key);\
+    ui_mf(NULL, 0, "%s.%s reset.", group, key);\
   } while(0)
 
 
 static void set_nick(char *group, char *key, char *val) {
   if(!val) {
     if(strcmp(group, "global") == 0) {
-      ui_logwindow_add(tab->log, "global.nick may not be unset.");
+      ui_m(NULL, 0, "global.nick may not be unset.");
       return;
     }
     UNSET(group, key);
     return;
   }
   if(strlen(val) > 32) {
-    ui_logwindow_add(tab->log, "Too long nick name.");
+    ui_m(NULL, 0, "Too long nick name.");
     return;
   }
   int i;
@@ -116,12 +116,12 @@ static void set_nick(char *group, char *key, char *val) {
     if(val[i] == '$' || val[i] == '|' || val[i] == ' ' || val[i] == '<' || val[i] == '>')
       break;
   if(i >= 0) {
-    ui_logwindow_add(tab->log, "Invalid character in nick name.");
+    ui_m(NULL, 0, "Invalid character in nick name.");
     return;
   }
   g_key_file_set_string(conf_file, group, key, val);
   get_string(group, key);
-  ui_logwindow_add(tab->log, "Your new nick will be used for new hub connections.");
+  ui_m(NULL, 0, "Your new nick will be used for new hub connections.");
 }
 
 
@@ -154,10 +154,10 @@ static void set_encoding(char *group, char *key, char *val) {
     UNSET(group, key);
   else if(!str_convert_check(val, &err)) {
     if(err) {
-      ui_logwindow_printf(tab->log, "ERROR: Can't use that encoding: %s", err->message);
+      ui_mf(NULL, 0, "ERROR: Can't use that encoding: %s", err->message);
       g_error_free(err);
     } else {
-      ui_logwindow_add(tab->log, "ERROR: Invalid encoding.");
+      ui_m(NULL, 0, "ERROR: Invalid encoding.");
     }
   } else {
     g_key_file_set_string(conf_file, group, key, val);
@@ -212,7 +212,7 @@ static void set_bool_sug(char *val, char **sug) {
 
 static void set_autoconnect(char *group, char *key, char *val) {
   if(strcmp(group, "global") == 0 || group[0] != '#')
-    ui_logwindow_add(tab->log, "ERROR: autoconnect can only be used as hub setting.");
+    ui_m(NULL, 0, "ERROR: autoconnect can only be used as hub setting.");
   else
     set_bool(group, key, val);
 }
@@ -224,9 +224,9 @@ static void set_autorefresh(char *group, char *key, char *val) {
   else {
     long v = strtol(val, NULL, 10);
     if((!v && errno == EINVAL) || v < INT_MIN || v > INT_MAX || v < 0)
-      ui_logwindow_add(tab->log, "Invalid number.");
+      ui_m(NULL, 0, "Invalid number.");
     else if(v > 0 && v < 10)
-      ui_logwindow_add(tab->log, "Interval between automatic refreshes should be at least 10 minutes.");
+      ui_m(NULL, 0, "Interval between automatic refreshes should be at least 10 minutes.");
     else {
       g_key_file_set_integer(conf_file, group, key, v);
       get_int(group, key);
@@ -241,7 +241,7 @@ static void set_slots(char *group, char *key, char *val) {
   else {
     long v = strtol(val, NULL, 10);
     if((!v && errno == EINVAL) || v < INT_MIN || v > INT_MAX || v < 0)
-      ui_logwindow_add(tab->log, "Invalid number.");
+      ui_m(NULL, 0, "Invalid number.");
     else {
       g_key_file_set_integer(conf_file, group, key, v);
       get_int(group, key);
@@ -293,13 +293,13 @@ static gboolean parsesetting(char *name, char **group, char **key, struct settin
   // lookup key and validate or figure out group
   *s = getsetting(*key);
   if(!*s) {
-    ui_logwindow_printf(tab->log, "No configuration variable with the name '%s'.", *key);
+    ui_mf(NULL, 0, "No configuration variable with the name '%s'.", *key);
     return FALSE;
   }
   if(*group && (
       ((*s)->group && strcmp(*group, (*s)->group) != 0) ||
       (!(*s)->group && !g_key_file_has_group(conf_file, *group)))) {
-    ui_logwindow_add(tab->log, "Wrong configuration group.");
+    ui_m(NULL, 0, "Wrong configuration group.");
     return FALSE;
   }
   if(!*group)
@@ -316,14 +316,12 @@ static gboolean parsesetting(char *name, char **group, char **key, struct settin
 
 
 static void c_set(char *args) {
-  g_return_if_fail(tab->log);
-
   if(!args[0]) {
     struct setting *s;
-    ui_logwindow_add(tab->log, "");
+    ui_m(NULL, 0, "");
     for(s=settings; s->name; s++)
       c_set(s->name);
-    ui_logwindow_add(tab->log, "");
+    ui_m(NULL, 0, "");
     return;
   }
 
@@ -360,8 +358,6 @@ static void c_set(char *args) {
 
 
 static void c_unset(char *args) {
-  g_return_if_fail(tab->log);
-
   if(!args[0]) {
     c_set("");
     return;
@@ -428,39 +424,37 @@ static void c_quit(char *args) {
 
 
 static void c_say(char *args) {
-  g_return_if_fail(tab->log);
   if(tab->type != UIT_HUB && tab->type != UIT_MSG)
-    ui_logwindow_add(tab->log, "This command can only be used on hub and message tabs.");
+    ui_m(NULL, 0, "This command can only be used on hub and message tabs.");
   else if(!tab->hub->nick_valid)
-    ui_logwindow_add(tab->log, "Not connected or logged in yet.");
+    ui_m(NULL, 0, "Not connected or logged in yet.");
   else if(!args[0])
-    ui_logwindow_add(tab->log, "Message empty.");
+    ui_m(NULL, 0, "Message empty.");
   else if(tab->type == UIT_HUB)
     nmdc_say(tab->hub, args);
   else if(!tab->msg_user)
-    ui_logwindow_add(tab->log, "User is not online.");
+    ui_m(NULL, 0, "User is not online.");
   else
     nmdc_msg(tab->hub, tab->msg_user, args);
 }
 
 
 static void c_msg(char *args) {
-  g_return_if_fail(tab->log);
   char *sep = strchr(args, ' ');
   if(sep) {
     *sep = 0;
     while(*(++sep) == ' ');
   }
   if(tab->type != UIT_HUB && tab->type != UIT_MSG)
-    ui_logwindow_add(tab->log, "This command can only be used on hub and message tabs.");
+    ui_m(NULL, 0, "This command can only be used on hub and message tabs.");
   else if(!tab->hub->nick_valid)
-    ui_logwindow_add(tab->log, "Not connected or logged in yet.");
+    ui_m(NULL, 0, "Not connected or logged in yet.");
   else if(!args[0])
-    ui_logwindow_add(tab->log, "No user specified. See `/help msg' for more information.");
+    ui_m(NULL, 0, "No user specified. See `/help msg' for more information.");
   else {
     struct nmdc_user *u = nmdc_user_get(tab->hub, args);
     if(!u)
-      ui_logwindow_add(tab->log, "No user found with that name. Note that usernames are case-sensitive.");
+      ui_m(NULL, 0, "No user found with that name. Note that usernames are case-sensitive.");
     else {
       // get or open tab and make sure it's selected
       struct ui_tab *t = ui_hub_getmsg(tab, u);
@@ -478,29 +472,21 @@ static void c_msg(char *args) {
 
 
 static void c_help(char *args) {
-  g_return_if_fail(tab->log);
   struct cmd *c;
   // list available commands
   if(!args[0]) {
-    ui_logwindow_add(tab->log, "");
-    ui_logwindow_add(tab->log, "Available commands:");
+    ui_m(NULL, 0, "\nAvailable commands:");
     for(c=cmds; c->f; c++)
-      ui_logwindow_printf(tab->log, " /%s - %s", c->name, c->sum);
-    ui_logwindow_add(tab->log, "");
+      ui_mf(NULL, 0, " /%s - %s", c->name, c->sum);
+    ui_m(NULL, 0, "");
 
   // list information on a particular command
   } else {
     c = getcmd(args);
-    ui_logwindow_add(tab->log, "");
     if(!c)
-      ui_logwindow_printf(tab->log, "Unknown command '%s'.", args);
-    else {
-      ui_logwindow_printf(tab->log, "Usage: /%s %s", c->name, c->args ? c->args : "");
-      ui_logwindow_printf(tab->log, "  %s", c->sum);
-      ui_logwindow_add(tab->log, "");
-      ui_logwindow_add(tab->log, c->desc);
-    }
-    ui_logwindow_add(tab->log, "");
+      ui_mf(NULL, 0, "\nUnknown command '%s'.", args);
+    else
+      ui_mf(NULL, 0, "\nUsage: /%s %s\n  %s\n%s\n", c->name, c->args ? c->args : "", c->sum, c->desc);
   }
 }
 
@@ -515,9 +501,8 @@ static void c_help_sug(char *args, char **sug) {
 
 
 static void c_open(char *args) {
-  g_return_if_fail(tab->log);
   if(!args[0]) {
-    ui_logwindow_add(tab->log, "No hub name given.");
+    ui_m(NULL, 0, "No hub name given.");
     return;
   }
   char *tmp;
@@ -529,7 +514,7 @@ static void c_open(char *args) {
     if(++len && !g_unichar_isalnum(g_utf8_get_char(tmp)))
       break;
   if(*tmp || !len || len > 25)
-    ui_logwindow_add(tab->log, "Sorry, tab name may only consist of alphanumeric characters, and must not exceed 25 characters.");
+    ui_m(NULL, 0, "Sorry, tab name may only consist of alphanumeric characters, and must not exceed 25 characters.");
   else {
     for(n=ui_tabs; n; n=n->next) {
       tmp = ((struct ui_tab *)n->data)->name;
@@ -541,7 +526,7 @@ static void c_open(char *args) {
     else if(n != ui_tab_cur)
       ui_tab_cur = n;
     else
-      ui_logwindow_add(tab->log, "Tab already selected.");
+      ui_m(NULL, 0, "Tab already selected.");
   }
 }
 
@@ -558,11 +543,10 @@ static void c_open_sug(char *args, char **sug) {
 
 
 static void c_connect(char *args) {
-  g_return_if_fail(tab->log);
   if(tab->type != UIT_HUB)
-    ui_logwindow_add(tab->log, "This command can only be used on hub tabs.");
+    ui_m(NULL, 0, "This command can only be used on hub tabs.");
   else if(tab->hub->state != HUBS_IDLE)
-    ui_logwindow_add(tab->log, "Already connected (or connecting). You may want to /disconnect first.");
+    ui_m(NULL, 0, "Already connected (or connecting). You may want to /disconnect first.");
   else {
     if(args[0]) {
       if(strncmp(args, "dchub://", 8) == 0)
@@ -573,7 +557,7 @@ static void c_connect(char *args) {
       conf_save();
     }
     if(!g_key_file_has_key(conf_file, tab->name, "hubaddr", NULL))
-      ui_logwindow_add(tab->log, "No hub address configured. Use '/connect <address>' to do so.");
+      ui_m(NULL, 0, "No hub address configured. Use '/connect <address>' to do so.");
     else
       nmdc_connect(tab->hub);
   }
@@ -603,13 +587,12 @@ static void c_connect_sug(char *args, char **sug) {
 
 
 static void c_disconnect(char *args) {
-  g_return_if_fail(tab->log);
   if(args[0])
-    ui_logwindow_add(tab->log, "This command does not accept any arguments.");
+    ui_m(NULL, 0, "This command does not accept any arguments.");
   else if(tab->type != UIT_HUB)
-    ui_logwindow_add(tab->log, "This command can only be used on hub tabs.");
+    ui_m(NULL, 0, "This command can only be used on hub tabs.");
   else if(tab->hub->state == HUBS_IDLE && !tab->hub->reconnect_timer)
-    ui_logwindow_add(tab->log, "Not connected.");
+    ui_m(NULL, 0, "Not connected.");
   else if(tab->hub->reconnect_timer) {
     g_source_remove(tab->hub->reconnect_timer);
     tab->hub->reconnect_timer = 0;
@@ -619,11 +602,10 @@ static void c_disconnect(char *args) {
 
 
 static void c_reconnect(char *args) {
-  g_return_if_fail(tab->log);
   if(args[0])
-    ui_logwindow_add(tab->log, "This command does not accept any arguments.");
+    ui_m(NULL, 0, "This command does not accept any arguments.");
   else if(tab->type != UIT_HUB)
-    ui_logwindow_add(tab->log, "This command can only be used on hub tabs.");
+    ui_m(NULL, 0, "This command can only be used on hub tabs.");
   else {
     if(tab->hub->state != HUBS_IDLE)
       nmdc_disconnect(tab->hub, FALSE);
@@ -634,9 +616,9 @@ static void c_reconnect(char *args) {
 
 static void c_close(char *args) {
   if(args[0])
-    ui_msg(UIMSG_TAB, "This command does not accept any arguments.");
+    ui_m(NULL, 0, "This command does not accept any arguments.");
   else if(tab->type == UIT_MAIN)
-    ui_msg(UIMSG_TAB, "Main tab cannot be closed.");
+    ui_m(NULL, 0, "Main tab cannot be closed.");
   else if(tab->type == UIT_HUB)
     ui_hub_close(tab);
   else if(tab->type == UIT_USERLIST)
@@ -648,18 +630,17 @@ static void c_close(char *args) {
 
 static void c_clear(char *args) {
   if(args[0])
-    ui_msg(UIMSG_TAB, "This command does not accept any arguments.");
+    ui_m(NULL, 0, "This command does not accept any arguments.");
   else if(tab->log)
     ui_logwindow_clear(tab->log);
 }
 
 
 static void c_userlist(char *args) {
-  g_return_if_fail(tab->log);
   if(args[0])
-    ui_logwindow_add(tab->log, "This command does not accept any arguments.");
+    ui_m(NULL, 0, "This command does not accept any arguments.");
   else if(tab->type != UIT_HUB)
-    ui_logwindow_add(tab->log, "This command can only be used on hub tabs.");
+    ui_m(NULL, 0, "This command can only be used on hub tabs.");
   else
     ui_hub_userlist_open(tab);
 }
@@ -669,17 +650,17 @@ static void listshares() {
   gsize len;
   char **dirs = g_key_file_get_keys(conf_file, "share", &len, NULL);
   if(!dirs || len == 0)
-    ui_logwindow_add(tab->log, "Nothing shared.");
+    ui_m(NULL, 0, "Nothing shared.");
   else {
-    ui_logwindow_add(tab->log, "");
+    ui_m(NULL, 0, "");
     char **cur;
     for(cur=dirs; *cur; cur++) {
       char *d = g_key_file_get_string(conf_file, "share", *cur, NULL);
       struct fl_list *fl = fl_list_file(fl_local_list, *cur);
-      ui_logwindow_printf(tab->log, " /%s -> %s (%s)", *cur, d, str_formatsize(fl->size));
+      ui_mf(NULL, 0, " /%s -> %s (%s)", *cur, d, str_formatsize(fl->size));
       g_free(d);
     }
-    ui_logwindow_add(tab->log, "");
+    ui_m(NULL, 0, "");
   }
   if(dirs)
     g_strfreev(dirs);
@@ -687,7 +668,6 @@ static void listshares() {
 
 
 static void c_share(char *args) {
-  g_return_if_fail(tab->log);
   if(!args[0]) {
     listshares();
     return;
@@ -696,15 +676,15 @@ static void c_share(char *args) {
   char *first, *second;
   str_arg2_split(args, &first, &second);
   if(!first || !first[0] || !second || !second[0])
-    ui_logwindow_add(tab->log, "Error parsing arguments. See \"/help share\" for details.");
+    ui_m(NULL, 0, "Error parsing arguments. See \"/help share\" for details.");
   else if(g_key_file_has_key(conf_file, "share", first, NULL))
-    ui_logwindow_add(tab->log, "You have already shared a directory with that name.");
+    ui_m(NULL, 0, "You have already shared a directory with that name.");
   else {
     char *path = path_expand(second);
     if(!path)
-      ui_logwindow_printf(tab->log, "Error obtaining absolute path: %s", g_strerror(errno));
+      ui_mf(NULL, 0, "Error obtaining absolute path: %s", g_strerror(errno));
     else if(!g_file_test(path, G_FILE_TEST_IS_DIR))
-      ui_logwindow_add(tab->log, "Not a directory.");
+      ui_m(NULL, 0, "Not a directory.");
     else {
       // Check whether it (or a subdirectory) is already shared
       char **dirs = g_key_file_get_keys(conf_file, "share", NULL, NULL);
@@ -718,12 +698,12 @@ static void c_share(char *args) {
         g_free(d);
       }
       if(dirs && *dir)
-        ui_logwindow_printf(tab->log, "Directory already (partly) shared in /%s", *dir);
+        ui_mf(NULL, 0, "Directory already (partly) shared in /%s", *dir);
       else {
         g_key_file_set_string(conf_file, "share", first, path);
         conf_save();
         fl_share(first);
-        ui_logwindow_printf(tab->log, "Added to share: /%s -> %s", first, path);
+        ui_mf(NULL, 0, "Added to share: /%s -> %s", first, path);
       }
       if(dirs)
         g_strfreev(dirs);
@@ -749,12 +729,11 @@ static void c_share_sug(char *args, char **sug) {
 
 
 static void c_unshare(char *args) {
-  g_return_if_fail(tab->log);
   if(!args[0])
     listshares();
   // otherwise we may crash
   else if(fl_refresh_queue && fl_refresh_queue->head)
-    ui_logwindow_add(tab->log, "Sorry, can't remove directories from the share while refreshing.");
+    ui_m(NULL, 0, "Sorry, can't remove directories from the share while refreshing.");
   else {
     while(args[0] == '/')
       args++;
@@ -763,14 +742,14 @@ static void c_unshare(char *args) {
       g_key_file_remove_group(conf_file, "share", NULL);
       conf_save();
       fl_unshare(NULL);
-      ui_logwindow_add(tab->log, "Removed all directories from share.");
+      ui_m(NULL, 0, "Removed all directories from share.");
     } else if(!path)
-      ui_logwindow_add(tab->log, "No shared directory with that name.");
+      ui_m(NULL, 0, "No shared directory with that name.");
     else {
       g_key_file_remove_key(conf_file, "share", args, NULL);
       conf_save();
       fl_unshare(args);
-      ui_logwindow_printf(tab->log, "Directory /%s (%s) removed from share.", args, path);
+      ui_mf(NULL, 0, "Directory /%s (%s) removed from share.", args, path);
     }
     g_free(path);
   }
@@ -790,10 +769,9 @@ static void c_unshare_sug(char *args, char **sug) {
 
 
 static void c_refresh(char *args) {
-  g_return_if_fail(tab->log);
   struct fl_list *n = fl_local_from_path(args);
   if(!n)
-    ui_msgf(UIMSG_TAB, "Directory `%s' not found.", args);
+    ui_mf(NULL, 0, "Directory `%s' not found.", args);
   else
     fl_refresh(n);
 }
@@ -815,14 +793,10 @@ static void nick_sug(char *args, char **sug) {
 
 
 static void c_version(char *args) {
-  g_return_if_fail(tab->log);
   if(args[0])
-    ui_logwindow_add(tab->log, "This command does not accept any arguments.");
-  else {
-    ui_logwindow_add(tab->log, "");
-    ui_logwindow_add(tab->log, ncdc_version());
-    ui_logwindow_add(tab->log, "");
-  }
+    ui_m(NULL, 0, "This command does not accept any arguments.");
+  else
+    ui_mf(NULL, 0, "\n%s\n", ncdc_version());
 }
 
 
@@ -944,8 +918,7 @@ void cmd_handle(char *ostr) {
   }
 
   // the current opened tab is where this command came from, and where the
-  // "replies" should be sent back to. (Some commands require this tab to have
-  // a logwindow, others report to ui_msg())
+  // "replies" should be sent back to.
   tab = ui_tab_cur->data;
 
   // extract the command from the string
@@ -968,7 +941,7 @@ void cmd_handle(char *ostr) {
   if(c)
     c->f(args);
   else
-    ui_logwindow_printf(tab->log, "Unknown command '%s'.", cmd);
+    ui_mf(NULL, 0, "Unknown command '%s'.", cmd);
 
   g_free(str);
 }

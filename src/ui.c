@@ -85,8 +85,8 @@ static struct ui_tab *ui_main_create() {
   ui_main->name = "main";
   ui_main->log = ui_logwindow_create("main");
 
-  ui_logwindow_printf(ui_main->log, "Welcome to ncdc %s!", VERSION);
-  ui_logwindow_printf(ui_main->log, "Using working directory: %s", conf_dir);
+  ui_mf(ui_main, 0, "Welcome to ncdc %s!", VERSION);
+  ui_mf(ui_main, 0, "Using working directory: %s", conf_dir);
 
   return ui_main;
 }
@@ -129,7 +129,7 @@ struct ui_tab *ui_msg_create(struct nmdc_hub *hub, struct nmdc_user *user) {
   tab->name = g_strdup_printf("~%s", user->name);
   tab->log = ui_logwindow_create(tab->name);
 
-  ui_logwindow_printf(tab->log, "Chatting with %s on %s.", user->name, hub->tab->name);
+  ui_mf(tab, 0, "Chatting with %s on %s.", user->name, hub->tab->name);
 
   return tab;
 }
@@ -171,16 +171,16 @@ static void ui_msg_key(struct ui_tab *tab, guint64 key) {
 
 
 static void ui_msg_msg(struct ui_tab *tab, const char *msg) {
-  ui_logwindow_add(tab->log, msg);
+  ui_m(tab, 0, msg);
 }
 
 
 static void ui_msg_joinquit(struct ui_tab *tab, gboolean join, struct nmdc_user *user) {
   if(join) {
-    ui_logwindow_printf(tab->log, "%s has joined.", user->name);
+    ui_mf(tab, 0, "%s has joined.", user->name);
     tab->msg_user = user;
   } else {
-    ui_logwindow_printf(tab->log, "%s has quit.", user->name);
+    ui_mf(tab, 0, "%s has quit.", user->name);
     tab->msg_user = NULL;
   }
 }
@@ -320,9 +320,9 @@ void ui_hub_userchange(struct ui_tab *tab, int change, struct nmdc_user *user) {
     user->isjoined = TRUE;
     if(log && tab->hub->joincomplete
         && (!tab->hub->nick_valid || strcmp(tab->hub->nick_hub, user->name_hub) != 0))
-      ui_logwindow_printf(tab->log, "%s has joined.", user->name);
+      ui_mf(tab, 0, "%s has joined.", user->name);
   } else if(change == UIHUB_UC_QUIT && log)
-    ui_logwindow_printf(tab->log, "%s has quit.", user->name);
+    ui_mf(tab, 0, "%s has quit.", user->name);
 }
 
 
@@ -565,7 +565,7 @@ static void ui_userlist_key(struct ui_tab *tab, guint64 key) {
       } else
         ui_tab_cur = g_list_find(ui_tabs, t);
     } else
-      ui_msg(UIMSG_TAB, "No user selected.");
+      ui_m(NULL, 0, "No user selected.");
     break;
   }
 
@@ -576,7 +576,7 @@ static void ui_userlist_key(struct ui_tab *tab, guint64 key) {
     g_sequence_sort(tab->users, ui_userlist_sort_func, tab);
     if(selisbegin)
       tab->user_sel = g_sequence_get_begin_iter(tab->users);
-    ui_msgf(UIMSG_TAB, "Ordering by %s (%s%s)", tab->user_sort_share ? "share size" : "user name",
+    ui_mf(NULL, 0, "Ordering by %s (%s%s)", tab->user_sort_share ? "share size" : "user name",
       tab->user_reverse ? "descending" : "ascending", tab->user_opfirst ? ", OPs first" : "");
   }
 }
@@ -617,48 +617,66 @@ void ui_userlist_userchange(struct ui_tab *tab, int change, struct nmdc_user *us
 
 #if INTERFACE
 
-#define UIMSG_MAIN   0 // default, mutually exclusive with UIMSG_TAB
-#define UIMSG_TAB    1 // message should go to the current tab instead of main tab
-// message should be notified in status bar (implied automatically if UIMSG_TAB
-// is specified and current tab has no log window)
-#define UIMSG_NOTIFY 2
+// Message should also be notified in status bar (implied automatically if the
+// requested tab has no log window)
+#define UIM_NOTIFY 1
+// Ownership of the message string is passed to the message handling function.
+// (Which fill g_free() it after use)
+#define UIM_PASS   2
 
 #endif
 
 
-static char *ui_msg_text = NULL;
-static guint ui_msg_timer;
-static gboolean ui_msg_updated = FALSE;
+static char *ui_m_text = NULL;
+static guint ui_m_timer;
+static gboolean ui_m_updated = FALSE;
 
-struct ui_msg_dat { char *msg; int flags; };
+struct ui_m_dat {
+  char *msg;
+  struct ui_tab *tab;
+  int flags;
+};
 
 
-static gboolean ui_msg_timeout(gpointer data) {
-  ui_msg(0, NULL);
+static gboolean ui_m_timeout(gpointer data) {
+  if(ui_m_text) {
+    g_free(ui_m_text);
+    ui_m_text = NULL;
+    g_source_remove(ui_m_timer);
+    ui_m_updated = TRUE;
+  }
   return FALSE;
 }
 
 
-static gboolean ui_msg_mainthread(gpointer dat) {
-  struct ui_msg_dat *msg = dat;
-  struct ui_tab *tab = ui_tab_cur->data;
-  if(ui_msg_text) {
-    g_free(ui_msg_text);
-    ui_msg_text = NULL;
-    g_source_remove(ui_msg_timer);
-    ui_msg_updated = TRUE;
+static gboolean ui_m_mainthread(gpointer dat) {
+  struct ui_m_dat *msg = dat;
+  struct ui_tab *tab = msg->tab;
+  if(!tab)
+    tab = ui_tab_cur->data;
+  // It can happen that the tab is closed while we were waiting for this idle
+  // function to be called, so check whether it's still in the list.
+  // TODO: Performance can be improved by using a reference counter or so.
+  else if(!g_list_find(ui_tabs, tab))
+    goto ui_m_cleanup;
+
+  gboolean notify = (msg->flags & UIM_NOTIFY) || !tab->log;
+
+  if(notify && ui_m_text) {
+    g_free(ui_m_text);
+    ui_m_text = NULL;
+    g_source_remove(ui_m_timer);
+    ui_m_updated = TRUE;
   }
-  if(msg->msg) {
-    if(msg->flags & UIMSG_TAB && tab->log)
-      ui_logwindow_add(tab->log, msg->msg);
-    if(!(msg->flags & UIMSG_TAB))
-      ui_logwindow_add(ui_main->log, msg->msg);
-    if((msg->flags & UIMSG_NOTIFY && tab->type != UIT_MAIN) || (msg->flags & UIMSG_TAB && !tab->log)) {
-      ui_msg_text = g_strdup(msg->msg);
-      ui_msg_timer = g_timeout_add(3000, ui_msg_timeout, NULL);
-      ui_msg_updated = TRUE;
-    }
+  if(notify) {
+    ui_m_text = g_strdup(msg->msg);
+    ui_m_timer = g_timeout_add(3000, ui_m_timeout, NULL);
+    ui_m_updated = TRUE;
   }
+  if(tab->log)
+    ui_logwindow_add(tab->log, msg->msg);
+
+ui_m_cleanup:
   g_free(msg->msg);
   g_free(msg);
   return FALSE;
@@ -669,21 +687,21 @@ static gboolean ui_msg_mainthread(gpointer dat) {
 // the hub has no tab, in the "status bar". Calling this function with NULL
 // will reset the status bar message. Unlike everything else, this function can
 // be called from any thread. (It will queue an idle function, after all)
-void ui_msg(int flags, char *msg) {
-  struct ui_msg_dat *dat = g_new0(struct ui_msg_dat, 1);
-  dat->msg = g_strdup(msg);
+void ui_m(struct ui_tab *tab, int flags, const char *msg) {
+  struct ui_m_dat *dat = g_new0(struct ui_m_dat, 1);
+  dat->msg = (flags & UIM_PASS) ? (char *)msg : g_strdup(msg);
+  dat->tab = tab;
   dat->flags = flags;
-  g_idle_add_full(G_PRIORITY_HIGH_IDLE, ui_msg_mainthread, dat, NULL);
+  g_idle_add_full(G_PRIORITY_HIGH_IDLE, ui_m_mainthread, dat, NULL);
 }
 
 
-void ui_msgf(int flags, const char *fmt, ...) {
+// UIM_PASS shouldn't be used here (makes no sense).
+void ui_mf(struct ui_tab *tab, int flags, const char *fmt, ...) {
   va_list va;
   va_start(va, fmt);
-  char *str = g_strdup_vprintf(fmt, va);
+  ui_m(tab, flags | UIM_PASS, g_strdup_vprintf(fmt, va));
   va_end(va);
-  ui_msg(flags, str);
-  g_free(str);
 }
 
 
@@ -747,10 +765,10 @@ static void ui_draw_status() {
   g_snprintf(buf, 100, "[S:%3d/%3d]", nmdc_cc_slots_in_use(), conf_slots());
   mvaddstr(winrows-1, wincols-11, buf);
 
-  ui_msg_updated = FALSE;
-  if(ui_msg_text) {
-    mvaddstr(winrows-1, 0, ui_msg_text);
-    mvaddstr(winrows-1, str_columns(ui_msg_text), "   ");
+  ui_m_updated = FALSE;
+  if(ui_m_text) {
+    mvaddstr(winrows-1, 0, ui_m_text);
+    mvaddstr(winrows-1, str_columns(ui_m_text), "   ");
   }
 }
 
@@ -858,7 +876,7 @@ void ui_draw() {
 
 gboolean ui_checkupdate() {
   struct ui_tab *cur = ui_tab_cur->data;
-  return ui_msg_updated || ui_beep || (cur->log && cur->log->updated);
+  return ui_m_updated || ui_beep || (cur->log && cur->log->updated);
 }
 
 

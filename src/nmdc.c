@@ -458,7 +458,7 @@ static void handle_cmd(struct net *n, char *cmd) {
       // some hubs send our $Hello twice (like verlihub)
       // just ignore the second one
       if(!hub->nick_valid) {
-        ui_logwindow_add(hub->tab->log, "Nick validated.");
+        ui_m(hub->tab, 0, "Nick validated.");
         hub->nick_valid = TRUE;
         net_send(hub->net, "$Version 1,0091");
         nmdc_send_myinfo(hub);
@@ -569,7 +569,7 @@ static void handle_cmd(struct net *n, char *cmd) {
   if(g_regex_match(forcemove, cmd, 0, &nfo)) { // 1 = addr
     char *addr = g_match_info_fetch(nfo, 1);
     char *eaddr = nmdc_unescape_and_decode(hub, addr);
-    ui_logwindow_printf(hub->tab->log, "\nThe hub is requesting you to move to %s.\nType `/connect %s' to do so.\n", eaddr, eaddr);
+    ui_mf(hub->tab, 0, "\nThe hub is requesting you to move to %s.\nType `/connect %s' to do so.\n", eaddr, eaddr);
     g_free(eaddr);
     g_free(addr);
   }
@@ -608,28 +608,25 @@ static void handle_cmd(struct net *n, char *cmd) {
 
   // $GetPass
   if(strncmp(cmd, "$GetPass", 8) == 0) {
-    ui_logwindow_add(hub->tab->log, "Hub requires a password. This version of ncdc does not support passworded login yet.");
+    ui_m(hub->tab, 0, "Hub requires a password. This version of ncdc does not support passworded login yet.");
     nmdc_disconnect(hub, FALSE);
   }
 
   // $ValidateDenide
   if(strncmp(cmd, "$ValidateDenide", 15) == 0) {
-    ui_logwindow_add(hub->tab->log, "Username invalid or already taken.");
+    ui_m(hub->tab, 0, "Username invalid or already taken.");
     nmdc_disconnect(hub, TRUE);
   }
 
   // $HubIsFull
   if(strncmp(cmd, "$HubIsFull", 10) == 0) {
-    ui_logwindow_add(hub->tab->log, "Hub is full.");
+    ui_m(hub->tab, 0, "Hub is full.");
     nmdc_disconnect(hub, TRUE);
   }
 
   // global hub message
-  if(cmd[0] != '$') {
-    char *msg = nmdc_unescape_and_decode(hub, cmd);
-    ui_logwindow_add(hub->tab->log, msg);
-    g_free(msg);
-  }
+  if(cmd[0] != '$')
+    ui_m(hub->tab, UIM_PASS, nmdc_unescape_and_decode(hub, cmd));
 }
 
 
@@ -654,16 +651,16 @@ static void handle_error(struct net *n, int action, GError *err) {
 
   switch(action) {
   case NETERR_CONN:
-    ui_logwindow_printf(hub->tab->log, "Could not connect to hub: %s. Wating 30 seconds before retrying.", err->message);
+    ui_mf(hub->tab, 0, "Could not connect to hub: %s. Wating 30 seconds before retrying.", err->message);
     hub->state = HUBS_IDLE;
     hub->reconnect_timer = g_timeout_add_seconds(30, reconnect_timer, hub);
     break;
   case NETERR_RECV:
-    ui_logwindow_printf(hub->tab->log, "Read error: %s", err->message);
+    ui_mf(hub->tab, 0, "Read error: %s", err->message);
     nmdc_disconnect(hub, TRUE);
     break;
   case NETERR_SEND:
-    ui_logwindow_printf(hub->tab->log, "Write error: %s", err->message);
+    ui_mf(hub->tab, 0, "Write error: %s", err->message);
     nmdc_disconnect(hub, TRUE);
     break;
   }
@@ -682,7 +679,7 @@ struct nmdc_hub *nmdc_create(struct ui_tab *tab) {
 
 static void handle_connect(struct net *n) {
   struct nmdc_hub *hub = n->handle;
-  ui_logwindow_printf(hub->tab->log, "Connected to %s.", net_remoteaddr(n));
+  ui_mf(hub->tab, 0, "Connected to %s.", net_remoteaddr(n));
   hub->state = HUBS_CONNECTED;
 }
 
@@ -696,7 +693,7 @@ void nmdc_connect(struct nmdc_hub *hub) {
     hub->reconnect_timer = 0;
   }
 
-  ui_logwindow_printf(hub->tab->log, "Connecting to %s...", addr);
+  ui_mf(hub->tab, 0, "Connecting to %s...", addr);
   hub->state = HUBS_CONNECTING;
   net_connect(hub->net, addr, 411, handle_connect);
   g_free(addr);
@@ -714,13 +711,13 @@ void nmdc_disconnect(struct nmdc_hub *hub, gboolean recon) {
   hub->nick_valid = hub->received_nicklist = hub->joincomplete = hub->state
     = hub->sharecount = hub->sharesize = hub->supports_nogetinfo = 0;
   if(!recon) {
-    ui_logwindow_printf(hub->tab->log, "Disconnected.");
+    ui_m(hub->tab, 0, "Disconnected.");
     if(hub->reconnect_timer) {
       g_source_remove(hub->reconnect_timer);
       hub->reconnect_timer = 0;
     }
   } else {
-    ui_logwindow_printf(hub->tab->log, "Connection lost. Waiting 30 seconds before reconnecting.");
+    ui_m(hub->tab, 0, "Connection lost. Waiting 30 seconds before reconnecting.");
     hub->reconnect_timer = g_timeout_add_seconds(30, reconnect_timer, hub);
   }
 }

@@ -159,8 +159,15 @@ static gboolean one_second_timer(gpointer dat) {
   return TRUE;
 }
 
+
+static gboolean screen_resized = FALSE;
+
 static gboolean screen_update_check(gpointer dat) {
-  if(ui_checkupdate())
+  if(screen_resized) {
+    endwin();
+    doupdate();
+    ui_draw();
+  } else if(ui_checkupdate())
     ui_draw();
   return TRUE;
 }
@@ -216,10 +223,11 @@ static void catch_sigterm(int sig) {
 // Fired when the screen is resized.  Normally I would check for KEY_RESIZE,
 // but that doesn't work very nicely together with select(). See
 // http://www.webservertalk.com/archive107-2005-1-896232.html
+// Also note that this is a signal handler, and all functions we call here must
+// be re-entrant. Obviously none of the ncurses functions are, so let's set a
+// variable and handle it in the screen_update_check_timer.
 static void catch_sigwinch(int sig) {
-  endwin();
-  doupdate();
-  ui_draw();
+  screen_resized = TRUE;
 }
 
 

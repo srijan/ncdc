@@ -31,6 +31,12 @@
 
 #if INTERFACE
 
+// These are assumed to occupy two bits
+#define UIP_EMPTY 0 // no change
+#define UIP_LOW   1 // system messages
+#define UIP_MED   2 // chat messages, or error messages in the main tab
+#define UIP_HIGH  3 // direct messages to you (PM or name mentioned)
+
 #define UIT_MAIN     0
 #define UIT_HUB      1
 #define UIT_USERLIST 2
@@ -38,6 +44,7 @@
 
 struct ui_tab {
   int type; // UIT_ type
+  int prio; // UIP_ type
   char *name;
   struct ui_logwindow *log;    // MAIN, HUB, MSG
   struct nmdc_hub *hub;        // HUB, USERLIST, MSG
@@ -171,7 +178,7 @@ static void ui_msg_key(struct ui_tab *tab, guint64 key) {
 
 
 static void ui_msg_msg(struct ui_tab *tab, const char *msg) {
-  ui_m(tab, 0, msg);
+  ui_m(tab, UIP_HIGH, msg);
 }
 
 
@@ -617,12 +624,20 @@ void ui_userlist_userchange(struct ui_tab *tab, int change, struct nmdc_user *us
 
 #if INTERFACE
 
+// These flags can be OR'ed together with UIP_ flags. No UIP_ flag or UIP_EMPTY
+// implies UIP_LOW. There is no need to set any priority when tab == NULL,
+// since it will be displayed right away anyway.
+
 // Message should also be notified in status bar (implied automatically if the
-// requested tab has no log window)
-#define UIM_NOTIFY 1
+// requested tab has no log window). This also uses UIP_EMPTY if no other UIP_
+// flag is set.
+#define UIM_NOTIFY 4
 // Ownership of the message string is passed to the message handling function.
 // (Which fill g_free() it after use)
-#define UIM_PASS   2
+#define UIM_PASS   8
+// This is a chat message, i.e. check to see if your name is part of the
+// message, and if so, give it UIP_HIGH.
+#define UIM_CHAT  16
 
 #endif
 
@@ -652,6 +667,7 @@ static gboolean ui_m_timeout(gpointer data) {
 static gboolean ui_m_mainthread(gpointer dat) {
   struct ui_m_dat *msg = dat;
   struct ui_tab *tab = msg->tab;
+  int prio = msg->flags & 3; // lower two bits
   if(!tab)
     tab = ui_tab_cur->data;
   // It can happen that the tab is closed while we were waiting for this idle
@@ -673,8 +689,18 @@ static gboolean ui_m_mainthread(gpointer dat) {
     ui_m_timer = g_timeout_add(3000, ui_m_timeout, NULL);
     ui_m_updated = TRUE;
   }
-  if(tab->log)
+  if(tab->log) {
+    if((msg->flags & UIM_CHAT) && tab->type == UIT_HUB && tab->hub->nick_valid) {
+      char *name = g_regex_escape_string(tab->hub->nick, -1);
+      char *pattern = g_strdup_printf("\\b%s\\b", name);
+      if(g_regex_match_simple(pattern, msg->msg, G_REGEX_CASELESS, 0))
+        prio = UIP_HIGH;
+      g_free(name);
+      g_free(pattern);
+    }
     ui_logwindow_add(tab->log, msg->msg);
+    tab->prio = MAX(tab->prio, MAX(prio, notify ? UIP_EMPTY : UIP_LOW));
+  }
 
 ui_m_cleanup:
   g_free(msg->msg);
@@ -827,6 +853,7 @@ static void ui_tablist_draw() {
 
 void ui_draw() {
   struct ui_tab *curtab = ui_tab_cur->data;
+  curtab->prio = UIP_EMPTY;
 
   getmaxyx(stdscr, winrows, wincols);
   curs_set(0); // may be overridden later on by a textinput widget

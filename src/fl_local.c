@@ -130,7 +130,7 @@ gboolean fl_flush(gpointer dat) {
       GError *err = NULL;
       if(!fl_save(fl_local_list, fl_local_list_file, &err)) {
         // this is a pretty fatal error... oh well, better luck next time
-        ui_mf(ui_main, 0, "Error saving file list: %s", err->message);
+        ui_mf(ui_main, UIP_MED, "Error saving file list: %s", err->message);
         g_error_free(err);
       }
     } else
@@ -326,7 +326,7 @@ static void fl_scan_dir(struct fl_list *parent, const char *path) {
   GError *err = NULL;
   GDir *dir = g_dir_open(path, 0, &err);
   if(!dir) {
-    ui_mf(ui_main, 0, "Error reading directory \"%s\": %s", path, g_strerror(errno));
+    ui_mf(ui_main, UIP_MED, "Error reading directory \"%s\": %s", path, g_strerror(errno));
     g_error_free(err);
     return;
   }
@@ -342,7 +342,7 @@ static void fl_scan_dir(struct fl_list *parent, const char *path) {
       confname = g_filename_display_name(name);
     char *encname = g_filename_from_utf8(confname, -1, NULL, NULL, NULL);
     if(!encname) {
-      ui_mf(ui_main, 0, "Error reading directory entry in \"%s\": Invalid encoding.", path);
+      ui_mf(ui_main, UIP_MED, "Error reading directory entry in \"%s\": Invalid encoding.", path);
       g_free(confname);
       continue;
     }
@@ -353,9 +353,9 @@ static void fl_scan_dir(struct fl_list *parent, const char *path) {
     g_free(encname);
     if(r < 0 || !(S_ISREG(dat.st_mode) || S_ISDIR(dat.st_mode))) {
       if(r < 0)
-        ui_mf(ui_main, 0, "Error stat'ing \"%s\": %s", cpath, g_strerror(errno));
+        ui_mf(ui_main, UIP_MED, "Error stat'ing \"%s\": %s", cpath, g_strerror(errno));
       else
-        ui_mf(ui_main, 0, "Not sharing \"%s\": Neither file nor directory.", cpath);
+        ui_mf(ui_main, UIP_MED, "Not sharing \"%s\": Neither file nor directory.", cpath);
       g_free(confname);
       g_free(cpath);
       continue;
@@ -543,7 +543,7 @@ static gboolean fl_hash_done(gpointer dat) {
   fl_hash_queue_size -= fl->size;
 
   if(args->err) {
-    ui_mf(ui_main, 0, "Error hashing \"%s\": %s", args->path, args->err->message);
+    ui_mf(ui_main, UIP_MED, "Error hashing \"%s\": %s", args->path, args->err->message);
     g_error_free(args->err);
     goto fl_hash_done_f;
   }
@@ -869,7 +869,7 @@ void fl_init() {
   fl_local_list = fl_load(fl_local_list_file, &err);
   if(!fl_local_list) {
     g_assert(err);
-    ui_mf(ui_main, 0, "Error loading local filelist: %s. Re-building list.", err->message);
+    ui_mf(ui_main, UIP_MED, "Error loading local filelist: %s. Re-building list.", err->message);
     g_error_free(err);
     dorefresh = TRUE;
     fl_hashdat_open(TRUE);

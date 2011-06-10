@@ -626,7 +626,7 @@ static void handle_cmd(struct net *n, char *cmd) {
 
   // global hub message
   if(cmd[0] != '$')
-    ui_m(hub->tab, UIM_PASS, nmdc_unescape_and_decode(hub, cmd));
+    ui_m(hub->tab, UIM_PASS|UIM_CHAT|UIP_MED, nmdc_unescape_and_decode(hub, cmd));
 }
 
 

@@ -877,15 +877,19 @@ void ui_input(guint64 key) {
     break;
   case INPT_ALT('h'): ; // alt+h (swap tab with left)
     GList *prev = ui_tab_cur->prev;
-    ui_tabs = g_list_delete_link(ui_tabs, ui_tab_cur);
-    ui_tabs = g_list_insert_before(ui_tabs, prev, curtab);
-    ui_tab_cur = prev->prev;
+    if(prev) {
+      ui_tabs = g_list_delete_link(ui_tabs, ui_tab_cur);
+      ui_tabs = g_list_insert_before(ui_tabs, prev, curtab);
+      ui_tab_cur = prev->prev;
+    }
     break;
   case INPT_ALT('l'): ; // alt+l (swap tab with right)
     GList *next = ui_tab_cur->next;
-    ui_tabs = g_list_delete_link(ui_tabs, ui_tab_cur);
-    ui_tabs = g_list_insert_before(ui_tabs, next->next, curtab);
-    ui_tab_cur = next->next;
+    if(next) {
+      ui_tabs = g_list_delete_link(ui_tabs, ui_tab_cur);
+      ui_tabs = g_list_insert_before(ui_tabs, next->next, curtab);
+      ui_tab_cur = next->next;
+    }
     break;
   case INPT_ALT('c'): // alt+c (alias for /close)
     cmd_handle("/close");

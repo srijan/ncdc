@@ -84,7 +84,8 @@ struct net {
   void (*cb_con)(struct net *);
   // Error callback. In the case of an error while connecting, cb_con will not
   // be called. Second argument is NETERR_* action. The GError does not have to
-  // be freed. Will not be called in the case of G_IO_ERROR_CANCELLED.
+  // be freed. Will not be called in the case of G_IO_ERROR_CANCELLED. All
+  // errors are fatal, and net_disconnect() should be called in the callback.
   void (*cb_err)(struct net *, int, GError *);
   // message termination character
   char eom[2];
@@ -184,7 +185,6 @@ static void consume_input(struct net *n) {
   // may do an unref().
   net_ref(n);
 
-  // TODO: set a maximum length on a single message to prevent unbounded buffer growth
   while(n->conn && (sep = strchr(str, n->eom[0]))) {
     consumed += 1 + sep - str;
     *sep = 0;
@@ -223,17 +223,25 @@ static void consume_input(struct net *n) {
 
 
 static gboolean handle_input(GSocket *sock, GIOCondition cond, gpointer dat) {
+  GError *err = NULL;
   struct net *n = dat;
   time(&(n->timeout_last));
 
   // make sure enough space is available in the input buffer (ugly hack, GString has no simple grow function)
   if(n->in->allocated_len - n->in->len < 1024) {
+    // don't allow the buffer to grow beyond 1MB
+    if(n->in->allocated_len + 1024 > 1024*1024) {
+      n->in_src = 0;
+      g_set_error_literal(&err, 1, 0, "Buffer overflow.");
+      n->cb_err(n, NETERR_RECV, err);
+      g_error_free(err);
+      return FALSE;
+    }
     gsize oldlen = n->in->len;
     g_string_set_size(n->in, n->in->len+1024);
     n->in->len = oldlen;
   }
 
-  GError *err = NULL;
   gssize read = g_socket_receive(n->sock, n->in->str + n->in->len, n->in->allocated_len - n->in->len - 1, NULL, &err);
   handle_ioerr(n, n->in_src, read, err, NETERR_RECV);
   ratecalc_add(&net_in, read);

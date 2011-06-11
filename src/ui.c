@@ -801,14 +801,14 @@ static void ui_draw_status() {
 
 #define tabcol(t, n) (2+ceil(log10((n)+1))+str_columns(((struct ui_tab *)(t)->data)->name))
 
-static void ui_tablist_draw() {
-  static const int xoffset = 8;
+static void ui_draw_tablist() {
+  static const int xoffset = 12;
   static int top = 0;
   int i, w;
   GList *n;
 
   int cur = g_list_position(ui_tabs, ui_tab_cur);
-  int maxw = wincols-xoffset-6;
+  int maxw = wincols-xoffset-5;
 
   // Make sure cur is visible
   if(top > cur)
@@ -830,7 +830,10 @@ static void ui_tablist_draw() {
   }
 
   // Print the stuff
-  mvaddstr(winrows-2, xoffset, top > 0 ? " <<" : " --");
+  if(top > 0)
+    mvaddstr(winrows-2, xoffset, "<<");
+  else
+    mvaddch(winrows-2, xoffset+1, '[');
   w = maxw;
   i = top;
   for(n=g_list_nth(ui_tabs, top); n; n=n->next) {
@@ -846,7 +849,12 @@ static void ui_tablist_draw() {
     if(n == ui_tab_cur)
       attroff(A_BOLD);
   }
-  mvaddstr(winrows-2, wincols-3, n ? " >>" : " --");
+  if(!n)
+    addstr(" ]");
+  else {
+    hline(' ', w + tabcol(n, i));
+    mvaddstr(winrows-2, wincols-3, ">>");
+  }
 }
 #undef tabcol
 
@@ -872,15 +880,13 @@ void ui_draw() {
   g_free(title);
 
   // second-last line - time and tab list
-  attron(A_REVERSE);
+  mvhline(winrows-2, 0, ACS_HLINE, wincols);
   // time
-  mvhline(winrows-2, 0, ' ', wincols);
   time_t tm = time(NULL);
-  char ts[10];
-  strftime(ts, 9, "%H:%M:%S", localtime(&tm));
-  mvaddstr(winrows-2, 0, ts);
-  ui_tablist_draw();
-  attroff(A_REVERSE);
+  char ts[12];
+  strftime(ts, 11, "[%H:%M:%S]", localtime(&tm));
+  mvaddstr(winrows-2, 1, ts);
+  ui_draw_tablist();
 
   // last line - status info or notification
   ui_draw_status();

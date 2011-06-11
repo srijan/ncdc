@@ -232,10 +232,11 @@ static void catch_sigwinch(int sig) {
 
 
 // redirect all non-fatal errors to stderr (NOT stdout!)
-// TODO: option to ignore debug stuff (compile-time? run-time?)
 static void log_redirect(const gchar *dom, GLogLevelFlags level, const gchar *msg, gpointer dat) {
-  fprintf(stderr, "*%s* %s\n", loglevel_to_str(level), msg);
-  fflush(stderr);
+  if(!(level & (G_LOG_LEVEL_INFO|G_LOG_LEVEL_DEBUG)) || conf_log_debug()) {
+    fprintf(stderr, "*%s* %s\n", loglevel_to_str(level), msg);
+    fflush(stderr);
+  }
 }
 
 

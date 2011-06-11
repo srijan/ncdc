@@ -76,6 +76,12 @@ GKeyFile *conf_file;
   !g_key_file_has_key(conf_file, "global", "slots", NULL) ? 10\
     : g_key_file_get_integer(conf_file, "global", "slots", NULL))
 
+// Can be used even before the configuration file is loaded. In which case it
+// returns TRUE. Default is otherwise FALSE.
+#define conf_log_debug() (\
+  !conf_file ? TRUE : !g_key_file_has_key(conf_file, "log", "log_debug", NULL) ? FALSE :\
+    g_key_file_get_boolean(conf_file, "log", "log_debug", NULL))
+
 #endif
 
 

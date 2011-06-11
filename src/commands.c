@@ -259,6 +259,7 @@ static struct setting settings[] = {
   { "description",   NULL,     get_string, set_userinfo,    NULL             },
   { "email",         NULL,     get_string, set_userinfo,    NULL             },
   { "encoding",      NULL,     get_string, set_encoding,    set_encoding_sug },
+  { "log_debug",     "log",    get_bool,   set_bool,        set_bool_sug     },
   { "nick",          NULL,     get_string, set_nick,        NULL             }, // global.nick may not be /unset
   { "show_joinquit", NULL,     get_bool,   set_bool,        set_bool_sug     },
   { "slots",         "global", get_int,    set_slots,       NULL             },

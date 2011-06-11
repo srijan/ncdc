@@ -167,6 +167,7 @@ static gboolean screen_update_check(gpointer dat) {
     endwin();
     doupdate();
     ui_draw();
+    screen_resized = FALSE;
   } else if(ui_checkupdate())
     ui_draw();
   return TRUE;

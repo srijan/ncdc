@@ -734,6 +734,45 @@ void ui_mf(struct ui_tab *tab, int flags, const char *fmt, ...) {
 
 
 
+// colours
+
+#if INTERFACE
+
+#define UI_COLOURS \
+  C(TABPRIO_LOW,  COLOR_BLACK,   -1, A_BOLD)\
+  C(TABPRIO_MED,  COLOR_CYAN,    -1, A_BOLD)\
+  C(TABPRIO_HIGH, COLOR_MAGENTA, -1, A_BOLD)
+
+
+enum ui_coltype {
+  UIC_UNUSED,
+#define C(n, fg, bg, attr) UIC_##n,
+  UI_COLOURS
+#undef C
+  UIC_NONE
+}
+
+
+struct ui_colour {
+  short fg, bg;
+  int x, a;
+};
+
+#define UIC(n) (ui_colours[UIC_##n].a)
+
+#endif
+
+struct ui_colour ui_colours[] = {
+  {},
+#define C(n, fg, bg, attr) { fg, bg, attr, 0 },
+  UI_COLOURS
+#undef C
+  { -1, -1, 0, 0 }
+};
+
+int ui_colours_num = G_N_ELEMENTS(ui_colours);
+
+
 
 // Global stuff
 
@@ -769,6 +808,18 @@ void ui_init() {
   keypad(stdscr, 1);
   nodelay(stdscr, 1);
 
+  // init colours
+  if(has_colors()) {
+    start_color();
+    use_default_colors();
+
+    int i;
+    for(i=1; i<ui_colours_num; i++) {
+      init_pair(i, ui_colours[i].fg, ui_colours[i].bg);
+      ui_colours[i].a = ui_colours[i].x | COLOR_PAIR(i);
+    }
+  }
+
   // draw
   ui_draw();
 }
@@ -800,6 +851,19 @@ static void ui_draw_status() {
 
 
 #define tabcol(t, n) (2+ceil(log10((n)+1))+str_columns(((struct ui_tab *)(t)->data)->name))
+#define prio2a(p) ((p) == UIP_LOW ? UIC(TABPRIO_LOW) : (p) == UIP_MED ? UIC(TABPRIO_MED) : UIC(TABPRIO_HIGH))
+
+/* All tabs are in one of the following states:
+ * - Selected                 (tab == ui_tab_cur->data) = sel    "n:name" in A_BOLD
+ * - No change                (!sel && tab->prio == UIP_EMPTY)   "n:name" normal
+ * - Change, low priority     (!sel && tab->prio == UIP_LOW)     "n!name", with ! in UIC(TABPRIO_LOW)
+ * - Change, medium priority  (!sel && tab->prio == UIP_MED)     "n!name", with ! in ^_MED
+ * - Change, high priority    (!sel && tab->prio == UIP_HIGH)    "n!name", with ! in ^_HIGH
+ *
+ * The truncated indicators are in the following states:
+ * - No changes    ">>" or "<<"
+ * - Change        "!>" or "<!"  with ! in same colour as above
+ */
 
 static void ui_draw_tablist() {
   static const int xoffset = 12;
@@ -829,34 +893,79 @@ static void ui_draw_tablist() {
     w -= tabcol(g_list_nth(ui_tabs, top), top);
   }
 
-  // Print the stuff
-  if(top > 0)
-    mvaddstr(winrows-2, xoffset, "<<");
-  else
+  // check highest priority of hidden tabs before top
+  // (This also sets n and i to the start of the visible list)
+  char maxprio = 0;
+  for(n=ui_tabs,i=0; i<top; i++,n=n->next) {
+    struct ui_tab *t = n->data;
+    if(t->prio > maxprio)
+      maxprio = t->prio;
+  }
+
+  // print left truncate indicator
+  if(top > 0) {
+    mvaddch(winrows-2, xoffset, '<');
+    if(!maxprio)
+      addch('<');
+    else {
+      attron(prio2a(maxprio));
+      addch('!');
+      attroff(prio2a(maxprio));
+    }
+  } else
     mvaddch(winrows-2, xoffset+1, '[');
+
+  // print the tab list
   w = maxw;
-  i = top;
-  for(n=g_list_nth(ui_tabs, top); n; n=n->next) {
+  char num[10];
+  for(; n; n=n->next) {
     w -= tabcol(n, ++i);
     if(w < 0)
       break;
+    struct ui_tab *t = n->data;
     addch(' ');
     if(n == ui_tab_cur)
       attron(A_BOLD);
-    char *tmp = g_strdup_printf("%d:%s", i, ((struct ui_tab *)n->data)->name);
-    addstr(tmp);
-    g_free(tmp);
+    g_snprintf(num, 10, "%d", i);
+    addstr(num);
+    if(n == ui_tab_cur || !t->prio)
+      addch(':');
+    else {
+      attron(prio2a(t->prio));
+      addch('!');
+      attroff(prio2a(t->prio));
+    }
+    addstr(t->name);
     if(n == ui_tab_cur)
       attroff(A_BOLD);
   }
-  if(!n)
+
+  // check priority of hidden tabs after the last visible one
+  GList *last = n;
+  maxprio = 0;
+  for(; n&&maxprio<UIP_HIGH; n=n->next) {
+    struct ui_tab *t = n->data;
+    if(t->prio > maxprio)
+      maxprio = t->prio;
+  }
+
+  // print right truncate indicator
+  if(!last)
     addstr(" ]");
   else {
-    hline(' ', w + tabcol(n, i));
-    mvaddstr(winrows-2, wincols-3, ">>");
+    hline(' ', w + tabcol(last, i));
+    if(!maxprio)
+      mvaddch(winrows-2, wincols-3, '>');
+    else {
+      attron(prio2a(maxprio));
+      mvaddch(winrows-2, wincols-3, '!');
+      attroff(prio2a(maxprio));
+    }
+    addch('>');
   }
 }
 #undef tabcol
+#undef prio2a
 
 
 void ui_draw() {

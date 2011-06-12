@@ -130,6 +130,10 @@ struct net {
       net_cancel(n);\
       g_object_unref((n)->conn);\
       (n)->conn = NULL;\
+      if((n)->file_left) {\
+        close((n)->file_fd);\
+        (n)->file_left = 0;\
+      }\
     }\
   } while(0)
 

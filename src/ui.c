@@ -55,9 +55,7 @@ struct ui_tab {
   struct nmdc_user *msg_user;
   char *msg_uname;
   // USERLIST
-  GSequence *users;
-  GSequenceIter *user_sel;
-  GSequenceIter *user_top;
+  struct ui_listing *user_list;
   gboolean user_reverse;
   gboolean user_sort_share;
   gboolean user_opfirst;
@@ -384,7 +382,7 @@ struct ui_tab *ui_userlist_create(struct nmdc_hub *hub) {
   tab->type = UIT_USERLIST;
   tab->hub = hub;
   tab->user_opfirst = TRUE;
-  tab->users = g_sequence_new(NULL);
+  GSequence *users = g_sequence_new(NULL);
   // populate the list
   // g_sequence_sort() uses insertion sort? in that case it is faster to insert
   // all items using g_sequence_insert_sorted() rather than inserting them in
@@ -394,8 +392,8 @@ struct ui_tab *ui_userlist_create(struct nmdc_hub *hub) {
   g_hash_table_iter_init(&iter, hub->users);
   struct nmdc_user *u;
   while(g_hash_table_iter_next(&iter, NULL, (gpointer *)&u))
-    u->iter = g_sequence_insert_sorted(tab->users, u, ui_userlist_sort_func, tab);
-  tab->user_sel = tab->user_top = g_sequence_get_begin_iter(tab->users);
+    u->iter = g_sequence_insert_sorted(users, u, ui_userlist_sort_func, tab);
+  tab->user_list = ui_listing_create(users);
   return tab;
 }
 
@@ -406,7 +404,8 @@ void ui_userlist_close(struct ui_tab *tab) {
   // To clean things up, we should also reset all nmdc_user->iter fields. But
   // this isn't all that necessary since they won't be used anymore until they
   // get reset in a subsequent ui_userlist_create().
-  g_sequence_free(tab->users);
+  g_sequence_free(tab->user_list->list);
+  ui_listing_free(tab->user_list);
   g_free(tab->name);
   g_free(tab);
 }
@@ -423,69 +422,60 @@ static char *ui_userlist_title(struct ui_tab *tab) {
     colvar += width;\
   } while(0)
 
+
+struct ui_userlist_draw_opts {
+  int cw_user, cw_share, cw_conn, cw_desc, cw_mail, cw_tag;
+};
+
+
+static void ui_userlist_draw_row(struct ui_listing *list, GSequenceIter *iter, int row, void *dat) {
+  struct nmdc_user *user = g_sequence_get(iter);
+  struct ui_userlist_draw_opts *o = dat;
+
+  char *tag = user->tag ? g_strdup_printf("<%s>", user->tag) : NULL;
+  int j=0;
+  if(iter == list->sel) {
+    attron(A_REVERSE);
+    mvhline(row, 0, ' ', wincols);
+  }
+  DRAW_COL(row, j, o->cw_user,  user->name);
+  DRAW_COL(row, j, o->cw_share, user->hasinfo ? str_formatsize(user->sharesize) : "");
+  DRAW_COL(row, j, o->cw_desc,  user->desc?user->desc:"");
+  DRAW_COL(row, j, o->cw_tag,   tag?tag:"");
+  DRAW_COL(row, j, o->cw_mail,  user->mail?user->mail:"");
+  DRAW_COL(row, j, o->cw_conn,  user->conn?user->conn:"");
+  if(iter == list->sel)
+    attroff(A_REVERSE);
+  g_free(tag);
+}
+
+
 // TODO: some way of letting the user know what keys can be pressed
 static void ui_userlist_draw(struct ui_tab *tab) {
   // column widths (this is a trial-and-error-whatever-looks-right algorithm)
+  struct ui_userlist_draw_opts o;
   int num = 2 + (tab->user_hide_conn?0:1) + (tab->user_hide_desc?0:1) + (tab->user_hide_tag?0:1) + (tab->user_hide_mail?0:1);
-  int cw_user = MAX(20, (wincols*6)/(num*10));
-  int cw_share = 12;
-  int i = wincols-cw_user-cw_share; num -= 2; // remaining number of columns
-  int cw_conn = tab->user_hide_conn ? 0 : (i*6)/(num*10);
-  int cw_desc = tab->user_hide_desc ? 0 : (i*10)/(num*10);
-  int cw_mail = tab->user_hide_mail ? 0 : (i*7)/(num*10);
-  int cw_tag  = tab->user_hide_tag  ? 0 : i-cw_conn-cw_desc-cw_mail;
+  o.cw_user = MAX(20, (wincols*6)/(num*10));
+  o.cw_share = 12;
+  int i = wincols-o.cw_user-o.cw_share; num -= 2; // remaining number of columns
+  o.cw_conn = tab->user_hide_conn ? 0 : (i*6)/(num*10);
+  o.cw_desc = tab->user_hide_desc ? 0 : (i*10)/(num*10);
+  o.cw_mail = tab->user_hide_mail ? 0 : (i*7)/(num*10);
+  o.cw_tag  = tab->user_hide_tag  ? 0 : i-o.cw_conn-o.cw_desc-o.cw_mail;
 
   // header
   i = 0;
   attron(A_BOLD);
-  DRAW_COL(1, i, cw_user,  "Username");
-  DRAW_COL(1, i, cw_share, "Share");
-  DRAW_COL(1, i, cw_desc,  "Description");
-  DRAW_COL(1, i, cw_tag,   "Tag");
-  DRAW_COL(1, i, cw_mail,  "E-Mail");
-  DRAW_COL(1, i, cw_conn,  "Connection");
+  DRAW_COL(1, i, o.cw_user,  "Username");
+  DRAW_COL(1, i, o.cw_share, "Share");
+  DRAW_COL(1, i, o.cw_desc,  "Description");
+  DRAW_COL(1, i, o.cw_tag,   "Tag");
+  DRAW_COL(1, i, o.cw_mail,  "E-Mail");
+  DRAW_COL(1, i, o.cw_conn,  "Connection");
   attroff(A_BOLD);
 
-  // get or update the top row to make sure sel is visible
-  GSequenceIter *n;
-  int height = winrows-5;
-  int row_last = g_sequence_iter_get_position(g_sequence_get_end_iter(tab->users));
-  int row_top = g_sequence_iter_get_position(tab->user_top);
-  int row_sel = g_sequence_iter_get_position(tab->user_sel);
-  // sel is before top? top = sel!
-  if(row_top > row_sel)
-    row_top = row_sel;
-  // otherwise, is it out of the screen? top = sel - height
-  else if(row_top <= row_sel-height)
-    row_top = row_sel-height+1;
-  // make sure there are no empty lines when len > height
-  if(row_top && row_top+height > row_last)
-    row_top = MAX(0, row_last-height);
-  tab->user_top = g_sequence_get_iter_at_pos(tab->users, row_top);
-
-  // TODO: status indicator? (OP/connected/active/passive/whatever)
-  n = tab->user_top;
-  i = 2;
-  while(i <= winrows-4 && !g_sequence_iter_is_end(n)) {
-    struct nmdc_user *user = g_sequence_get(n);
-    char *tag = user->tag ? g_strdup_printf("<%s>", user->tag) : NULL;
-    int j=0;
-    if(n == tab->user_sel) {
-      attron(A_REVERSE);
-      mvhline(i, 0, ' ', wincols);
-    }
-    DRAW_COL(i, j, cw_user,  user->name);
-    DRAW_COL(i, j, cw_share, user->hasinfo ? str_formatsize(user->sharesize) : "");
-    DRAW_COL(i, j, cw_desc,  user->desc?user->desc:"");
-    DRAW_COL(i, j, cw_tag,   tag?tag:"");
-    DRAW_COL(i, j, cw_mail,  user->mail?user->mail:"");
-    DRAW_COL(i, j, cw_conn,  user->conn?user->conn:"");
-    if(n == tab->user_sel)
-      attroff(A_REVERSE);
-    g_free(tag);
-    i++;
-    n = g_sequence_iter_next(n);
-  }
+  // rows
+  int pos = ui_listing_draw(tab->user_list, 2, winrows-3, ui_userlist_draw_row, &o);
 
   // footer
   attron(A_BOLD);
@@ -493,45 +483,22 @@ static void ui_userlist_draw(struct ui_tab *tab) {
   mvaddstr(winrows-3, 0, "Totals:");
   char *tmp = g_strdup_printf("%s%c   %d users",
     str_formatsize(tab->hub->sharesize), tab->hub->sharecount == count ? ' ' : '+', count);
-  mvaddstr(winrows-3, cw_user, tmp);
+  mvaddstr(winrows-3, o.cw_user, tmp);
   g_free(tmp);
-  tmp = g_strdup_printf("%3d%%", MIN(100, row_last ? (row_top+height)*100/row_last : 0));
+  tmp = g_strdup_printf("%3d%%", pos);
   mvaddstr(winrows-3, wincols-6, tmp);
   g_free(tmp);
   attroff(A_BOLD);
 }
+#undef DRAW_COL
 
 
 static void ui_userlist_key(struct ui_tab *tab, guint64 key) {
+  if(ui_listing_key(tab->user_list, key, winrows/2))
+    return;
+
   gboolean sort = FALSE;
   switch(key) {
-  case INPT_KEY(KEY_NPAGE): // page down
-    tab->user_sel = g_sequence_iter_move(tab->user_sel, winrows/2);
-    if(g_sequence_iter_is_end(tab->user_sel))
-      tab->user_sel = g_sequence_iter_prev(tab->user_sel);
-    break;
-  case INPT_KEY(KEY_PPAGE): // page up
-    tab->user_sel = g_sequence_iter_move(tab->user_sel, -winrows/2);
-    // workaround for https://bugzilla.gnome.org/show_bug.cgi?id=648313
-    if(g_sequence_iter_is_end(tab->user_sel))
-      tab->user_sel = g_sequence_get_begin_iter(tab->users);
-    break;
-  case INPT_KEY(KEY_DOWN): // item down
-  case INPT_CHAR('j'):
-    tab->user_sel = g_sequence_iter_next(tab->user_sel);
-    if(g_sequence_iter_is_end(tab->user_sel))
-      tab->user_sel = g_sequence_iter_prev(tab->user_sel);
-    break;
-  case INPT_KEY(KEY_UP): // item up
-  case INPT_CHAR('k'):
-    tab->user_sel = g_sequence_iter_prev(tab->user_sel);
-    break;
-  case INPT_KEY(KEY_HOME): // home
-    tab->user_sel = g_sequence_get_begin_iter(tab->users);
-    break;
-  case INPT_KEY(KEY_END): // end
-    tab->user_sel = g_sequence_iter_prev(g_sequence_get_end_iter(tab->users));
-    break;
   case INPT_CHAR('s'): // s (order by share asc/desc)
     if(tab->user_sort_share)
       tab->user_reverse = !tab->user_reverse;
@@ -563,8 +530,8 @@ static void ui_userlist_key(struct ui_tab *tab, guint64 key) {
     tab->user_hide_conn = !tab->user_hide_conn;
     break;
   case INPT_CHAR('m'): // m (/msg user)
-    if(!g_sequence_iter_is_end(tab->user_sel)) {
-      struct nmdc_user *u = g_sequence_get(tab->user_sel);
+    if(!g_sequence_iter_is_end(tab->user_list->sel)) {
+      struct nmdc_user *u = g_sequence_get(tab->user_list->sel);
       struct ui_tab *t = ui_hub_getmsg(tab, u);
       if(!t) {
         t = ui_msg_create(tab->hub, u);
@@ -579,10 +546,8 @@ static void ui_userlist_key(struct ui_tab *tab, guint64 key) {
   // TODO: some way to save the column visibility? per hub? global default?
 
   if(sort) {
-    gboolean selisbegin = g_sequence_iter_is_begin(tab->user_sel);
-    g_sequence_sort(tab->users, ui_userlist_sort_func, tab);
-    if(selisbegin)
-      tab->user_sel = g_sequence_get_begin_iter(tab->users);
+    g_sequence_sort(tab->user_list->list, ui_userlist_sort_func, tab);
+    ui_listing_sorted(tab->user_list);
     ui_mf(NULL, 0, "Ordering by %s (%s%s)", tab->user_sort_share ? "share size" : "user name",
       tab->user_reverse ? "descending" : "ascending", tab->user_opfirst ? ", OPs first" : "");
   }
@@ -591,29 +556,16 @@ static void ui_userlist_key(struct ui_tab *tab, guint64 key) {
 
 void ui_userlist_userchange(struct ui_tab *tab, int change, struct nmdc_user *user) {
   if(change == UIHUB_UC_JOIN) {
-    gboolean topisbegin = g_sequence_iter_is_begin(tab->user_top);
-    gboolean selisbegin = g_sequence_iter_is_begin(tab->user_sel);
-    user->iter = g_sequence_insert_sorted(tab->users, user, ui_userlist_sort_func, tab);
-    // update top/sel in case they used to be begin but aren't anymore
-    if(topisbegin != g_sequence_iter_is_begin(tab->user_top))
-      tab->user_top = user->iter;
-    if(selisbegin != g_sequence_iter_is_begin(tab->user_sel))
-      tab->user_sel = user->iter;
+    user->iter = g_sequence_insert_sorted(tab->user_list->list, user, ui_userlist_sort_func, tab);
+    ui_listing_inserted(tab->user_list);
   } else if(change == UIHUB_UC_QUIT) {
     g_assert(g_sequence_get(user->iter) == (gpointer)user);
-    // update top/sel in case we are removing one of them
-    if(user->iter == tab->user_top)
-      tab->user_top = g_sequence_iter_prev(user->iter);
-    if(user->iter == tab->user_top)
-      tab->user_top = g_sequence_iter_next(user->iter);
-    if(user->iter == tab->user_sel) {
-      tab->user_sel = g_sequence_iter_next(user->iter);
-      if(g_sequence_iter_is_end(tab->user_sel))
-        tab->user_sel = g_sequence_iter_prev(user->iter);
-    }
+    ui_listing_remove(tab->user_list, user->iter);
     g_sequence_remove(user->iter);
-  } else
+  } else {
     g_sequence_sort_changed(user->iter, ui_userlist_sort_func, tab);
+    ui_listing_sorted(tab->user_list);
+  }
 }
 
 

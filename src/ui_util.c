@@ -541,3 +541,147 @@ gboolean ui_textinput_key(struct ui_textinput *ti, guint64 key, char **str) {
   return TRUE;
 }
 
+
+
+
+
+
+// Generic listing "widget".
+// This widget allows easy listing, selecting and paging of (dynamic) GSequence
+// lists.  The list is managed by the user, but the widget does need to be
+// notified of insertions and deletions.
+
+#if INTERFACE
+
+struct ui_listing {
+  GSequence *list;
+  GSequenceIter *sel;
+  GSequenceIter *top;
+  gboolean topisbegin;
+  gboolean selisbegin;
+}
+
+
+// update top/sel in case they used to be the start of the list but aren't anymore
+#define ui_listing_inserted(ul) do {\
+    if((ul)->topisbegin != g_sequence_iter_is_begin((ul)->top))\
+      (ul)->top = g_sequence_get_begin_iter((ul)->list);\
+    if((ul)->selisbegin != g_sequence_iter_is_begin((ul)->sel))\
+      (ul)->sel = g_sequence_get_begin_iter((ul)->list);\
+  } while(0)
+
+
+// called after the order of the list has changed
+// update sel in case it used to be the start of the list but isn't anymore
+#define ui_listing_sorted(ul) do {\
+    if((ul)->selisbegin != g_sequence_iter_is_begin((ul)->sel))\
+      (ul)->sel = g_sequence_get_begin_iter((ul)->list);\
+  } while(0)
+
+
+#define ui_listing_updateisbegin(ul) do {\
+    (ul)->topisbegin = g_sequence_iter_is_begin((ul)->top);\
+    (ul)->selisbegin = g_sequence_iter_is_begin((ul)->sel);\
+  } while(0)
+
+
+// update top/sel in case one of them is removed.
+// call this before using g_sequence_remove()
+#define ui_listing_remove(ul, iter) do {\
+    if((ul)->top == (iter))\
+      (ul)->top = g_sequence_iter_prev(iter);\
+    if((ul)->top == (iter))\
+      (ul)->top = g_sequence_iter_next(iter);\
+    if((ul)->sel == (iter)) {\
+      (ul)->sel = g_sequence_iter_next(iter);\
+      if(g_sequence_iter_is_end((ul)->sel))\
+        (ul)->sel = g_sequence_iter_prev(iter);\
+    }\
+    ui_listing_updateisbegin(ul);\
+  } while(0)
+
+
+// does not free the GSequence (we don't control the list, after all)
+#define ui_listing_free(ul) g_slice_free(struct ui_listing, ul)
+
+
+#endif
+
+
+struct ui_listing *ui_listing_create(GSequence *list) {
+  struct ui_listing *ul = g_slice_new0(struct ui_listing);
+  ul->list = list;
+  ul->sel = ul->top = g_sequence_get_begin_iter(list);
+  ul->topisbegin = ul->selisbegin = TRUE;
+  return ul;
+}
+
+
+gboolean ui_listing_key(struct ui_listing *ul, guint64 key, int page) {
+  switch(key) {
+  case INPT_KEY(KEY_NPAGE): // page down
+    ul->sel = g_sequence_iter_move(ul->sel, page);
+    if(g_sequence_iter_is_end(ul->sel))
+      ul->sel = g_sequence_iter_prev(ul->sel);
+    break;
+  case INPT_KEY(KEY_PPAGE): // page up
+    ul->sel = g_sequence_iter_move(ul->sel, -page);
+    // workaround for https://bugzilla.gnome.org/show_bug.cgi?id=648313
+    if(g_sequence_iter_is_end(ul->sel))
+      ul->sel = g_sequence_get_begin_iter(ul->list);
+    break;
+  case INPT_KEY(KEY_DOWN): // item down
+  case INPT_CHAR('j'):
+    ul->sel = g_sequence_iter_next(ul->sel);
+    if(g_sequence_iter_is_end(ul->sel))
+      ul->sel = g_sequence_iter_prev(ul->sel);
+    break;
+  case INPT_KEY(KEY_UP): // item up
+  case INPT_CHAR('k'):
+    ul->sel = g_sequence_iter_prev(ul->sel);
+    break;
+  case INPT_KEY(KEY_HOME): // home
+    ul->sel = g_sequence_get_begin_iter(ul->list);
+    break;
+  case INPT_KEY(KEY_END): // end
+    ul->sel = g_sequence_iter_prev(g_sequence_get_end_iter(ul->list));
+    break;
+  default:
+    return FALSE;
+  }
+  ui_listing_updateisbegin(ul);
+  return TRUE;
+}
+
+
+// Every item is assumed to occupy exactly one line.
+// Returns the relative position of the current page (in percent)
+int ui_listing_draw(struct ui_listing *ul, int top, int bottom, void (*cb)(struct ui_listing *, GSequenceIter *, int, void *), void *dat) {
+  // get or update the top row to make sure sel is visible
+  int height = bottom - top;
+  int row_last = g_sequence_iter_get_position(g_sequence_get_end_iter(ul->list));
+  int row_top = g_sequence_iter_get_position(ul->top);
+  int row_sel = g_sequence_iter_get_position(ul->sel);
+  // sel is before top? top = sel!
+  if(row_top > row_sel)
+    row_top = row_sel;
+  // otherwise, is it out of the screen? top = sel - height
+  else if(row_top <= row_sel-height)
+    row_top = row_sel-height+1;
+  // make sure there are no empty lines when len > height
+  if(row_top && row_top+height > row_last)
+    row_top = MAX(0, row_last-height);
+  ul->top = g_sequence_get_iter_at_pos(ul->list, row_top);
+
+  // draw
+  GSequenceIter *n = ul->top;
+  while(top < bottom && !g_sequence_iter_is_end(n)) {
+    cb(ul, n, top++, dat);
+    n = g_sequence_iter_next(n);
+  }
+
+  ui_listing_updateisbegin(ul);
+  return MIN(100, row_last ? (row_top+height)*100/row_last : 0);
+}
+
+

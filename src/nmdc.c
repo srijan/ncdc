@@ -511,8 +511,17 @@ static void handle_cmd(struct net *n, char *cmd) {
     char **list = g_strsplit(str, "$$", 0);
     g_free(str);
     char **cur;
-    for(cur=list; *cur&&**cur; cur++)
-      user_add(hub, *cur)->isop = TRUE;
+    // Actually, we should be going through the entire user list and set
+    // isop=FALSE when the user is not listed here. I consider this to be too
+    // inefficient and not all that important at this point.
+    for(cur=list; *cur&&**cur; cur++) {
+      struct nmdc_user *u = user_add(hub, *cur);
+      if(!u->isop) {
+        u->isop = TRUE;
+        ui_hub_userchange(hub->tab, UIHUB_UC_NFO, u);
+      } else
+        u->isop = TRUE;
+    }
     hub->received_nicklist = TRUE;
     g_strfreev(list);
   }

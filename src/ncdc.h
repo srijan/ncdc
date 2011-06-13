@@ -45,6 +45,7 @@ struct nmdc_cc;
 struct nmdc_hub;
 struct nmdc_user;
 struct tth_ctx;
+struct ui_listing;
 struct ui_logwindow;
 struct ui_tab;
 struct ui_textinput;

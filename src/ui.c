@@ -1046,6 +1046,12 @@ void ui_input(guint64 key) {
   case INPT_CTRL('l'): // ctrl+l (alias for /clear)
     cmd_handle("/clear");
     break;
+
+  case INPT_CTRL('e'): // ctrl+e
+  case INPT_CTRL('u'): // ctrl+u (alias for /refresh)
+    cmd_handle("/refresh");
+    break;
+
   default:
     // alt+num (switch tab)
     if(key >= INPT_ALT('0') && key <= INPT_ALT('9')) {

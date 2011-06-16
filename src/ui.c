@@ -384,6 +384,8 @@ struct ui_tab *ui_userlist_create(struct nmdc_hub *hub) {
   tab->type = UIT_USERLIST;
   tab->hub = hub;
   tab->user_opfirst = TRUE;
+  tab->user_hide_conn = TRUE;
+  tab->user_hide_mail = TRUE;
   GSequence *users = g_sequence_new(NULL);
   // populate the list
   // g_sequence_sort() uses insertion sort? in that case it is faster to insert

@@ -550,6 +550,8 @@ static void handle_cmd(struct net *n, char *cmd) {
 
   // $HubName
   if(g_regex_match(hubname, cmd, 0, &nfo)) { // 1 = name
+    g_free(hub->hubname_hub);
+    g_free(hub->hubname);
     hub->hubname_hub = g_match_info_fetch(nfo, 1);
     hub->hubname = nmdc_unescape_and_decode(hub, hub->hubname_hub);
   }

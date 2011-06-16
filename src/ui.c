@@ -336,8 +336,9 @@ void ui_hub_msg(struct ui_tab *tab, struct nmdc_user *user, const char *msg) {
   struct ui_tab *t = ui_hub_getmsg(tab, user);
   if(!t) {
     t = ui_msg_create(tab->hub, user);
-    // TODO: This also puts the focus on the new tab, which is annoying.
+    GList *old = ui_tab_cur;
     ui_tab_open(t);
+    ui_tab_cur = old;
   }
   ui_msg_msg(t, msg);
 }

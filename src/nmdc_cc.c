@@ -44,12 +44,15 @@ struct nmdc_cc {
   guint64 last_length;
   guint64 last_offset;
   GError *err;
+  GSequenceIter *iter;
 };
+
+#define nmdc_cc_init_global() nmdc_cc_list = g_sequence_new(NULL)
 
 #endif
 
-// opened connections - in no particular order
-GList *nmdc_cc_list = NULL;
+// opened connections - ui_conn is responsible for the ordering
+GSequence *nmdc_cc_list;
 
 
 // When a hub tab is closed (not just disconnected), make sure all hub fields
@@ -60,9 +63,9 @@ GList *nmdc_cc_list = NULL;
 // Note that the connection will remain hubless even when the same hub is later
 // opened again. I don't think this is a huge problem, however.
 void nmdc_cc_remove_hub(struct nmdc_hub *hub) {
-  GList *n;
-  for(n=nmdc_cc_list; n; n=n->next) {
-    struct nmdc_cc *c = n->data;
+  GSequenceIter *i = g_sequence_get_begin_iter(nmdc_cc_list);
+  for(; !g_sequence_iter_is_end(i); i=g_sequence_iter_next(i)) {
+    struct nmdc_cc *c = g_sequence_get(i);
     if(c->hub == hub)
       c->hub = NULL;
   }
@@ -76,9 +79,9 @@ void nmdc_cc_remove_hub(struct nmdc_hub *hub) {
 // are many transfers active that don't require a slot.
 int nmdc_cc_slots_in_use() {
   int num = 0;
-  GList *n;
-  for(n=nmdc_cc_list; n; n=n->next)
-    if(((struct nmdc_cc *)n->data)->net->file_left)
+  GSequenceIter *i = g_sequence_get_begin_iter(nmdc_cc_list);
+  for(; !g_sequence_iter_is_end(i); i=g_sequence_iter_next(i))
+    if(((struct nmdc_cc *)g_sequence_get(i))->net->file_left)
       num++;
   return num;
 }
@@ -86,9 +89,9 @@ int nmdc_cc_slots_in_use() {
 
 // Get an already connected user
 static struct nmdc_cc *nmdc_cc_get_conn(struct nmdc_hub *hub, const char *user) {
-  GList *n;
-  for(n=nmdc_cc_list; n; n=n->next) {
-    struct nmdc_cc *c = n->data;
+  GSequenceIter *i = g_sequence_get_begin_iter(nmdc_cc_list);
+  for(; !g_sequence_iter_is_end(i); i=g_sequence_iter_next(i)) {
+    struct nmdc_cc *c = g_sequence_get(i);
     if(c->nick_raw && c->hub == hub && c->net->conn && strcmp(c->nick_raw, user) == 0)
       return c;
   }
@@ -294,6 +297,8 @@ static void handle_cmd(struct net *n, char *cmd) {
   if(g_regex_match(mynick, cmd, 0, &nfo)) { // 1 = nick
     char *nick = g_match_info_fetch(nfo, 1);
     handle_mynick(cc, nick);
+    if(ui_conn)
+      ui_conn_listchange(cc->iter, UICONN_MOD);
     g_free(nick);
   }
   g_match_info_free(nfo);
@@ -370,7 +375,9 @@ struct nmdc_cc *nmdc_cc_create(struct nmdc_hub *hub) {
   cc->net = net_create('|', cc, FALSE, handle_cmd, handle_error);
   cc->hub = hub;
   time(&(cc->last_action));
-  nmdc_cc_list = g_list_prepend(nmdc_cc_list, cc);
+  cc->iter = g_sequence_append(nmdc_cc_list, cc);
+  if(ui_conn)
+    ui_conn_listchange(cc->iter, UICONN_ADD);
   return cc;
 }
 
@@ -415,7 +422,9 @@ void nmdc_cc_free(struct nmdc_cc *cc) {
   nmdc_cc_disconnect(cc);
   if(cc->timeout_src)
     g_source_remove(cc->timeout_src);
-  nmdc_cc_list = g_list_remove(nmdc_cc_list, cc);
+  if(ui_conn)
+    ui_conn_listchange(cc->iter, UICONN_DEL);
+  g_sequence_remove(cc->iter);
   net_unref(cc->net);
   g_error_free(cc->err);
   g_free(cc->nick_raw);

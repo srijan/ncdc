@@ -41,6 +41,7 @@
 #define UIT_HUB      1
 #define UIT_USERLIST 2
 #define UIT_MSG      3
+#define UIT_CONN     4
 
 struct ui_tab {
   int type; // UIT_ type
@@ -48,6 +49,7 @@ struct ui_tab {
   char *name;
   struct ui_logwindow *log;    // MAIN, HUB, MSG
   struct nmdc_hub *hub;        // HUB, USERLIST, MSG
+  struct ui_listing *list;     // USERLIST, CONN
   // HUB
   struct ui_tab *userlist_tab;
   gboolean hub_joincomplete;
@@ -55,7 +57,6 @@ struct ui_tab {
   struct nmdc_user *msg_user;
   char *msg_uname;
   // USERLIST
-  struct ui_listing *user_list;
   gboolean user_details;
   gboolean user_reverse;
   gboolean user_sort_share;
@@ -90,6 +91,7 @@ static struct ui_tab *ui_main_create() {
   ui_main = g_new0(struct ui_tab, 1);
   ui_main->name = "main";
   ui_main->log = ui_logwindow_create("main");
+  ui_main->type = UIT_MAIN;
 
   ui_mf(ui_main, 0, "Welcome to ncdc %s!", VERSION);
   ui_mf(ui_main, 0, "Using working directory: %s", conf_dir);
@@ -397,7 +399,7 @@ struct ui_tab *ui_userlist_create(struct nmdc_hub *hub) {
   struct nmdc_user *u;
   while(g_hash_table_iter_next(&iter, NULL, (gpointer *)&u))
     u->iter = g_sequence_insert_sorted(users, u, ui_userlist_sort_func, tab);
-  tab->user_list = ui_listing_create(users);
+  tab->list = ui_listing_create(users);
   return tab;
 }
 
@@ -408,8 +410,8 @@ void ui_userlist_close(struct ui_tab *tab) {
   // To clean things up, we should also reset all nmdc_user->iter fields. But
   // this isn't all that necessary since they won't be used anymore until they
   // get reset in a subsequent ui_userlist_create().
-  g_sequence_free(tab->user_list->list);
-  ui_listing_free(tab->user_list);
+  g_sequence_free(tab->list->list);
+  ui_listing_free(tab->list);
   g_free(tab->name);
   g_free(tab);
 }
@@ -481,7 +483,7 @@ static void ui_userlist_draw(struct ui_tab *tab) {
 
   // rows
   int bottom = tab->user_details ? winrows-7 : winrows-3;
-  int pos = ui_listing_draw(tab->user_list, 2, bottom-1, ui_userlist_draw_row, &o);
+  int pos = ui_listing_draw(tab->list, 2, bottom-1, ui_userlist_draw_row, &o);
 
   // footer
   attron(A_REVERSE);
@@ -498,10 +500,10 @@ static void ui_userlist_draw(struct ui_tab *tab) {
   // detailed info box
   if(!tab->user_details)
     return;
-  if(g_sequence_iter_is_end(tab->user_list->sel))
+  if(g_sequence_iter_is_end(tab->list->sel))
     mvaddstr(bottom+1, 2, "No user selected.");
   else {
-    struct nmdc_user *u = g_sequence_get(tab->user_list->sel);
+    struct nmdc_user *u = g_sequence_get(tab->list->sel);
     attron(A_BOLD);
     mvaddstr(bottom+1,  8, "Username:");
     mvaddstr(bottom+1, 45, "Share:");
@@ -530,7 +532,7 @@ static void ui_userlist_draw(struct ui_tab *tab) {
 
 
 static void ui_userlist_key(struct ui_tab *tab, guint64 key) {
-  if(ui_listing_key(tab->user_list, key, winrows/2))
+  if(ui_listing_key(tab->list, key, winrows/2))
     return;
 
   gboolean sort = FALSE;
@@ -570,8 +572,8 @@ static void ui_userlist_key(struct ui_tab *tab, guint64 key) {
     tab->user_details = !tab->user_details;
     break;
   case INPT_CHAR('m'): // m (/msg user)
-    if(!g_sequence_iter_is_end(tab->user_list->sel)) {
-      struct nmdc_user *u = g_sequence_get(tab->user_list->sel);
+    if(!g_sequence_iter_is_end(tab->list->sel)) {
+      struct nmdc_user *u = g_sequence_get(tab->list->sel);
       struct ui_tab *t = ui_hub_getmsg(tab, u);
       if(!t) {
         t = ui_msg_create(tab->hub, u);
@@ -586,8 +588,8 @@ static void ui_userlist_key(struct ui_tab *tab, guint64 key) {
   // TODO: some way to save the column visibility? per hub? global default?
 
   if(sort) {
-    g_sequence_sort(tab->user_list->list, ui_userlist_sort_func, tab);
-    ui_listing_sorted(tab->user_list);
+    g_sequence_sort(tab->list->list, ui_userlist_sort_func, tab);
+    ui_listing_sorted(tab->list);
     ui_mf(NULL, 0, "Ordering by %s (%s%s)", tab->user_sort_share ? "share size" : "user name",
       tab->user_reverse ? "descending" : "ascending", tab->user_opfirst ? ", OPs first" : "");
   }
@@ -596,17 +598,152 @@ static void ui_userlist_key(struct ui_tab *tab, guint64 key) {
 
 void ui_userlist_userchange(struct ui_tab *tab, int change, struct nmdc_user *user) {
   if(change == UIHUB_UC_JOIN) {
-    user->iter = g_sequence_insert_sorted(tab->user_list->list, user, ui_userlist_sort_func, tab);
-    ui_listing_inserted(tab->user_list);
+    user->iter = g_sequence_insert_sorted(tab->list->list, user, ui_userlist_sort_func, tab);
+    ui_listing_inserted(tab->list);
   } else if(change == UIHUB_UC_QUIT) {
     g_assert(g_sequence_get(user->iter) == (gpointer)user);
-    ui_listing_remove(tab->user_list, user->iter);
+    ui_listing_remove(tab->list, user->iter);
     g_sequence_remove(user->iter);
   } else {
     g_sequence_sort_changed(user->iter, ui_userlist_sort_func, tab);
-    ui_listing_sorted(tab->user_list);
+    ui_listing_sorted(tab->list);
   }
 }
+
+
+
+
+// these can only be one connections tab, so this can be static
+struct ui_tab *ui_conn;
+
+
+static gint ui_conn_sort_func(gconstpointer da, gconstpointer db, gpointer dat) {
+  const struct nmdc_cc *a = da;
+  const struct nmdc_cc *b = db;
+  int o = 0;
+  if(!o && !a->nick != !b->nick)
+    o = a->nick ? 1 : -1;
+  if(!o && a->nick && b->nick)
+    o = strcmp(a->nick, b->nick);
+  if(!o && a->hub && b->hub)
+    o = strcmp(a->hub->tab->name, b->hub->tab->name);
+  return o;
+}
+
+
+struct ui_tab *ui_conn_create() {
+  ui_conn = g_new0(struct ui_tab, 1);
+  ui_conn->name = "connections";
+  ui_conn->type = UIT_CONN;
+  // sort the connection list
+  g_sequence_sort(nmdc_cc_list, ui_conn_sort_func, NULL);
+  ui_conn->list = ui_listing_create(nmdc_cc_list);
+  return ui_conn;
+}
+
+
+void ui_conn_close() {
+  ui_tab_remove(ui_conn);
+  ui_listing_free(ui_conn->list);
+  g_free(ui_conn);
+  ui_conn = NULL;
+}
+
+
+#if INTERFACE
+#define UICONN_ADD 0
+#define UICONN_DEL 1
+#define UICONN_MOD 2
+#endif
+
+
+void ui_conn_listchange(GSequenceIter *iter, int change) {
+  g_return_if_fail(ui_conn);
+  switch(change) {
+  case UICONN_ADD:
+    ui_listing_inserted(ui_conn->list);
+    break;
+  case UICONN_DEL:
+    ui_listing_remove(ui_conn->list, iter);
+    break;
+  case UICONN_MOD:
+    g_sequence_sort_changed(iter, ui_conn_sort_func, NULL);
+    ui_listing_sorted(ui_conn->list);
+    break;
+  }
+}
+
+
+static char *ui_conn_title() {
+  return g_strdup("Connection list");
+}
+
+
+static void ui_conn_draw_row(struct ui_listing *list, GSequenceIter *iter, int row, void *dat) {
+  struct nmdc_cc *cc = g_sequence_get(iter);
+  char tmp[100];
+  if(iter == list->sel) {
+    attron(A_REVERSE);
+    mvhline(row, 0, ' ', wincols);
+  }
+
+  mvaddch(row, 0,
+    !cc->nick          ? 'C' : // connecting
+    cc->timeout_src    ? 'D' : // disconnected
+    cc->net->file_left ? 'U' : // uploading
+                         'I'); // idle
+
+  if(cc->nick)
+    mvaddnstr(row, 2, cc->nick, str_offset_from_columns(cc->nick, 19));
+  else {
+    g_snprintf(tmp, 99, "Unknown (%s)", net_remoteaddr(cc->net));
+    mvaddstr(row, 2, tmp);
+  }
+
+  if(cc->hub)
+    mvaddnstr(row, 22, cc->hub->tab->name, str_offset_from_columns(cc->hub->tab->name, 14));
+
+  // TODO: ratecalc for each connection
+  // TODO: progress bar or something?
+
+  if(cc->err) {
+    mvaddstr(row, 55, "Error: ");
+    addnstr(cc->err->message, str_offset_from_columns(cc->err->message, wincols-64));
+  } else if(cc->last_file) {
+    char *file = rindex(cc->last_file, '/');
+    if(file)
+      file++;
+    else
+      file = cc->last_file;
+    mvaddnstr(row, 55, file, str_offset_from_columns(file, wincols-56));
+  }
+
+  if(iter == list->sel)
+    attroff(A_REVERSE);
+}
+
+
+static void ui_conn_draw() {
+  attron(A_BOLD);
+  mvaddstr(1, 2,  "Username");
+  mvaddstr(1, 22, "Hub");
+  mvaddstr(1, 44, "KiB/s");
+  mvaddstr(1, 55, "File");
+  attroff(A_BOLD);
+
+  int pos = ui_listing_draw(ui_conn->list, 2, winrows-10, ui_conn_draw_row, NULL);
+
+  pos++;
+  // TODO: detailed info box (unlike with the userlist, this box is always
+  // visible here. Or at least by default)
+}
+
+
+static void ui_conn_key(guint64 key) {
+  if(ui_listing_key(ui_conn->list, key, (winrows-10)/2))
+    return;
+}
+
 
 
 
@@ -973,7 +1110,8 @@ void ui_draw() {
     curtab->type == UIT_MAIN     ? ui_main_title() :
     curtab->type == UIT_HUB      ? ui_hub_title(curtab) :
     curtab->type == UIT_USERLIST ? ui_userlist_title(curtab) :
-    curtab->type == UIT_MSG      ? ui_msg_title(curtab) : g_strdup("");
+    curtab->type == UIT_MSG      ? ui_msg_title(curtab) :
+    curtab->type == UIT_CONN     ? ui_conn_title() : g_strdup("");
   attron(A_REVERSE);
   mvhline(0, 0, ' ', wincols);
   mvaddstr(0, 0, title);
@@ -998,6 +1136,7 @@ void ui_draw() {
   case UIT_HUB:      ui_hub_draw(curtab);  break;
   case UIT_USERLIST: ui_userlist_draw(curtab);  break;
   case UIT_MSG:      ui_msg_draw(curtab);  break;
+  case UIT_CONN:     ui_conn_draw(); break;
   }
 
   refresh();
@@ -1055,6 +1194,10 @@ void ui_input(guint64 key) {
     cmd_handle("/refresh");
     break;
 
+  case INPT_ALT('n'): // alt+n (alias for /connections)
+    cmd_handle("/connections");
+    break;
+
   default:
     // alt+num (switch tab)
     if(key >= INPT_ALT('0') && key <= INPT_ALT('9')) {
@@ -1068,6 +1211,7 @@ void ui_input(guint64 key) {
       case UIT_HUB:      ui_hub_key(curtab, key); break;
       case UIT_USERLIST: ui_userlist_key(curtab, key); break;
       case UIT_MSG:      ui_msg_key(curtab, key); break;
+      case UIT_CONN:     ui_conn_key(key); break;
       }
     }
     // TODO: some user feedback on invalid key

@@ -626,6 +626,8 @@ static void c_close(char *args) {
     ui_userlist_close(tab);
   else if(tab->type == UIT_MSG)
     ui_msg_close(tab);
+  else if(tab->type == UIT_CONN)
+    ui_conn_close();
 }
 
 
@@ -821,6 +823,18 @@ static void c_version(char *args) {
 }
 
 
+static void c_connections(char *args) {
+  if(args[0])
+    ui_m(NULL, 0, "This command does not accept any arguments.");
+  else {
+    if(ui_conn)
+      ui_tab_cur = g_list_find(ui_tabs, ui_conn);
+    else
+      ui_tab_open(ui_conn_create());
+  }
+}
+
+
 // definition of the command list
 static struct cmd cmds[] = {
   { "clear", c_clear, NULL,
@@ -843,6 +857,10 @@ static struct cmd cmds[] = {
     "  /open testhub\n"
     "  /connect dchub://dc.some-test-hub.com/\n"
     "See `/help open' for more information."
+  },
+  { "connections", c_connections, NULL,
+    NULL, "Display the connection list.",
+    "Opens a new tab with the connection list."
   },
   { "disconnect", c_disconnect, NULL,
     NULL, "Disconnect from a hub.",

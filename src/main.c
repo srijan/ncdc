@@ -271,6 +271,7 @@ int main(int argc, char **argv) {
   g_thread_init(NULL);
   g_type_init();
   conf_init();
+  nmdc_cc_init_global();
   net_init_global();
 
   // setup logging

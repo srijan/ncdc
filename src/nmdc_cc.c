@@ -413,6 +413,8 @@ void nmdc_cc_disconnect(struct nmdc_cc *cc) {
 
 void nmdc_cc_free(struct nmdc_cc *cc) {
   nmdc_cc_disconnect(cc);
+  if(cc->timeout_src)
+    g_source_remove(cc->timeout_src);
   nmdc_cc_list = g_list_remove(nmdc_cc_list, cc);
   net_unref(cc->net);
   g_error_free(cc->err);

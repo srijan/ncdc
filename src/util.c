@@ -300,6 +300,31 @@ char *str_formatsize(guint64 size) {
 }
 
 
+char *str_fullsize(guint64 size) {
+  static char tmp[50];
+  static char res[50];
+  int i, j;
+
+  /* the K&R method */
+  i = 0;
+  do {
+    tmp[i++] = size % 10 + '0';
+  } while((size /= 10) > 0);
+  tmp[i] = '\0';
+
+  /* reverse and add thousand seperators */
+  j = 0;
+  while(i--) {
+    res[j++] = tmp[i];
+    if(i != 0 && i%3 == 0)
+      res[j++] = '.';
+  }
+  res[j] = '\0';
+
+  return res;
+}
+
+
 // case-insensitive substring match
 char *str_casestr(const char *haystack, const char *needle) {
   gsize hlen = strlen(haystack);

@@ -658,7 +658,7 @@ gboolean ui_listing_key(struct ui_listing *ul, guint64 key, int page) {
 // Returns the relative position of the current page (in percent)
 int ui_listing_draw(struct ui_listing *ul, int top, int bottom, void (*cb)(struct ui_listing *, GSequenceIter *, int, void *), void *dat) {
   // get or update the top row to make sure sel is visible
-  int height = bottom - top;
+  int height = 1 + bottom - top;
   int row_last = g_sequence_iter_get_position(g_sequence_get_end_iter(ul->list));
   int row_top = g_sequence_iter_get_position(ul->top);
   int row_sel = g_sequence_iter_get_position(ul->sel);
@@ -675,7 +675,7 @@ int ui_listing_draw(struct ui_listing *ul, int top, int bottom, void (*cb)(struc
 
   // draw
   GSequenceIter *n = ul->top;
-  while(top < bottom && !g_sequence_iter_is_end(n)) {
+  while(top <= bottom && !g_sequence_iter_is_end(n)) {
     cb(ul, n, top++, dat);
     n = g_sequence_iter_next(n);
   }

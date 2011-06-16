@@ -56,6 +56,7 @@ struct ui_tab {
   char *msg_uname;
   // USERLIST
   struct ui_listing *user_list;
+  gboolean user_details;
   gboolean user_reverse;
   gboolean user_sort_share;
   gboolean user_opfirst;
@@ -452,6 +453,7 @@ static void ui_userlist_draw_row(struct ui_listing *list, GSequenceIter *iter, i
 
 // TODO: some way of letting the user know what keys can be pressed
 static void ui_userlist_draw(struct ui_tab *tab) {
+  char tmp[201];
   // column widths (this is a trial-and-error-whatever-looks-right algorithm)
   struct ui_userlist_draw_opts o;
   int num = 2 + (tab->user_hide_conn?0:1) + (tab->user_hide_desc?0:1) + (tab->user_hide_tag?0:1) + (tab->user_hide_mail?0:1);
@@ -475,20 +477,51 @@ static void ui_userlist_draw(struct ui_tab *tab) {
   attroff(A_BOLD);
 
   // rows
-  int pos = ui_listing_draw(tab->user_list, 2, winrows-3, ui_userlist_draw_row, &o);
+  int bottom = tab->user_details ? winrows-7 : winrows-3;
+  int pos = ui_listing_draw(tab->user_list, 2, bottom-1, ui_userlist_draw_row, &o);
 
   // footer
-  attron(A_BOLD);
+  attron(A_REVERSE);
+  mvhline(bottom, 0, ' ', wincols);
   int count = g_hash_table_size(tab->hub->users);
-  mvaddstr(winrows-3, 0, "Totals:");
-  char *tmp = g_strdup_printf("%s%c   %d users",
+  mvaddstr(bottom, 0, "Totals:");
+  g_snprintf(tmp, 200, "%s%c   %d users",
     str_formatsize(tab->hub->sharesize), tab->hub->sharecount == count ? ' ' : '+', count);
-  mvaddstr(winrows-3, o.cw_user, tmp);
-  g_free(tmp);
-  tmp = g_strdup_printf("%3d%%", pos);
-  mvaddstr(winrows-3, wincols-6, tmp);
-  g_free(tmp);
-  attroff(A_BOLD);
+  mvaddstr(bottom, o.cw_user, tmp);
+  g_snprintf(tmp, 200, "%3d%%", pos);
+  mvaddstr(bottom, wincols-6, tmp);
+  attroff(A_REVERSE);
+
+  // detailed info box
+  if(!tab->user_details)
+    return;
+  if(g_sequence_iter_is_end(tab->user_list->sel))
+    mvaddstr(bottom+1, 2, "No user selected.");
+  else {
+    struct nmdc_user *u = g_sequence_get(tab->user_list->sel);
+    attron(A_BOLD);
+    mvaddstr(bottom+1,  8, "Username:");
+    mvaddstr(bottom+1, 45, "Share:");
+    mvaddstr(bottom+2,  6, "Connection:");
+    mvaddstr(bottom+2, 44, "E-Mail:");
+    mvaddstr(bottom+3,  1, "Description/tag:");
+    attroff(A_BOLD);
+    mvaddstr(bottom+1, 18, u->name);
+    if(u->hasinfo)
+      g_snprintf(tmp, 200, "%s (%s bytes)", str_formatsize(u->sharesize), str_fullsize(u->sharesize));
+    else
+      strcpy(tmp, "-");
+    mvaddstr(bottom+1, 52, tmp);
+    mvaddstr(bottom+2, 18, u->hasinfo ? u->conn : "-");
+    mvaddstr(bottom+2, 52, u->hasinfo ? u->mail : "-");
+    if(u->hasinfo && u->tag)
+      g_snprintf(tmp, 200, "%s <%s>", u->desc?u->desc:"", u->tag);
+    else if(u->hasinfo)
+      strncpy(tmp, u->desc, 200);
+    else
+      strcpy(tmp, "-");
+    mvaddstr(bottom+3, 18, tmp);
+  }
 }
 #undef DRAW_COL
 
@@ -528,6 +561,10 @@ static void ui_userlist_key(struct ui_tab *tab, guint64 key) {
     break;
   case INPT_CHAR('c'): // c (toggle connection visibility)
     tab->user_hide_conn = !tab->user_hide_conn;
+    break;
+  case INPT_CTRL('j'): // newline
+  case INPT_CHAR('i'): // i       (toggle user info)
+    tab->user_details = !tab->user_details;
     break;
   case INPT_CHAR('m'): // m (/msg user)
     if(!g_sequence_iter_is_end(tab->user_list->sel)) {

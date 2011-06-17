@@ -703,11 +703,16 @@ static void ui_conn_draw_row(struct ui_listing *list, GSequenceIter *iter, int r
   if(cc->hub)
     mvaddnstr(row, 22, cc->hub->tab->name, str_offset_from_columns(cc->hub->tab->name, 14));
 
-  // TODO: ratecalc for each connection
+  if(cc->timeout_src)
+    strcpy(tmp, "     -");
+  else
+    g_snprintf(tmp, 99, "%6d", ratecalc_get(cc->net->rate_out)/1024);
+  mvaddstr(row, 44, tmp);
+
   // TODO: progress bar or something?
 
   if(cc->err) {
-    mvaddstr(row, 55, "Error: ");
+    mvaddstr(row, 55, "Disconnected: ");
     addnstr(cc->err->message, str_offset_from_columns(cc->err->message, wincols-64));
   } else if(cc->last_file) {
     char *file = rindex(cc->last_file, '/');
@@ -724,6 +729,7 @@ static void ui_conn_draw_row(struct ui_listing *list, GSequenceIter *iter, int r
 
 
 static void ui_conn_draw() {
+  char tmp[100];
   attron(A_BOLD);
   mvaddstr(1, 2,  "Username");
   mvaddstr(1, 22, "Hub");
@@ -733,7 +739,12 @@ static void ui_conn_draw() {
 
   int pos = ui_listing_draw(ui_conn->list, 2, winrows-10, ui_conn_draw_row, NULL);
 
-  pos++;
+  // footer
+  attron(A_REVERSE);
+  mvhline(winrows-9, 0, ' ', wincols);
+  g_snprintf(tmp, 99, "%3d connections    %3d%%", g_sequence_iter_get_position(g_sequence_get_end_iter(ui_conn->list->list)), pos);
+  mvaddstr(winrows-9, wincols-24, tmp);
+  attroff(A_REVERSE);
   // TODO: detailed info box (unlike with the userlist, this box is always
   // visible here. Or at least by default)
 }

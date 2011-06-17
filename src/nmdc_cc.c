@@ -397,10 +397,6 @@ static void handle_connect(struct net *n) {
 void nmdc_cc_connect(struct nmdc_cc *cc, const char *addr) {
   g_return_if_fail(!cc->timeout_src);
   net_connect(cc->net, addr, 0, handle_connect);
-  if(cc->timeout_src) {
-    g_source_remove(cc->timeout_src);
-    cc->timeout_src = 0;
-  }
   g_clear_error(&(cc->err));
 }
 
@@ -412,6 +408,7 @@ static gboolean handle_timeout(gpointer dat) {
 
 
 void nmdc_cc_disconnect(struct nmdc_cc *cc) {
+  g_return_if_fail(!cc->timeout_src);
   time(&(cc->last_action));
   net_disconnect(cc->net);
   cc->timeout_src = g_timeout_add_seconds(30, handle_timeout, cc);

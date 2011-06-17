@@ -78,6 +78,9 @@ struct net {
   int file_fd;
   gint64 file_left;
   guint64 file_offset;
+  // in/out rates
+  struct ratecalc *rate_in;
+  struct ratecalc *rate_out;
   // receive callback
   void (*cb_rcv)(struct net *, char *);
   // on-connect callback
@@ -134,6 +137,8 @@ struct net {
         close((n)->file_fd);\
         (n)->file_left = 0;\
       }\
+      ratecalc_unregister((n)->rate_in);\
+      ratecalc_unregister((n)->rate_out);\
     }\
   } while(0)
 
@@ -143,41 +148,21 @@ struct net {
 #define net_unref(n) do {\
     if(g_atomic_int_dec_and_test(&((n)->ref))) {\
       net_disconnect(n);\
-      if((n)->timeout_src)\
-        g_source_remove((n)->timeout_src);\
       if((n)->file_left)\
         close((n)->file_fd);\
+      if((n)->timeout_src)\
+        g_source_remove((n)->timeout_src);\
       g_object_unref((n)->cancel);\
       g_string_free((n)->out, TRUE);\
       g_string_free((n)->in, TRUE);\
-      g_free(n);\
+      g_slice_free(struct ratecalc, (n)->rate_in);\
+      g_slice_free(struct ratecalc, (n)->rate_out);\
+      g_slice_free(struct net, n);\
     }\
   } while(0)
 
 
 #endif
-
-
-
-// Some global stuff for sending UDP packets
-
-struct net_udp { GSocketAddress *dest; char *msg; int msglen; };
-static GSocket *net_udp_sock;
-static GQueue *net_udp_queue;
-
-
-// initialize some global structures
-void net_init_global() {
-  ratecalc_init(&net_in);
-  ratecalc_init(&net_out);
-  ratecalc_register(&net_in);
-  ratecalc_register(&net_out);
-
-  // TODO: IPv6?
-  net_udp_sock = g_socket_new(G_SOCKET_FAMILY_IPV4, G_SOCKET_TYPE_DATAGRAM, G_SOCKET_PROTOCOL_UDP, NULL);
-  g_socket_set_blocking(net_udp_sock, FALSE);
-  net_udp_queue = g_queue_new();
-}
 
 
 static void consume_input(struct net *n) {
@@ -249,6 +234,7 @@ static gboolean handle_input(GSocket *sock, GIOCondition cond, gpointer dat) {
   gssize read = g_socket_receive(n->sock, n->in->str + n->in->len, n->in->allocated_len - n->in->len - 1, NULL, &err);
   handle_ioerr(n, n->in_src, read, err, NETERR_RECV);
   ratecalc_add(&net_in, read);
+  ratecalc_add(n->rate_in, read);
   n->in->len += read;
   n->in->str[n->in->len] = 0;
   consume_input(n);
@@ -279,6 +265,7 @@ static gboolean handle_sendfile(struct net *n) {
   if(r >= 0) {
     n->file_left -= r;
     ratecalc_add(&net_out, r);
+    ratecalc_add(n->rate_out, r);
     return TRUE;
 
   } else if(errno == EAGAIN || errno == EINTR)
@@ -295,6 +282,7 @@ static gboolean handle_sendfile(struct net *n) {
     gssize written = g_socket_send(n->sock, buf, r, NULL, &err);
     handle_ioerr(n, n->out_src, written, err, NETERR_SEND);
     ratecalc_add(&net_out, r);
+    ratecalc_add(n->rate_out, r);
     n->file_offset += r;
     n->file_left -= r;
     return TRUE;
@@ -315,6 +303,7 @@ static gboolean handle_output(GSocket *sock, GIOCondition cond, gpointer dat) {
     GError *err = NULL;
     gssize written = g_socket_send(n->sock, n->out->str, n->out->len, NULL, &err);
     handle_ioerr(n, n->out_src, written, err, NETERR_SEND);
+    ratecalc_add(n->rate_out, written);
     ratecalc_add(&net_out, written);
     g_string_erase(n->out, 0, written);
     if(n->out->len || n->file_left)
@@ -337,6 +326,9 @@ static gboolean handle_output(GSocket *sock, GIOCondition cond, gpointer dat) {
 static gboolean handle_timer(gpointer dat) {
   struct net *n = dat;
   time_t t = time(NULL);
+
+  if(!n->conn)
+    return TRUE;
 
   // keepalive? send an empty command every 2 minutes of inactivity
   if(n->keepalive && n->timeout_last < t-120)
@@ -379,6 +371,10 @@ static void handle_connect(GObject *src, GAsyncResult *res, gpointer dat) {
     g_source_set_callback(src, (GSourceFunc)handle_input, n, NULL);
     n->in_src = g_source_attach(src, NULL);
     g_source_unref(src);
+    ratecalc_reset(n->rate_in);
+    ratecalc_reset(n->rate_out);
+    ratecalc_register(n->rate_in);
+    ratecalc_register(n->rate_out);
     g_debug("%s- Connected.", net_remoteaddr(n));
     n->cb_con(n);
   }
@@ -425,8 +421,12 @@ char *net_remoteaddr(struct net *n) {
 
 
 struct net *net_create(char term, void *han, gboolean keepalive, void (*rfunc)(struct net *, char *), void (*errfunc)(struct net *, int, GError *)) {
-  struct net *n = g_new0(struct net, 1);
+  struct net *n = g_slice_new0(struct net);
   n->ref = 1;
+  n->rate_in  = g_slice_new0(struct ratecalc);
+  n->rate_out = g_slice_new0(struct ratecalc);
+  ratecalc_init(n->rate_in);
+  ratecalc_init(n->rate_out);
   n->in  = g_string_sized_new(1024);
   n->out = g_string_sized_new(1024);
   n->cancel = g_cancellable_new();
@@ -473,7 +473,7 @@ void net_sendf(struct net *n, const char *fmt, ...) {
 
 
 // TODO: error reporting?
-// Note: the net_send() family shouldn't be used while the file is being sent.
+// Note: the net_send() family shouldn't be used while a file is being sent.
 void net_sendfile(struct net *n, const char *path, guint64 offset, guint64 length) {
   g_return_if_fail(!n->file_left);
   g_return_if_fail((n->file_fd = open(path, O_RDONLY)) >= 0);
@@ -482,6 +482,16 @@ void net_sendfile(struct net *n, const char *path, guint64 offset, guint64 lengt
   send_do(n);
 }
 
+
+
+
+
+
+// Some global stuff for sending UDP packets
+
+struct net_udp { GSocketAddress *dest; char *msg; int msglen; };
+static GSocket *net_udp_sock;
+static GQueue *net_udp_queue;
 
 
 static gboolean udp_handle_out(GSocket *sock, GIOCondition cond, gpointer dat) {
@@ -547,5 +557,26 @@ void net_udp_sendf(const char *dest, const char *fmt, ...) {
   va_end(va);
   net_udp_send_raw(dest, str, strlen(str));
   g_free(str);
+}
+
+
+
+
+
+
+
+
+// initialize some global structures
+
+void net_init_global() {
+  ratecalc_init(&net_in);
+  ratecalc_init(&net_out);
+  ratecalc_register(&net_in);
+  ratecalc_register(&net_out);
+
+  // TODO: IPv6?
+  net_udp_sock = g_socket_new(G_SOCKET_FAMILY_IPV4, G_SOCKET_TYPE_DATAGRAM, G_SOCKET_PROTOCOL_UDP, NULL);
+  g_socket_set_blocking(net_udp_sock, FALSE);
+  net_udp_queue = g_queue_new();
 }
 

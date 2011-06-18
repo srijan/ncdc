@@ -521,7 +521,7 @@ static void ui_userlist_draw(struct ui_tab *tab) {
     mvaddstr(bottom+2, 52, u->hasinfo ? u->mail : "-");
     if(u->hasinfo && u->tag)
       g_snprintf(tmp, 200, "%s <%s>", u->desc?u->desc:"", u->tag);
-    else if(u->hasinfo)
+    else if(u->desc)
       strncpy(tmp, u->desc, 200);
     else
       strcpy(tmp, "-");

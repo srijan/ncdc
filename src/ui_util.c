@@ -596,6 +596,8 @@ struct ui_listing {
       (ul)->sel = g_sequence_iter_next(iter);\
       if(g_sequence_iter_is_end((ul)->sel))\
         (ul)->sel = g_sequence_iter_prev(iter);\
+      if((ul)->sel == (iter))\
+        (ul)->sel = g_sequence_get_end_iter((ul)->list);\
     }\
     ui_listing_updateisbegin(ul);\
   } while(0)

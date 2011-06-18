@@ -212,7 +212,8 @@ static char *adc_escape(const char *str) {
 
 static void handle_error(struct net *n, int action, GError *err) {
   struct nmdc_cc *cc = n->handle;
-  g_propagate_error(&(cc->err), g_error_copy(err));
+  if(!cc->err) // ignore network errors if there already was a protocol error
+    g_propagate_error(&(cc->err), g_error_copy(err));
   nmdc_cc_disconnect(n->handle);
 }
 
@@ -527,7 +528,8 @@ void nmdc_cc_disconnect(struct nmdc_cc *cc) {
 
 
 void nmdc_cc_free(struct nmdc_cc *cc) {
-  nmdc_cc_disconnect(cc);
+  if(!cc->timeout_src)
+    nmdc_cc_disconnect(cc);
   if(cc->timeout_src)
     g_source_remove(cc->timeout_src);
   if(ui_conn)

@@ -37,6 +37,7 @@ struct nmdc_cc {
   struct nmdc_hub *hub;
   char *nick_raw; // hub encoding
   char *nick;     // UTF-8
+  gboolean active;
   time_t last_action;
   int timeout_src;
   char remoteaddr[24]; // xxx.xxx.xxx.xxx:ppppp
@@ -244,14 +245,32 @@ static void handle_adcget(struct nmdc_cc *cc, char *type, char *id, guint64 star
 }
 
 
+
+// Figure out from which hub a connection came
+static struct nmdc_hub *nmdc_cc_get_hub(const char *nick) {
+  // TODO: Keep a list of expected incoming connections by checking
+  // $RevConnectToMe's, and check that list first before falling back to this
+  // extremely ugly and unreliable trick.
+  GList *n;
+  for(n=ui_tabs; n; n=n->next) {
+    struct ui_tab *t = n->data;
+    if(t->type == UIT_HUB && g_hash_table_lookup(t->hub->users, nick))
+      return t->hub;
+  }
+  return NULL;
+}
+
+
 static void handle_mynick(struct nmdc_cc *cc, const char *nick) {
   if(cc->nick) {
     g_warning("Received a $MyNick from %s when we have already received one.", cc->nick);
     return;
   }
 
-  // TODO: figure out hub if this is an active session
+  if(!cc->hub)
+    cc->hub = nmdc_cc_get_hub(nick);
   if(!cc->hub) {
+    g_warning("Received incoming connection from %s (%s), who is on none of the connected hubs.", nick, net_remoteaddr(cc->net));
     nmdc_cc_disconnect(cc);
     return;
   }
@@ -273,6 +292,11 @@ static void handle_mynick(struct nmdc_cc *cc, const char *nick) {
     g_set_error_literal(&(cc->err), 1, 0, "too many open connections with this user");
     nmdc_cc_disconnect(cc);
     return;
+  }
+
+  if(cc->active) {
+    net_sendf(cc->net, "$MyNick %s", cc->hub->nick_hub);
+    net_sendf(cc->net, "$Lock EXTENDEDPROTOCOL/wut? Pk=%s-%s", PACKAGE_NAME, PACKAGE_VERSION);
   }
 }
 
@@ -404,6 +428,13 @@ void nmdc_cc_connect(struct nmdc_cc *cc, const char *addr) {
 }
 
 
+static void nmdc_cc_incoming(struct nmdc_cc *cc, GSocket *sock) {
+  net_setsock(cc->net, sock);
+  cc->active = TRUE;
+  strncpy(cc->remoteaddr, net_remoteaddr(cc->net), 23);
+}
+
+
 static gboolean handle_timeout(gpointer dat) {
   nmdc_cc_free(dat);
   return FALSE;
@@ -460,7 +491,17 @@ void nmdc_cc_listen_stop() {
 
 
 static gboolean listen_handle(GSocket *sock, GIOCondition cond, gpointer dat) {
-  // TODO: actually handle incoming connections
+  GError *err = NULL;
+  GSocket *s = g_socket_accept(sock, NULL, &err);
+  if(!s) {
+    if(err->code != G_IO_ERROR_WOULD_BLOCK) {
+      ui_mf(ui_main, 0, "Listen error: %s. Switching to passive mode.", err->message);
+      nmdc_cc_listen_stop();
+    }
+    g_error_free(err);
+    return FALSE;
+  }
+  nmdc_cc_incoming(nmdc_cc_create(NULL), s);
   return TRUE;
 }
 

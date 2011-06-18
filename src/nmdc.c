@@ -281,9 +281,8 @@ void nmdc_send_myinfo(struct nmdc_hub *hub) {
       hubs++;
   }
 
-  // TODO: mode and "open new slot when upload is slower than.." stuff. When implemented.
-  tmp = g_strdup_printf("$MyINFO $ALL %s %s<ncdc V:%s,M:P,H:%d/0/0,S:%d>$ $%s\01$%s$%"G_GUINT64_FORMAT"$",
-    hub->nick_hub, desc, VERSION, hubs, conf_slots(), conn, mail, fl_local_list_size);
+  tmp = g_strdup_printf("$MyINFO $ALL %s %s<ncdc V:%s,M:%c,H:%d/0/0,S:%d>$ $%s\01$%s$%"G_GUINT64_FORMAT"$",
+    hub->nick_hub, desc, VERSION, nmdc_cc_listen ? 'A' : 'P', hubs, conf_slots(), conn, mail, fl_local_list_size);
   g_free(desc);
   g_free(conn);
   g_free(mail);
@@ -394,7 +393,7 @@ static void handle_search(struct nmdc_hub *hub, char *from, int size_m, guint64 
       hub->nick_hub, tmp, size ? size : "", slots_free, slots, res[i]->isfile ? tth : hub->hubname_hub, hubaddr);
     if(from[0] == 'H')
       net_sendf(hub->net, "%s\05%s", msg, from+4);
-    else // TODO: send multiple $SR's in a single UDP message? What do the other clients do?
+    else
       net_udp_sendf(from, "%s|", msg);
     g_free(fl);
     g_free(msg);
@@ -424,6 +423,7 @@ static void handle_cmd(struct net *n, char *cmd) {
   CMDREGEX(to, "To: ([^ $]+) From: ([^ $]+) \\$(.+)");
   CMDREGEX(forcemove, "ForceMove (.+)");
   CMDREGEX(connecttome, "ConnectToMe ([^ $]+) ([0-9]{1,3}(?:\\.[0-9]{1,3}){3}:[0-9]+)"); // TODO: IPv6
+  CMDREGEX(revconnecttome, "RevConnectToMe ([^ $]+) ([^ $]+)");
   CMDREGEX(search, "Search (Hub:(?:[^ $]+)|(?:[0-9]{1,3}(?:\\.[0-9]{1,3}){3}:[0-9]+)) ([TF])\\?([TF])\\?([0-9]+)\\?([1-9])\\?(.+)");
 
   // $Lock
@@ -596,6 +596,21 @@ static void handle_cmd(struct net *n, char *cmd) {
       nmdc_cc_connect(nmdc_cc_create(hub), addr);
     g_free(me);
     g_free(addr);
+  }
+  g_match_info_free(nfo);
+
+  // $RevConnectToMe
+  if(g_regex_match(revconnecttome, cmd, 0, &nfo)) { // 1 = other, 2 = me
+    char *other = g_match_info_fetch(nfo, 1);
+    char *me = g_match_info_fetch(nfo, 2);
+    if(strcmp(me, hub->nick_hub) != 0)
+      g_warning("Received a $RevConnectToMe for someone else (to %s from %s)", me, other);
+    else if(nmdc_cc_listen)
+      net_sendf(hub->net, "$ConnectToMe %s %s:%d", other, nmdc_cc_listen_ip, nmdc_cc_listen_port);
+    else
+      g_message("Received a $RevConnectToMe, but we're not active.");
+    g_free(me);
+    g_free(other);
   }
   g_match_info_free(nfo);
 

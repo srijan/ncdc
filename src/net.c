@@ -96,6 +96,8 @@ struct net {
   // packets will be sent. Otherwise, an error will be generated if there has
   // been no read activity within the last 30 seconds (or so).
   gboolean keepalive;
+  // Whether _connect() or _setsock() was used.
+  gboolean setsock;
   // Don't use _set_timeout() on the socket, since that will throw a timeout
   // even when we're actively writing to the socket. So we use our own timeout
   // detection using a 5-second timer and a timestamp of the last action.
@@ -133,6 +135,10 @@ struct net {
       net_cancel(n);\
       g_object_unref((n)->conn);\
       (n)->conn = NULL;\
+      if((n)->setsock) {\
+        g_object_unref((n)->sock);\
+        (n)->setsock = FALSE;\
+      }\
       if((n)->file_left) {\
         close((n)->file_fd);\
         (n)->file_left = 0;\
@@ -346,6 +352,29 @@ static gboolean handle_timer(gpointer dat) {
 }
 
 
+static void handle_setconn(struct net *n, GSocketConnection *conn) {
+  n->conn = conn;
+  n->sock = g_socket_connection_get_socket(n->conn);
+#if GLIB_CHECK_VERSION(2, 26, 0)
+  g_socket_set_timeout(n->sock, 0);
+#endif
+  time(&(n->timeout_last));
+  n->timeout_src = g_timeout_add_seconds(5, handle_timer, n);
+  if(n->keepalive)
+    g_socket_set_keepalive(n->sock, TRUE);
+  g_socket_set_blocking(n->sock, FALSE);
+  GSource *src = g_socket_create_source(n->sock, G_IO_IN, NULL);
+  g_source_set_callback(src, (GSourceFunc)handle_input, n, NULL);
+  n->in_src = g_source_attach(src, NULL);
+  g_source_unref(src);
+  ratecalc_reset(n->rate_in);
+  ratecalc_reset(n->rate_out);
+  ratecalc_register(n->rate_in);
+  ratecalc_register(n->rate_out);
+  g_debug("%s- Connected.", net_remoteaddr(n));
+}
+
+
 static void handle_connect(GObject *src, GAsyncResult *res, gpointer dat) {
   struct net *n = dat;
 
@@ -357,31 +386,14 @@ static void handle_connect(GObject *src, GAsyncResult *res, gpointer dat) {
       n->cb_err(n, NETERR_CONN, err);
     g_error_free(err);
   } else {
-    n->conn = conn;
-    n->sock = g_socket_connection_get_socket(n->conn);
-#if GLIB_CHECK_VERSION(2, 26, 0)
-    g_socket_set_timeout(n->sock, 0);
-#endif
-    time(&(n->timeout_last));
-    n->timeout_src = g_timeout_add_seconds(5, handle_timer, n);
-    if(n->keepalive)
-      g_socket_set_keepalive(n->sock, TRUE);
-    g_socket_set_blocking(n->sock, FALSE);
-    GSource *src = g_socket_create_source(n->sock, G_IO_IN, NULL);
-    g_source_set_callback(src, (GSourceFunc)handle_input, n, NULL);
-    n->in_src = g_source_attach(src, NULL);
-    g_source_unref(src);
-    ratecalc_reset(n->rate_in);
-    ratecalc_reset(n->rate_out);
-    ratecalc_register(n->rate_in);
-    ratecalc_register(n->rate_out);
-    g_debug("%s- Connected.", net_remoteaddr(n));
+    handle_setconn(n, conn);
     n->cb_con(n);
   }
 }
 
 
 void net_connect(struct net *n, const char *addr, unsigned short defport, void (*cb)(struct net *)) {
+  g_return_if_fail(!n->conn);
   n->cb_con = cb;
 
   // From g_socket_client_connect_to_host() documentation:
@@ -402,6 +414,13 @@ void net_connect(struct net *n, const char *addr, unsigned short defport, void (
 #endif
   g_socket_client_connect_to_host_async(sc, addr, defport, n->cancel, handle_connect, n);
   g_object_unref(sc);
+}
+
+
+void net_setsock(struct net *n, GSocket *sock) {
+  g_return_if_fail(!n->conn);
+  handle_setconn(n, g_socket_connection_factory_create_connection(sock));
+  n->setsock = TRUE;
 }
 
 

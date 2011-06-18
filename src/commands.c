@@ -185,16 +185,20 @@ static void set_encoding_sug(char *val, char **sug) {
 }
 
 
+static gboolean bool_var(const char *val) {
+  if(strcmp(val, "1") == 0 || strcmp(val, "t") == 0 || strcmp(val, "y") == 0
+      || strcmp(val, "true") == 0 || strcmp(val, "yes") == 0 || strcmp(val, "on") == 0)
+    return TRUE;
+  return FALSE;
+}
+
+
 // generic set function for boolean settings that don't require any special attention
 static void set_bool(char *group, char *key, char *val) {
   if(!val)
     UNSET(group, key);
   else {
-    gboolean new = FALSE;
-    if(strcmp(val, "1") == 0 || strcmp(val, "t") == 0 || strcmp(val, "y") == 0
-        || strcmp(val, "true") == 0 || strcmp(val, "yes") == 0 || strcmp(val, "on") == 0)
-      new = TRUE;
-    g_key_file_set_boolean(conf_file, group, key, new);
+    g_key_file_set_boolean(conf_file, group, key, bool_var(val));
     get_bool(group, key);
   }
 }
@@ -215,6 +219,49 @@ static void set_autoconnect(char *group, char *key, char *val) {
     ui_m(NULL, 0, "ERROR: autoconnect can only be used as hub setting.");
   else
     set_bool(group, key, val);
+}
+
+
+static void set_active(char *group, char *key, char *val) {
+  if(!val)
+    UNSET(group, key);
+  else if(bool_var(val) && !g_key_file_has_key(conf_file, "global", "active_ip", NULL)) {
+    ui_m(NULL, 0, "ERROR: No IP address set. Please use `/set active_ip <your_ip>' first.");
+    return;
+  }
+  set_bool(group, key, val);
+  nmdc_cc_listen_start();
+}
+
+
+static void set_active_ip(char *group, char *key, char *val) {
+  if(!val) {
+    UNSET(group, key);
+    set_active(group, key, NULL);
+  }
+  // TODO: IPv6?
+  if(!g_regex_match_simple("^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}$", val, 0, 0)
+      || strncmp("127.", val, 4) == 0 || strncmp("0.", val, 2) == 0) {
+    ui_m(NULL, 0, "ERROR: Invalid IP.");
+    return;
+  }
+  g_key_file_set_string(conf_file, group, key, val);
+  get_string(group, key);
+}
+
+
+static void set_active_port(char *group, char *key, char *val) {
+  long v = -1;
+  if(!val)
+    UNSET(group, key);
+  else {
+    v = strtol(val, NULL, 10);
+    if((!v && errno == EINVAL) || v < 0 || v > 65535)
+      ui_m(NULL, 0, "Invalid port number.");
+    g_key_file_set_integer(conf_file, group, key, v);
+    get_int(group, key);
+  }
+  nmdc_cc_listen_start();
 }
 
 
@@ -253,6 +300,9 @@ static void set_slots(char *group, char *key, char *val) {
 // the settings list
 // TODO: help text / documentation?
 static struct setting settings[] = {
+  { "active",        "global", get_bool,   set_active,      NULL             },
+  { "active_ip",     "global", get_string, set_active_ip,   NULL             },
+  { "active_port",   "global", get_int,    set_active_port, NULL,            },
   { "autoconnect",   NULL,     get_bool,   set_autoconnect, set_bool_sug     }, // may not be used in "global"
   { "autorefresh",   "global", get_int,    set_autorefresh, NULL             }, // in minutes, 0 = disabled
   { "connection",    NULL,     get_string, set_userinfo,    NULL             },

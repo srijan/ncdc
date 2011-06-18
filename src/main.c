@@ -302,6 +302,7 @@ int main(int argc, char **argv) {
     g_error("Can't setup SIGTERM: %s", g_strerror(errno));
 
   fl_init();
+  nmdc_cc_listen_start();
   open_autoconnect();
 
   // init and start main loop

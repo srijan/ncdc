@@ -433,3 +433,88 @@ void nmdc_cc_free(struct nmdc_cc *cc) {
   g_free(cc);
 }
 
+
+
+
+
+// Active mode
+
+// listen socket. NULL if we aren't active.
+GSocket *nmdc_cc_listen = NULL;
+char    *nmdc_cc_listen_ip = NULL; // human-readable string. This is the remote IP, not the one we bind to.
+guint16  nmdc_cc_listen_port = 0;
+
+static int nmdc_cc_listen_src = 0;
+
+
+// TODO: immediately send $MyINFO on A/P change?
+void nmdc_cc_listen_stop() {
+  if(!nmdc_cc_listen)
+    return;
+  g_free(nmdc_cc_listen_ip);
+  nmdc_cc_listen_ip = NULL;
+  g_source_remove(nmdc_cc_listen_src);
+  g_object_unref(nmdc_cc_listen);
+  nmdc_cc_listen = FALSE;
+}
+
+
+static gboolean listen_handle(GSocket *sock, GIOCondition cond, gpointer dat) {
+  // TODO: actually handle incoming connections
+  return TRUE;
+}
+
+
+// more like a "restart()"
+gboolean nmdc_cc_listen_start() {
+  GError *err = NULL;
+
+  nmdc_cc_listen_stop();
+  if(!g_key_file_get_boolean(conf_file, "global", "active", NULL))
+    return FALSE;
+
+  // can be 0, in which case it'll be randomly assigned
+  int port = g_key_file_get_integer(conf_file, "global", "active_port", NULL);
+
+  // TODO: option to bind to a specific IP, for those who want that functionality
+  GInetAddress *laddr = g_inet_address_new_any(G_SOCKET_FAMILY_IPV4);
+  GSocketAddress *saddr = G_SOCKET_ADDRESS(g_inet_socket_address_new(laddr, port));
+  g_object_unref(laddr);
+
+  // create(), bind() and listen()
+  GSocket *s = g_socket_new(G_SOCKET_FAMILY_IPV4, G_SOCKET_TYPE_STREAM, G_SOCKET_PROTOCOL_TCP, NULL);
+  g_socket_set_blocking(s, FALSE);
+  g_socket_bind(s, saddr, TRUE, &err);
+  g_object_unref(saddr);
+  if(err) {
+    ui_mf(ui_main, 0, "Error creating listen socket: %s", err->message);
+    g_error_free(err);
+    g_object_unref(s);
+    return FALSE;
+  }
+  if(!g_socket_listen(s, &err)) {
+    ui_mf(ui_main, 0, "Error creating listen socket: %s", err->message);
+    g_error_free(err);
+    g_object_unref(s);
+    return FALSE;
+  }
+
+  // attach incoming connections handler to the event loop
+  GSource *src = g_socket_create_source(s, G_IO_IN, NULL);
+  g_source_set_callback(src, (GSourceFunc)listen_handle, NULL, NULL);
+  nmdc_cc_listen_src = g_source_attach(src, NULL);
+  g_source_unref(src);
+
+  // set global variables
+  nmdc_cc_listen = s;
+  nmdc_cc_listen_ip = g_key_file_get_string(conf_file, "global", "active_ip", NULL);
+  // actual listen port may be different from what we specified (notably when port = 0)
+  GSocketAddress *addr = g_socket_get_local_address(s, NULL);
+  nmdc_cc_listen_port = g_inet_socket_address_get_port(G_INET_SOCKET_ADDRESS(addr));
+  g_object_unref(addr);
+
+  ui_mf(ui_main, 0, "Listening on port %d (%s).", nmdc_cc_listen_port, nmdc_cc_listen_ip);
+  return TRUE;
+}
+
+

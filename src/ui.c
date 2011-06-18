@@ -731,22 +731,53 @@ static void ui_conn_draw_row(struct ui_listing *list, GSequenceIter *iter, int r
 static void ui_conn_draw() {
   char tmp[100];
   attron(A_BOLD);
-  mvaddstr(1, 2,  "Username");
+  mvaddstr(1, 0,  "S Username");
   mvaddstr(1, 22, "Hub");
   mvaddstr(1, 44, "KiB/s");
   mvaddstr(1, 55, "File");
   attroff(A_BOLD);
 
-  int pos = ui_listing_draw(ui_conn->list, 2, winrows-10, ui_conn_draw_row, NULL);
+  int bottom = winrows-11;
+  int pos = ui_listing_draw(ui_conn->list, 2, bottom-1, ui_conn_draw_row, NULL);
 
   // footer
   attron(A_REVERSE);
-  mvhline(winrows-9, 0, ' ', wincols);
+  mvhline(bottom, 0, ' ', wincols);
   g_snprintf(tmp, 99, "%3d connections    %3d%%", g_sequence_iter_get_position(g_sequence_get_end_iter(ui_conn->list->list)), pos);
-  mvaddstr(winrows-9, wincols-24, tmp);
+  mvaddstr(bottom, wincols-24, tmp);
   attroff(A_REVERSE);
-  // TODO: detailed info box (unlike with the userlist, this box is always
-  // visible here. Or at least by default)
+
+  // detailed info
+  struct nmdc_cc *cc = g_sequence_iter_is_end(ui_conn->list->sel) ? NULL : g_sequence_get(ui_conn->list->sel);
+  if(!cc) {
+    mvaddstr(bottom+1, 0, "Nothing selected.");
+    return;
+  }
+  attron(A_BOLD);
+  mvaddstr(bottom+1,  1, "Username:");
+  mvaddstr(bottom+1, 40, "Hub:");
+  mvaddstr(bottom+2,  2, "IP/port:");
+  mvaddstr(bottom+2, 37, "Status:");
+  mvaddstr(bottom+3,  7, "Up:");
+  mvaddstr(bottom+3, 39, "Down:");
+  mvaddstr(bottom+4,  5, "File:");
+  attroff(A_BOLD);
+  mvaddstr(bottom+1, 11, cc->nick ? cc->nick : "Unknown / connecting");
+  mvaddstr(bottom+1, 45, cc->hub ? cc->hub->tab->name : "-");
+  mvaddstr(bottom+2, 11, cc->remoteaddr);
+  mvaddstr(bottom+2, 45,
+    !cc->nick          ? "Connecting" :
+    cc->timeout_src    ? "Disconnected" :
+    cc->net->file_left ? "Uploading" : "Idle");
+  g_snprintf(tmp, 99, "%d KiB/s (%s)", ratecalc_get(cc->net->rate_out)/1024, str_formatsize(cc->net->rate_out->total));
+  mvaddstr(bottom+3, 11, tmp);
+  g_snprintf(tmp, 99, "%d KiB/s (%s)", ratecalc_get(cc->net->rate_in)/1024, str_formatsize(cc->net->rate_in->total));
+  mvaddstr(bottom+3, 45, tmp);
+  if(cc->last_file)
+    mvaddnstr(bottom+4, 11, cc->last_file, str_offset_from_columns(cc->last_file, wincols-12));
+  else
+    mvaddstr(bottom+4, 11, "None.");
+  // TODO: more info (chunk size, file size, progress, error info, idle time)
 }
 
 

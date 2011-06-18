@@ -39,6 +39,7 @@ struct nmdc_cc {
   char *nick;     // UTF-8
   time_t last_action;
   int timeout_src;
+  char remoteaddr[24]; // xxx.xxx.xxx.xxx:ppppp
   char *last_file;
   guint64 last_size;
   guint64 last_length;
@@ -388,6 +389,7 @@ static void handle_connect(struct net *n) {
   if(!cc->hub)
     nmdc_cc_disconnect(cc);
   else {
+    strncpy(cc->remoteaddr, net_remoteaddr(cc->net), 23);
     net_sendf(n, "$MyNick %s", cc->hub->nick_hub);
     net_sendf(n, "$Lock EXTENDEDPROTOCOL/wut? Pk=%s-%s", PACKAGE_NAME, PACKAGE_VERSION);
   }
@@ -396,6 +398,7 @@ static void handle_connect(struct net *n) {
 
 void nmdc_cc_connect(struct nmdc_cc *cc, const char *addr) {
   g_return_if_fail(!cc->timeout_src);
+  strncpy(cc->remoteaddr, addr, 23);
   net_connect(cc->net, addr, 0, handle_connect);
   g_clear_error(&(cc->err));
 }

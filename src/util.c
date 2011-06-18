@@ -524,6 +524,7 @@ void base32_decode(const char *from, char *to) {
 struct ratecalc {
   int counter;
   int rate;
+  guint64 total;
   char isreg;
 };
 
@@ -531,7 +532,7 @@ struct ratecalc {
 
 #define ratecalc_reset(rc) do {\
     g_atomic_int_set(&((rc)->counter), 0);\
-    (rc)->rate = 0;\
+    (rc)->rate = (rc)->total = 0;\
   } while(0)
 
 #define ratecalc_init(rc) do {\
@@ -558,6 +559,7 @@ struct ratecalc {
       do {\
         cur = g_atomic_int_get(&(rc->counter));\
       } while(!g_atomic_int_compare_and_exchange(&(rc->counter), cur, 0));\
+      rc->total += cur;\
       rc->rate = cur + ((rc->rate - cur) / 2);\
     }\
   } while(0)

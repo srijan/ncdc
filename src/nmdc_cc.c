@@ -30,6 +30,54 @@
 #include <sys/stat.h>
 
 
+// List of expected incoming connections.
+// This is list managed by the functions/macros below, in addition to
+// nmdc_cc_init_global(), nmdc_cc_remove_hub() and nmdc_cc_get_hub().
+
+#if INTERFACE
+
+struct nmdc_cc_expect {
+  struct nmdc_hub *hub;
+  char *nick; // hub encoding
+  time_t added;
+};
+
+#define nmdc_cc_expect_add(h, n) do {\
+    struct nmdc_cc_expect *e = g_slice_new0(struct nmdc_cc_expect);\
+    e->hub = h;\
+    e->nick = g_strdup(n);\
+    time(&(e->added));\
+    g_queue_push_tail(nmdc_cc_expected, e);\
+  } while(0)
+
+#endif
+
+GQueue *nmdc_cc_expected;
+
+
+gboolean nmdc_cc_expect_check(gpointer data) {
+  time_t t = time(NULL)-300; // keep them in the list for 5 min.
+  GList *p, *n;
+  for(n=nmdc_cc_expected->head; n;) {
+    p = n->next;
+    struct nmdc_cc_expect *e = n->data;
+    if(e->added < t) {
+      g_message("Expected connection from %s on %s, but received none.", e->nick, e->hub->tab->name);
+      g_free(e->nick);
+      g_slice_free(struct nmdc_cc_expect, e);
+      g_queue_delete_link(nmdc_cc_expected, n);
+    } else
+      break;
+    n = p;
+  }
+  return TRUE;
+}
+
+
+
+
+// Main C-C objects
+
 #if INTERFACE
 
 struct nmdc_cc {
@@ -49,7 +97,11 @@ struct nmdc_cc {
   GSequenceIter *iter;
 };
 
-#define nmdc_cc_init_global() nmdc_cc_list = g_sequence_new(NULL)
+#define nmdc_cc_init_global() do {\
+    nmdc_cc_expected = g_queue_new();\
+    g_timeout_add_seconds_full(G_PRIORITY_LOW, 120, nmdc_cc_expect_check, NULL, NULL);\
+    nmdc_cc_list = g_sequence_new(NULL);\
+  } while(0)
 
 #endif
 
@@ -65,11 +117,25 @@ GSequence *nmdc_cc_list;
 // Note that the connection will remain hubless even when the same hub is later
 // opened again. I don't think this is a huge problem, however.
 void nmdc_cc_remove_hub(struct nmdc_hub *hub) {
+  // Remove from nmdc_cc objects
   GSequenceIter *i = g_sequence_get_begin_iter(nmdc_cc_list);
   for(; !g_sequence_iter_is_end(i); i=g_sequence_iter_next(i)) {
     struct nmdc_cc *c = g_sequence_get(i);
     if(c->hub == hub)
       c->hub = NULL;
+  }
+
+  // Remove from expects list
+  GList *p, *n;
+  for(n=nmdc_cc_expected->head; n;) {
+    p = n->next;
+    struct nmdc_cc_expect *e = n->data;
+    if(e->hub == hub) {
+      g_free(e->nick);
+      g_slice_free(struct nmdc_cc_expect, e);
+      g_queue_delete_link(nmdc_cc_expected, n);
+    }
+    n = p;
   }
 }
 
@@ -248,14 +314,25 @@ static void handle_adcget(struct nmdc_cc *cc, char *type, char *id, guint64 star
 
 // Figure out from which hub a connection came
 static struct nmdc_hub *nmdc_cc_get_hub(const char *nick) {
-  // TODO: Keep a list of expected incoming connections by checking
-  // $RevConnectToMe's, and check that list first before falling back to this
-  // extremely ugly and unreliable trick.
   GList *n;
+  for(n=nmdc_cc_expected->head; n; n=n->next) {
+    struct nmdc_cc_expect *e = n->data;
+    if(strcmp(e->nick, nick) == 0) {
+      struct nmdc_hub *hub = e->hub;
+      g_free(e->nick);
+      g_slice_free(struct nmdc_cc_expect, e);
+      g_queue_delete_link(nmdc_cc_expected, n);
+      return hub;
+    }
+  }
+
+  // This is a fallback, and quite an ugly one at that.
   for(n=ui_tabs; n; n=n->next) {
     struct ui_tab *t = n->data;
-    if(t->type == UIT_HUB && g_hash_table_lookup(t->hub->users, nick))
+    if(t->type == UIT_HUB && g_hash_table_lookup(t->hub->users, nick)) {
+      g_warning("Unexpected incoming connection from %s", nick);
       return t->hub;
+    }
   }
   return NULL;
 }

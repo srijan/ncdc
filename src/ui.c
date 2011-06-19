@@ -439,10 +439,11 @@ static void ui_userlist_draw_row(struct ui_listing *list, GSequenceIter *iter, i
   struct ui_userlist_draw_opts *o = dat;
 
   char *tag = user->tag ? g_strdup_printf("<%s>", user->tag) : NULL;
-  int j=0;
+  int j=2;
   if(iter == list->sel) {
-    attron(A_REVERSE);
-    mvhline(row, 0, ' ', wincols);
+    attron(A_BOLD);
+    mvaddstr(row, 0, ">");
+    attroff(A_BOLD);
   }
   DRAW_COL(row, j, o->cw_user,  user->name);
   DRAW_COL(row, j, o->cw_share, user->hasinfo ? str_formatsize(user->sharesize) : "");
@@ -450,8 +451,6 @@ static void ui_userlist_draw_row(struct ui_listing *list, GSequenceIter *iter, i
   DRAW_COL(row, j, o->cw_tag,   tag?tag:"");
   DRAW_COL(row, j, o->cw_mail,  user->mail?user->mail:"");
   DRAW_COL(row, j, o->cw_conn,  user->conn?user->conn:"");
-  if(iter == list->sel)
-    attroff(A_REVERSE);
   g_free(tag);
 }
 
@@ -464,14 +463,14 @@ static void ui_userlist_draw(struct ui_tab *tab) {
   int num = 2 + (tab->user_hide_conn?0:1) + (tab->user_hide_desc?0:1) + (tab->user_hide_tag?0:1) + (tab->user_hide_mail?0:1);
   o.cw_user = MAX(20, (wincols*6)/(num*10));
   o.cw_share = 12;
-  int i = wincols-o.cw_user-o.cw_share; num -= 2; // remaining number of columns
+  int i = wincols-o.cw_user-o.cw_share-2; num -= 2; // remaining number of columns
   o.cw_conn = tab->user_hide_conn ? 0 : (i*6)/(num*10);
   o.cw_desc = tab->user_hide_desc ? 0 : (i*10)/(num*10);
   o.cw_mail = tab->user_hide_mail ? 0 : (i*7)/(num*10);
   o.cw_tag  = tab->user_hide_tag  ? 0 : i-o.cw_conn-o.cw_desc-o.cw_mail;
 
   // header
-  i = 0;
+  i = 2;
   attron(A_BOLD);
   DRAW_COL(1, i, o.cw_user,  "Username");
   DRAW_COL(1, i, o.cw_share, "Share");
@@ -492,7 +491,7 @@ static void ui_userlist_draw(struct ui_tab *tab) {
   mvaddstr(bottom, 0, "Totals:");
   g_snprintf(tmp, 200, "%s%c   %d users",
     str_formatsize(tab->hub->sharesize), tab->hub->sharecount == count ? ' ' : '+', count);
-  mvaddstr(bottom, o.cw_user, tmp);
+  mvaddstr(bottom, o.cw_user+2, tmp);
   g_snprintf(tmp, 200, "%3d%%", pos);
   mvaddstr(bottom, wincols-6, tmp);
   attroff(A_REVERSE);
@@ -683,58 +682,56 @@ static void ui_conn_draw_row(struct ui_listing *list, GSequenceIter *iter, int r
   struct nmdc_cc *cc = g_sequence_get(iter);
   char tmp[100];
   if(iter == list->sel) {
-    attron(A_REVERSE);
-    mvhline(row, 0, ' ', wincols);
+    attron(A_BOLD);
+    mvaddch(row, 0, '>');
+    attroff(A_BOLD);
   }
 
-  mvaddch(row, 0,
+  mvaddch(row, 2,
     !cc->nick          ? 'C' : // connecting
     cc->timeout_src    ? 'D' : // disconnected
     cc->net->file_left ? 'U' : // uploading
                          'I'); // idle
 
   if(cc->nick)
-    mvaddnstr(row, 2, cc->nick, str_offset_from_columns(cc->nick, 19));
+    mvaddnstr(row, 4, cc->nick, str_offset_from_columns(cc->nick, 19));
   else {
-    g_snprintf(tmp, 99, "Unknown (%s)", net_remoteaddr(cc->net));
-    mvaddstr(row, 2, tmp);
+    g_snprintf(tmp, 99, "IP:%s", cc->remoteaddr);
+    mvaddstr(row, 4, tmp);
   }
 
   if(cc->hub)
-    mvaddnstr(row, 22, cc->hub->tab->name, str_offset_from_columns(cc->hub->tab->name, 14));
+    mvaddnstr(row, 24, cc->hub->tab->name, str_offset_from_columns(cc->hub->tab->name, 14));
 
   if(cc->timeout_src)
     strcpy(tmp, "     -");
   else
     g_snprintf(tmp, 99, "%6d", ratecalc_get(cc->net->rate_out)/1024);
-  mvaddstr(row, 44, tmp);
+  mvaddstr(row, 46, tmp);
 
   // TODO: progress bar or something?
 
   if(cc->err) {
-    mvaddstr(row, 55, "Disconnected: ");
-    addnstr(cc->err->message, str_offset_from_columns(cc->err->message, wincols-64));
+    mvaddstr(row, 57, "Disconnected: ");
+    addnstr(cc->err->message, str_offset_from_columns(cc->err->message, wincols-72));
   } else if(cc->last_file) {
     char *file = rindex(cc->last_file, '/');
     if(file)
       file++;
     else
       file = cc->last_file;
-    mvaddnstr(row, 55, file, str_offset_from_columns(file, wincols-56));
+      mvaddnstr(row, 57, file, str_offset_from_columns(file, wincols-57));
   }
-
-  if(iter == list->sel)
-    attroff(A_REVERSE);
 }
 
 
 static void ui_conn_draw() {
   char tmp[100];
   attron(A_BOLD);
-  mvaddstr(1, 0,  "S Username");
-  mvaddstr(1, 22, "Hub");
-  mvaddstr(1, 44, "KiB/s");
-  mvaddstr(1, 55, "File");
+  mvaddstr(1, 2,  "S Username");
+  mvaddstr(1, 24, "Hub");
+  mvaddstr(1, 46, "KiB/s");
+  mvaddstr(1, 57, "File");
   attroff(A_BOLD);
 
   int bottom = winrows-11;

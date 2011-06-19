@@ -270,16 +270,19 @@ static void tiger_final(struct tiger_ctx *ctx, char result[24]) {
 
 #if INTERFACE
 
-// Maximum number of levels, including root (level 0).  The ADC docs specify 7,
-// but everyone else uses 10, so let's just follow the crowd.  (Does eat up
-// quite a bit of HDD space, though.)
-#define tth_keep_level 10
-/* Space requirements per file for different levels (in bytes, min - max)
- * 10  6144 - 12288
- *  9  3072 -  6144
- *  8  1536 -  3072
- *  7   768 -  1536
- *  6   384 -   768
+// Maximum number of levels, including root (level 0).  The ADC docs specify
+// that this should be at least 7, and everyone else uses 10. Since keeping 10
+// levels of hash data does eat up more space than I'd be willing to spend on
+// it, let's use 8.
+#define tth_keep_level 8
+/* Space requirements per file for different levels (in bytes, min - max) and
+ * the block size of a 1GiB file.
+ *
+ * 10  6144 - 12288    2 MiB
+ *  9  3072 -  6144    4 MiB
+ *  8  1536 -  3072    8 MiB
+ *  7   768 -  1536   16 MiB
+ *  6   384 -   768   32 MiB
  */
 
 

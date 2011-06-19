@@ -128,7 +128,7 @@ gboolean fl_flush(gpointer dat) {
     // save our file list
     if(fl_local_list) {
       GError *err = NULL;
-      if(!fl_save(fl_local_list, fl_local_list_file, &err)) {
+      if(!fl_save(fl_local_list, fl_local_list_file, NULL, 9999, &err)) {
         // this is a pretty fatal error... oh well, better luck next time
         ui_mf(ui_main, UIP_MED, "Error saving file list: %s", err->message);
         g_error_free(err);

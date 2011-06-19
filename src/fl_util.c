@@ -287,15 +287,22 @@ int fl_list_search(struct fl_list *parent, int size_m, guint64 size, int filedir
 
 
 
-// Read filelist from an xml file
+
+// Internal structure used by fl_load() and fl_save()
 
 struct fl_loadsave_context {
-  char *file;
-  BZFILE *fh_bz;
-  FILE *fh_f;
+  char *file;     // some name, for debugging purposes
+  BZFILE *fh_bz;  // if BZ2 compression is enabled (implies fh_h!=NULL)
+  FILE *fh_f;     // if we're working with a file
+  GString *buf;   // if we're working with a buffer (only fl_save() supports this)
   GError **err;
   gboolean stream_end;
 };
+
+
+
+
+// Read filelist from an xml file
 
 
 static int fl_load_input(void *context, char *buf, int len) {
@@ -303,22 +310,34 @@ static int fl_load_input(void *context, char *buf, int len) {
   if(xc->stream_end)
     return 0;
   int bzerr;
-  int r = BZ2_bzRead(&bzerr, xc->fh_bz, buf, len);
-  if(bzerr != BZ_OK && bzerr != BZ_STREAM_END) {
-    g_set_error(xc->err, 1, 0, "bzip2 decompression error. (%d)", bzerr);
-    return -1;
-  } else {
-    xc->stream_end = bzerr == BZ_STREAM_END;
+  if(xc->fh_bz) {
+    int r = BZ2_bzRead(&bzerr, xc->fh_bz, buf, len);
+    if(bzerr != BZ_OK && bzerr != BZ_STREAM_END) {
+      g_set_error(xc->err, 1, 0, "bzip2 decompression error. (%d)", bzerr);
+      return -1;
+    } else {
+      xc->stream_end = bzerr == BZ_STREAM_END;
+      return r;
+    }
+  } else if(xc->fh_f) {
+    int r = fread(buf, 1, len, xc->fh_f);
+    if(r < 0)
+      g_set_error(xc->err, 1, 0, "Read error: %s", g_strerror(errno));
+    xc->stream_end = r <= 0;
     return r;
-  }
+  } else
+    g_return_val_if_reached(-1);
 }
 
 
 static int fl_load_close(void *context) {
   struct fl_loadsave_context *xc = context;
   int bzerr;
-  BZ2_bzReadClose(&bzerr, xc->fh_bz);
+  if(xc->fh_bz)
+    BZ2_bzReadClose(&bzerr, xc->fh_bz);
   fclose(xc->fh_f);
+  g_free(xc->file);
+  g_slice_free(struct fl_loadsave_context, xc);
   return 0;
 }
 
@@ -421,36 +440,55 @@ static int fl_load_handle(xmlTextReaderPtr reader, gboolean *havefl, gboolean *n
 }
 
 
-struct fl_list *fl_load(const char *file, GError **err) {
-  g_return_val_if_fail(err == NULL || *err == NULL, NULL);
-
-  // open the file
+static xmlTextReaderPtr fl_load_open(const char *file, GError **err) {
   gboolean isbz2 = strlen(file) > 4 && strcmp(file+(strlen(file)-4), ".bz2") == 0;
-  xmlTextReaderPtr reader;
 
-  struct fl_loadsave_context xc;
-  xc.stream_end = FALSE;
-  xc.err = err;
+  // open file
+  FILE *f = fopen(file, "r");
+  if(!f) {
+    g_set_error_literal(err, 1, 0, g_strerror(errno));
+    return NULL;
+  }
 
+  // open BZ2 decompression
+  BZFILE *bzf = NULL;
   if(isbz2) {
-    xc.fh_f = fopen(file, "r");
-    if(!xc.fh_f) {
-      g_set_error_literal(err, 1, 0, g_strerror(errno));
+    int bzerr;
+    bzf = BZ2_bzReadOpen(&bzerr, f, 0, 0, NULL, 0);
+    if(bzerr != BZ_OK) {
+      g_set_error(err, 1, 0, "Unable to open BZ2 file (%d)", bzerr);
+      fclose(f);
       return NULL;
     }
-    int bzerr;
-    xc.fh_bz = BZ2_bzReadOpen(&bzerr, xc.fh_f, 0, 0, NULL, 0);
-    g_return_val_if_fail(bzerr == BZ_OK, NULL);
-    reader = xmlReaderForIO(fl_load_input, fl_load_close, &xc, NULL, NULL, XML_PARSE_NOENT);
-  } else
-    reader = xmlReaderForFile(file, NULL, XML_PARSE_NOENT);
+  }
+
+  // create reader
+  struct fl_loadsave_context *xc = g_slice_new0(struct fl_loadsave_context);
+  xc->err = err;
+  xc->file = g_strdup(file);
+  xc->fh_f = f;
+  xc->fh_bz = bzf;
+  xmlTextReaderPtr reader = xmlReaderForIO(fl_load_input, fl_load_close, xc, NULL, NULL, XML_PARSE_NOENT);
 
   if(!reader) {
+    fl_load_close(xc);
     if(err && !*err)
       g_set_error_literal(err, 1, 0, "Failed to open file.");
     return NULL;
   }
+
   xmlTextReaderSetErrorHandler(reader, fl_load_error, &xc);
+  return reader;
+}
+
+
+struct fl_list *fl_load(const char *file, GError **err) {
+  g_return_val_if_fail(err == NULL || *err == NULL, NULL);
+
+  // open the file
+  xmlTextReaderPtr reader = fl_load_open(file, err);
+  if(!reader)
+    return NULL;
 
   // parse & read
   struct fl_list *cur, *root;
@@ -483,33 +521,49 @@ struct fl_list *fl_load(const char *file, GError **err) {
 
 
 
+
 // Save a filelist to a .xml file
 
 static int fl_save_write(void *context, const char *buf, int len) {
   struct fl_loadsave_context *xc = context;
-  int bzerr;
-  BZ2_bzWrite(&bzerr, xc->fh_bz, (char *)buf, len);
-  if(bzerr == BZ_OK)
+  if(xc->fh_bz) {
+    int bzerr;
+    BZ2_bzWrite(&bzerr, xc->fh_bz, (char *)buf, len);
+    if(bzerr == BZ_OK)
+      return len;
+    if(bzerr == BZ_IO_ERROR) {
+      g_set_error_literal(xc->err, 1, 0, "bzip2 write error.");
+      return -1;
+    }
+    g_return_val_if_reached(-1);
+  } else if(xc->fh_f) {
+    int r = fwrite(buf, 1, len, xc->fh_f);
+    if(r < 0)
+      g_set_error(xc->err, 1, 0, "Write error: %s", g_strerror(errno));
+    return r;
+  } else if(xc->buf) {
+    g_string_append_len(xc->buf, buf, len);
     return len;
-  if(bzerr == BZ_IO_ERROR) {
-    g_set_error_literal(xc->err, 1, 0, "bzip2 write error.");
-    return -1;
-  }
-  g_return_val_if_reached(-1);
+  } else
+    g_return_val_if_reached(-1);
 }
 
 
 static int fl_save_close(void *context) {
   struct fl_loadsave_context *xc = context;
   int bzerr;
-  BZ2_bzWriteClose(&bzerr, xc->fh_bz, 0, NULL, NULL);
-  fclose(xc->fh_f);
+  if(xc->fh_bz)
+    BZ2_bzWriteClose(&bzerr, xc->fh_bz, 0, NULL, NULL);
+  if(xc->fh_f)
+    fclose(xc->fh_f);
+  g_free(xc->file);
+  g_slice_free(struct fl_loadsave_context, xc);
   return 0;
 }
 
 
 // recursive
-static gboolean fl_save_childs(xmlTextWriterPtr writer, struct fl_list *fl) {
+static gboolean fl_save_childs(xmlTextWriterPtr writer, struct fl_list *fl, int level) {
   GSequenceIter *iter;
   for(iter=g_sequence_get_begin_iter(fl->sub); !g_sequence_iter_is_end(iter); iter=g_sequence_iter_next(iter)) {
     struct fl_list *cur = g_sequence_get(iter);
@@ -527,9 +581,11 @@ static gboolean fl_save_childs(xmlTextWriterPtr writer, struct fl_list *fl) {
     if(!cur->isfile) {
       CHECKFAIL(xmlTextWriterStartElement(writer, (xmlChar *)"Directory"));
       CHECKFAIL(xmlTextWriterWriteAttribute(writer, (xmlChar *)"Name", (xmlChar *)cur->name));
-      if(cur->incomplete || cur->hastth != g_sequence_iter_get_position(g_sequence_get_end_iter(cur->sub)))
+      if(cur->incomplete || cur->hastth != g_sequence_iter_get_position(g_sequence_get_end_iter(cur->sub))
+          || (cur->hastth && level < 1))
         CHECKFAIL(xmlTextWriterWriteAttribute(writer, (xmlChar *)"Incomplete", (xmlChar *)"1"));
-      fl_save_childs(writer, cur);
+      if(level > 0)
+        fl_save_childs(writer, cur, level-1);
       CHECKFAIL(xmlTextWriterEndElement(writer));
     }
 #undef CHECKFAIL
@@ -538,35 +594,61 @@ static gboolean fl_save_childs(xmlTextWriterPtr writer, struct fl_list *fl) {
 }
 
 
-gboolean fl_save(struct fl_list *fl, const char *file, GError **err) {
+static xmlTextWriterPtr fl_save_open(const char *file, gboolean isbz2, GString *buf, GError **err) {
+  // open file (if any)
+  FILE *f = NULL;
+  if(file) {
+    f = fopen(file, "w");
+    if(!f) {
+      g_set_error_literal(err, 1, 0, g_strerror(errno));
+      return NULL;
+    }
+  }
+
+  // open compressor (if needed)
+  BZFILE *bzf = NULL;
+  if(f && isbz2) {
+    int bzerr;
+    bzf = BZ2_bzWriteOpen(&bzerr, f, 7, 0, 0);
+    if(bzerr != BZ_OK) {
+      g_set_error(err, 1, 0, "Unable to create BZ2 file (%d)", bzerr);
+      fclose(f);
+      return NULL;
+    }
+  }
+
+  // create writer
+  struct fl_loadsave_context *xc = g_slice_new0(struct fl_loadsave_context);
+  xc->err = err;
+  xc->file = file ? g_strdup(file) : g_strdup("string buffer");
+  xc->fh_f = f;
+  xc->fh_bz = bzf;
+  xc->buf = buf;
+  xmlTextWriterPtr writer = xmlNewTextWriter(xmlOutputBufferCreateIO(fl_save_write, fl_save_close, xc, NULL));
+
+  if(!writer) {
+    fl_save_close(xc);
+    if(err && !*err)
+      g_set_error_literal(err, 1, 0, "Failed to open file.");
+    return NULL;
+  }
+  return writer;
+}
+
+
+gboolean fl_save(struct fl_list *fl, const char *file, GString *buf, int level, GError **err) {
   g_return_val_if_fail(err == NULL || *err == NULL, FALSE);
 
   // open a temporary file for writing
-  gboolean isbz2 = strlen(file) > 4 && strcmp(file+(strlen(file)-4), ".bz2") == 0;
-  xmlTextWriterPtr writer;
+  gboolean isbz2 = FALSE;
+  char *tmpfile = NULL;
+  if(file) {
+    isbz2 = strlen(file) > 4 && strcmp(file+(strlen(file)-4), ".bz2") == 0;
+    tmpfile = g_strdup_printf("%s.tmp-%d", file, rand());
+  }
 
-  char *tmpfile = g_strdup_printf("%s.tmp-%d", file, rand());
-
-  struct fl_loadsave_context xc;
-  xc.err = err;
-
-  if(isbz2) {
-    xc.fh_f = fopen(tmpfile, "w");
-    if(!xc.fh_f) {
-      g_set_error_literal(err, 1, 0, g_strerror(errno));
-      g_free(tmpfile);
-      return FALSE;
-    }
-    int bzerr;
-    xc.fh_bz = BZ2_bzWriteOpen(&bzerr, xc.fh_f, 7, 0, 0);
-    g_return_val_if_fail(bzerr == BZ_OK, FALSE);
-    writer = xmlNewTextWriter(xmlOutputBufferCreateIO(fl_save_write, fl_save_close, &xc, NULL));
-  } else
-    writer = xmlNewTextWriterFilename(file, 0);
-
+  xmlTextWriterPtr writer = fl_save_open(tmpfile, isbz2, buf, err);
   if(!writer) {
-    if(err && !*err)
-      g_set_error_literal(err, 1, 0, "Failed to open temporary file.");
     g_free(tmpfile);
     return FALSE;
   }
@@ -581,12 +663,15 @@ gboolean fl_save(struct fl_list *fl, const char *file, GError **err) {
   CHECKFAIL(xmlTextWriterStartElement(writer, (xmlChar *)"FileListing"));
   CHECKFAIL(xmlTextWriterWriteAttribute(writer, (xmlChar *)"Version", (xmlChar *)"1"));
   CHECKFAIL(xmlTextWriterWriteAttribute(writer, (xmlChar *)"Generator", (xmlChar *)PACKAGE_STRING));
-  CHECKFAIL(xmlTextWriterWriteAttribute(writer, (xmlChar *)"Base", (xmlChar *)"/"));
   // TODO: generate a proper CID
   CHECKFAIL(xmlTextWriterWriteAttribute(writer, (xmlChar *)"CID", (xmlChar *)"NCDCDOESNOTHAVECIDSUPPORTYET23456723456"));
 
+  char *path = fl_list_path(fl);
+  CHECKFAIL(xmlTextWriterWriteAttribute(writer, (xmlChar *)"Base", (xmlChar *)path));
+  g_free(path);
+
   // all <Directory ..> elements
-  if(!fl_save_childs(writer, fl)) {
+  if(!fl_save_childs(writer, fl, level-1)) {
     success = FALSE;
     goto fl_save_error;
   }
@@ -598,15 +683,17 @@ fl_save_error:
   xmlTextWriterEndDocument(writer);
   xmlFreeTextWriter(writer);
 
-  // rename or unlink
-  if(success && rename(tmpfile, file) < 0) {
-    g_set_error_literal(err, 1, 0, g_strerror(errno));
-    success = FALSE;
+  // rename or unlink file
+  if(file) {
+    if(success && rename(tmpfile, file) < 0) {
+      if(err && !*err)
+        g_set_error_literal(err, 1, 0, g_strerror(errno));
+      success = FALSE;
+    }
+    if(!success)
+      unlink(tmpfile);
+    g_free(tmpfile);
   }
-  if(!success)
-    unlink(tmpfile);
-
-  g_free(tmpfile);
   return success;
 }
 

@@ -95,6 +95,11 @@ static struct ui_tab *ui_main_create() {
 
   ui_mf(ui_main, 0, "Welcome to ncdc %s!", VERSION);
   ui_mf(ui_main, 0, "Using working directory: %s", conf_dir);
+  ui_m(ui_main, 0,
+    "\n!WARNING! This is an early beta version of ncdc!"
+    "\nDon't be surprised if things crash or don't work."
+    "\nMany features are still missing, and the existing features are not always complete."
+    "\nMake sure you always run the latest version available from http://dev.yorhel.nl/ncdc\n");
 
   return ui_main;
 }

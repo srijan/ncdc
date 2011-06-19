@@ -228,6 +228,55 @@ char *fl_hashdat_get(const char *tth, int *len) {
 }
 
 
+// "garbage collect" - removes unused items from hashdata.dat and performs a
+// gdbm_reorganize() (the only fl_hashdat_ function that uses, but does not
+// modify, fl_hash_index).
+void fl_hashdat_gc() {
+  fl_flush(NULL);
+  GSList *rm = NULL;
+  char tth[40];
+  tth[39] = 0;
+
+  // check for unused keys
+  datum key = gdbm_firstkey(fl_hashdat);
+  char *freethis = NULL;
+  for(; key.dptr; key=gdbm_nextkey(fl_hashdat, key)) {
+    char *str = key.dptr;
+    if(freethis)
+      free(freethis);
+    // We only touch keys that this or earlier versions of ncdc could have
+    // created. Unknown keys are left untouched as a later version could have
+    // made these and there is no way to tell whether these need to be cleaned
+    // up or not.
+    if(key.dsize == 25 && (str[0] == HASHDAT_INFO || str[0] == HASHDAT_TTHL)
+        && !g_hash_table_lookup(fl_hash_index, str+1)) {
+      base32_encode(str+1, tth);
+      g_message("Removing unused key in hashdata.dat: type = %d, hash = %s", str[0], tth);
+      rm = g_slist_prepend(rm, str);
+      freethis = NULL;
+    } else
+      freethis = str;
+  }
+  if(freethis)
+    free(freethis);
+
+  // delete the unused keys
+  GSList *n = rm;
+  key.dsize = 25; // all keys in the list are 25 bytes
+  while(n) {
+    rm = n->next;
+    key.dptr = n->data;
+    gdbm_delete(fl_hashdat, key);
+    free(n->data);
+    g_slist_free_1(n);
+    n = rm;
+  }
+
+  // perform the reorganize
+  gdbm_reorganize(fl_hashdat);
+}
+
+
 
 
 

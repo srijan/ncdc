@@ -885,6 +885,16 @@ static void c_connections(char *args) {
 }
 
 
+static void c_gc(char *args) {
+  if(args[0])
+    ui_m(NULL, 0, "This command does not accept any arguments.");
+  else {
+    fl_hashdat_gc();
+    ui_m(NULL, 0, "Garbage-collection done.");
+  }
+}
+
+
 // definition of the command list
 static struct cmd cmds[] = {
   { "clear", c_clear, NULL,
@@ -915,6 +925,13 @@ static struct cmd cmds[] = {
   { "disconnect", c_disconnect, NULL,
     NULL, "Disconnect from a hub.",
     "Closes the connection with the hub."
+  },
+  { "gc", c_gc, NULL,
+    NULL, "Perform some garbage collection.",
+    "Cleans up unused data and reorganizes existing data to allow more efficient storage and usage.\n"
+    "Currently, the only thing being cleaned up is the hashdata.dat file.\n\n"
+    "This command may take some time to complete, and will fully block ncdc while it is running.\n"
+    "You won't have to perform this command very often."
   },
   { "help", c_help, c_help_sug,
     "[<command>]", "Request information on commands.",

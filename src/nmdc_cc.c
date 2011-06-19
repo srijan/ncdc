@@ -218,10 +218,6 @@ static void handle_error(struct net *n, int action, GError *err) {
 }
 
 
-// TODO:
-// - id = files.xml? (Required by ADC, but I doubt it's used)
-// - type = list? (Also required by ADC, but is this used?)
-
 // err->type = 0 -> generic error. otherwise -> no slots
 static void handle_adcget(struct nmdc_cc *cc, char *type, char *id, guint64 start, gint64 bytes, GError **err) {
   // tthl
@@ -245,6 +241,34 @@ static void handle_adcget(struct nmdc_cc *cc, char *type, char *id, guint64 star
     return;
   }
 
+  // list
+  if(strcmp(type, "list") == 0) {
+    if(id[0] != '/' || id[strlen(id)-1] != '/' || start != 0 || bytes != -1 || !g_utf8_validate(id, -1, NULL)) {
+      g_set_error_literal(err, 1, 0, "Invalid ADCGET arguments");
+      return;
+    }
+    struct fl_list *f = fl_local_list ? fl_list_from_path(fl_local_list, id) : NULL;
+    if(!f || f->isfile) {
+      g_set_error_literal(err, 1, 0, "File Not Available");
+      return;
+    }
+    // We don't support recursive lists (yet), as these may be somewhat expensive.
+    GString *buf = g_string_new("");
+    GError *e = NULL;
+    if(!fl_save(f, NULL, buf, 1, &e)) {
+      g_set_error(err, 1, 0, "Creating partial XML list: %s", e->message);
+      g_error_free(e);
+      g_string_free(buf, TRUE);
+      return;
+    }
+    char *eid = adc_escape(id);
+    net_sendf(cc->net, "$ADCSND list %s 0 %d", eid, buf->len);
+    net_send_raw(cc->net, buf->str, buf->len);
+    g_free(eid);
+    g_string_free(buf, TRUE);
+    return;
+  }
+
   // file
   if(strcmp(type, "file") != 0) {
     g_set_error_literal(err, 1, 0, "Unsupported ADCGET type");
@@ -252,6 +276,7 @@ static void handle_adcget(struct nmdc_cc *cc, char *type, char *id, guint64 star
   }
 
   // get path (for file uploads)
+  // TODO: files.xml? (Required by ADC, but I doubt it's used)
   char *path = NULL;
   char *vpath;
   struct fl_list *f = NULL;

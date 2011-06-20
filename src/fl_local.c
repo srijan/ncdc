@@ -785,7 +785,8 @@ static gboolean fl_refresh_scanned(gpointer dat) {
   else {
     // force a flush when all queued refreshes have been processed
     fl_flush(NULL);
-    ui_mf(ui_main, UIM_NOTIFY, "File list refresh finished.");
+    if(fl_local_list && fl_local_list->hastth)
+      ui_mf(ui_main, UIM_NOTIFY, "File list refresh finished.");
   }
   return FALSE;
 }

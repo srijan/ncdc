@@ -1,11 +1,16 @@
-ncdc 0.1-alpha
-==============
+ncdc 0.1
+========
 
 DESCRIPTION
 
   ncdc aims to become an awesome Direct Connect client with an NCurses
-  interface, written in C. It is currently in a very early alpha stage and
-  nothing useful has been implemented yet.
+  interface, written in C. It is currently still in active development, and
+  therefore lacks many features you'd expect a mature direct connect client to
+  have. Nonetheless, ncdc is already quite useful.
+
+  Always make sure you run the latest version. You can check for updates and
+  find more information at http://dev.yorhel.nl/ncdc
+
 
 
 REQUIREMENTS
@@ -19,24 +24,35 @@ REQUIREMENTS
 
 
 
-BUILDING
+BUILDING FROM A RELEASE TARBALL
 
-  To build ncdc from this repository (there are no packaged versions yet), you
-  will need the following:
-
-  - GNU make and autotools
-  - A C compiler, obviously
+  If you managed to fetch an ncdc tarball from somewhere, then you will need
+  the following to build ncdc:
+  - A C compiler
+  - GNU make
   - Header files for the above REQUIREMENTS
+
+  And the usual commands will get you up and running:
+
+    ./configure --prefix=/usr
+    make (or gmake)
+    (sudo) make install
+
+
+
+BUILDING FROM THE GIT REPOSITORY
+
+  To build the latest and greatest version from the git repository, you will
+  need the stuff mentioned above in addition to:
+  - GNU autotools
   - The 'makeheaders' program, which is assumed to be in your $PATH
     (Get it from http://www.hwaci.com/sw/mkhdr/index.html)
 
-  If you have all that, run:
+  Then run the following command:
 
     autoreconf -i
-    ./configure --prefix=/usr
-    make (or gmake)
 
-  And optionally 'make install' if you want.
+  ...and you can use same tricks to build ncdc as with using a release tarball.
 
 
 

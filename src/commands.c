@@ -308,23 +308,46 @@ static void set_slots(char *group, char *key, char *val) {
 }
 
 
+static void get_minislot_size(char *group, char *key) {
+  ui_mf(NULL, 0, "%s.%s = %d KiB", group, key, conf_minislot_size() / 1024);
+}
+
+
+static void set_minislot_size(char *group, char *key, char *val) {
+  if(!val)
+    UNSET(group, key);
+  else {
+    long v = strtol(val, NULL, 10);
+    if((!v && errno == EINVAL) || v < INT_MIN || v > INT_MAX/1024 || v < 0)
+      ui_m(NULL, 0, "Invalid number.");
+    else if(v < 64)
+      ui_m(NULL, 0, "Minislot size must be at least 64 KiB.");
+    else {
+      g_key_file_set_integer(conf_file, group, key, v);
+      get_minislot_size(group, key);
+    }
+  }
+}
+
+
 // the settings list
 // TODO: help text / documentation?
 static struct setting settings[] = {
-  { "active",        "global", get_bool_f,      set_active,      NULL             },
-  { "active_ip",     "global", get_string,      set_active_ip,   NULL             },
-  { "active_port",   "global", get_int,         set_active_port, NULL,            },
-  { "autoconnect",   NULL,     get_bool_f,      set_autoconnect, set_bool_sug     }, // may not be used in "global"
-  { "autorefresh",   "global", get_autorefresh, set_autorefresh, NULL             }, // in minutes, 0 = disabled
-  { "connection",    NULL,     get_string,      set_userinfo,    NULL             },
-  { "description",   NULL,     get_string,      set_userinfo,    NULL             },
-  { "email",         NULL,     get_string,      set_userinfo,    NULL             },
-  { "encoding",      NULL,     get_encoding,    set_encoding,    set_encoding_sug },
-  { "log_debug",     "log",    get_bool_f,      set_bool_f,      set_bool_sug     },
-  { "nick",          NULL,     get_string,      set_nick,        NULL             }, // global.nick may not be /unset
-  { "share_hidden",  "global", get_bool_f,      set_bool_f,      set_bool_sug     },
-  { "show_joinquit", NULL,     get_bool_f,      set_bool_f,      set_bool_sug     },
-  { "slots",         "global", get_slots,       set_slots,       NULL             },
+  { "active",        "global", get_bool_f,        set_active,        NULL             },
+  { "active_ip",     "global", get_string,        set_active_ip,     NULL             },
+  { "active_port",   "global", get_int,           set_active_port,   NULL,            },
+  { "autoconnect",   NULL,     get_bool_f,        set_autoconnect,   set_bool_sug     }, // may not be used in "global"
+  { "autorefresh",   "global", get_autorefresh,   set_autorefresh,   NULL             }, // in minutes, 0 = disabled
+  { "connection",    NULL,     get_string,        set_userinfo,      NULL             },
+  { "description",   NULL,     get_string,        set_userinfo,      NULL             },
+  { "email",         NULL,     get_string,        set_userinfo,      NULL             },
+  { "encoding",      NULL,     get_encoding,      set_encoding,      set_encoding_sug },
+  { "log_debug",     "log",    get_bool_f,        set_bool_f,        set_bool_sug     },
+  { "minislot_size", "global", get_minislot_size, set_minislot_size, NULL             },
+  { "nick",          NULL,     get_string,        set_nick,          NULL             }, // global.nick may not be /unset
+  { "share_hidden",  "global", get_bool_f,        set_bool_f,        set_bool_sug     },
+  { "show_joinquit", NULL,     get_bool_f,        set_bool_f,        set_bool_sug     },
+  { "slots",         "global", get_slots,         set_slots,         NULL             },
   { NULL }
 };
 

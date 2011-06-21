@@ -315,7 +315,7 @@ static void handle_adcget(struct nmdc_cc *cc, char *type, char *id, guint64 star
   }
   if(bytes < 0 || bytes > st.st_size-start)
     bytes = st.st_size-start;
-  if(needslot && st.st_size < 16*1024)
+  if(needslot && st.st_size < conf_minislot_size())
     needslot = FALSE;
 
   // send

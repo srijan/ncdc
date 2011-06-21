@@ -268,6 +268,19 @@ static void user_myinfo(struct nmdc_hub *hub, struct nmdc_user *u, const char *s
 // hub stuff
 
 
+void nmdc_password(struct nmdc_hub *hub, char *pass) {
+  g_return_if_fail(!hub->nick_valid);
+  char *rpass = !pass ? g_key_file_get_string(conf_file, hub->tab->name, "password", NULL) : g_strdup(pass);
+  if(!rpass)
+    ui_m(NULL, 0,
+      "\nPassword required. Type '/password <your password>' to log in without saving your password."
+      "\nOr use '/set password <your password>' to log in and save your password in the config file (unencrypted!).\n");
+  else
+    net_sendf(hub->net, "$MyPass %s", rpass); // Password is sent raw, not encoded. Don't think encoding really matters here.
+  g_free(rpass);
+}
+
+
 void nmdc_grant(struct nmdc_hub *hub, struct nmdc_user *u) {
   if(!g_hash_table_lookup(hub->grants, u->name_hub))
     g_hash_table_insert(hub->grants, g_strdup(u->name_hub), (void *)1);
@@ -645,8 +658,15 @@ static void handle_cmd(struct net *n, char *cmd) {
   g_match_info_free(nfo);
 
   // $GetPass
-  if(strncmp(cmd, "$GetPass", 8) == 0) {
-    ui_m(hub->tab, 0, "Hub requires a password. This version of ncdc does not support passworded login yet.");
+  if(strncmp(cmd, "$GetPass", 8) == 0)
+    nmdc_password(hub, NULL);
+
+  // $BadPass
+  if(strncmp(cmd, "$BadPass", 8) == 0) {
+    if(g_key_file_has_key(conf_file, hub->tab->name, "password", NULL))
+      ui_m(hub->tab, 0, "Wrong password. Use '/set password <password>' to edit your password or '/unset password' to reset it.");
+    else
+      ui_m(hub->tab, 0, "Wrong password. Type /reconnect to try again.");
     nmdc_disconnect(hub, FALSE);
   }
 

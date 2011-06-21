@@ -352,6 +352,26 @@ static void set_minislots(char *group, char *key, char *val) {
 }
 
 
+static void get_password(char *group, char *key) {
+  ui_mf(NULL, 0, "%s.%s is %s", group, key, g_key_file_has_key(conf_file, group, key, NULL) ? "set" : "not set");
+}
+
+
+static void set_password(char *group, char *key, char *val) {
+  if(strcmp(group, "global") == 0 || group[0] != '#')
+    ui_m(NULL, 0, "ERROR: password can only be used as hub setting.");
+  else if(!val)
+    UNSET(group, key);
+  else {
+    g_key_file_set_string(conf_file, group, key, val);
+    if(tab->type == UIT_HUB && tab->hub->state == HUBS_CONNECTED && !tab->hub->nick_valid)
+      nmdc_password(tab->hub, NULL);
+    ui_m(NULL, 0, "Password saved.");
+  }
+}
+
+
+
 // the settings list
 // TODO: help text / documentation?
 static struct setting settings[] = {
@@ -368,6 +388,7 @@ static struct setting settings[] = {
   { "minislots",     "global", get_minislots,     set_minislots,     NULL             },
   { "minislot_size", "global", get_minislot_size, set_minislot_size, NULL             },
   { "nick",          NULL,     get_string,        set_nick,          NULL             }, // global.nick may not be /unset
+  { "password",      NULL,     get_password,      set_password,      NULL             }, // may not be used in "global" (obviously)
   { "share_hidden",  "global", get_bool_f,        set_bool_f,        set_bool_sug     },
   { "show_joinquit", NULL,     get_bool_f,        set_bool_f,        set_bool_sug     },
   { "slots",         "global", get_slots,         set_slots,         NULL             },
@@ -998,6 +1019,18 @@ static void c_grant(char *args) {
 }
 
 
+static void c_password(char *args) {
+  if(tab->type != UIT_HUB)
+    ui_m(NULL, 0, "This command can only be used on hub tabs.");
+  else if(tab->hub->state != HUBS_CONNECTED)
+    ui_m(NULL, 0, "Not connected to a hub. Did you want to use '/set password' instead?");
+  else if(tab->hub->nick_valid)
+    ui_m(NULL, 0, "Already logged in. Did you want to use '/set password' instead?");
+  else
+    nmdc_password(tab->hub, args);
+}
+
+
 // definition of the command list
 static struct cmd cmds[] = {
   { "clear", c_clear, NULL,
@@ -1062,6 +1095,12 @@ static struct cmd cmds[] = {
     " identify the hub, and will be used for storing hub-specific configuration.\n\n"
     "If you have previously connected to a hub from a tab with the same name, /open"
     " will automatically connect to the same hub again."
+  },
+  { "password", c_password, NULL,
+    "<password>", "Send your password to the hub.",
+    "The /password command can be used to send a password to the hub without saving it to the config file.\n"
+    "If you wish to login automatically without having to type /password every time, use '/set password <password>'."
+    " Be warned, however, that your password will be saved unencrypted in this case."
   },
   { "quit", c_quit, NULL,
     NULL, "Quit ncdc.",

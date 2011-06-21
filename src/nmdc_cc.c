@@ -230,7 +230,7 @@ static gboolean request_slot(struct nmdc_cc *cc, gboolean need_full) {
     return TRUE;
 
   // if we can use a minislot, do so
-  if(!need_full && minislots < 3) {
+  if(!need_full && minislots < conf_minislots()) {
     cc->slot_mini = TRUE;
     return TRUE;
   }

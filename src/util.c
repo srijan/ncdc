@@ -83,6 +83,10 @@ GKeyFile *conf_file;
   !g_key_file_has_key(conf_file, "global", "slots", NULL) ? 10\
     : g_key_file_get_integer(conf_file, "global", "slots", NULL))
 
+#define conf_minislots() (\
+  !g_key_file_has_key(conf_file, "global", "minislots", NULL) ? 3\
+    : g_key_file_get_integer(conf_file, "global", "minislots", NULL))
+
 #define conf_minislot_size() (1024*(\
   !g_key_file_has_key(conf_file, "global", "minislot_size", NULL) ? 64\
     : g_key_file_get_integer(conf_file, "global", "minislot_size", NULL)))

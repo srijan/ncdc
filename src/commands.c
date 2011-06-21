@@ -330,6 +330,28 @@ static void set_minislot_size(char *group, char *key, char *val) {
 }
 
 
+static void get_minislots(char *group, char *key) {
+  ui_mf(NULL, 0, "%s.%s = %d", group, key, conf_minislots());
+}
+
+
+static void set_minislots(char *group, char *key, char *val) {
+  if(!val)
+    UNSET(group, key);
+  else {
+    long v = strtol(val, NULL, 10);
+    if((!v && errno == EINVAL) || v < INT_MIN || v > INT_MAX || v < 0)
+      ui_m(NULL, 0, "Invalid number.");
+    else if(v < 1)
+      ui_m(NULL, 0, "You must have at least 1 minislot.");
+    else {
+      g_key_file_set_integer(conf_file, group, key, v);
+      get_minislots(group, key);
+    }
+  }
+}
+
+
 // the settings list
 // TODO: help text / documentation?
 static struct setting settings[] = {
@@ -343,6 +365,7 @@ static struct setting settings[] = {
   { "email",         NULL,     get_string,        set_userinfo,      NULL             },
   { "encoding",      NULL,     get_encoding,      set_encoding,      set_encoding_sug },
   { "log_debug",     "log",    get_bool_f,        set_bool_f,        set_bool_sug     },
+  { "minislots",     "global", get_minislots,     set_minislots,     NULL             },
   { "minislot_size", "global", get_minislot_size, set_minislot_size, NULL             },
   { "nick",          NULL,     get_string,        set_nick,          NULL             }, // global.nick may not be /unset
   { "share_hidden",  "global", get_bool_f,        set_bool_f,        set_bool_sug     },

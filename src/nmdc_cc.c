@@ -85,9 +85,11 @@ struct nmdc_cc {
   struct nmdc_hub *hub;
   char *nick_raw; // hub encoding
   char *nick;     // UTF-8
-  gboolean active;
-  time_t last_action;
+  gboolean active : 1;
+  gboolean isop : 1;
+  gboolean slot_mini : 1;
   int timeout_src;
+  time_t last_action;
   char remoteaddr[24]; // xxx.xxx.xxx.xxx:ppppp
   char *last_file;
   guint64 last_size;
@@ -145,12 +147,19 @@ void nmdc_cc_remove_hub(struct nmdc_hub *hub) {
 // the return value can be larger than the configured number of slots. This
 // also means that an upload that requires a slot will not be granted if there
 // are many transfers active that don't require a slot.
-int nmdc_cc_slots_in_use() {
+int nmdc_cc_slots_in_use(int *mini) {
   int num = 0;
+  int m = 0;
   GSequenceIter *i = g_sequence_get_begin_iter(nmdc_cc_list);
-  for(; !g_sequence_iter_is_end(i); i=g_sequence_iter_next(i))
-    if(((struct nmdc_cc *)g_sequence_get(i))->net->file_left)
+  for(; !g_sequence_iter_is_end(i); i=g_sequence_iter_next(i)) {
+    struct nmdc_cc *c = g_sequence_get(i);
+    if(c->net->file_left)
       num++;
+    if(c->net->file_left && c->slot_mini)
+      m++;
+  }
+  if(mini)
+    *mini = m;
   return num;
 }
 
@@ -208,6 +217,31 @@ static char *adc_escape(const char *str) {
   return g_string_free(dest, FALSE);
 }
 
+
+
+static gboolean request_slot(struct nmdc_cc *cc, gboolean need_full) {
+  int minislots;
+  int slots = nmdc_cc_slots_in_use(&minislots);
+
+  cc->slot_mini = FALSE;
+
+  // if we have a free slot, use that
+  if(slots < conf_slots())
+    return TRUE;
+
+  // if we can use a minislot, do so
+  if(!need_full && minislots < 3) {
+    cc->slot_mini = TRUE;
+    return TRUE;
+  }
+
+  // if we can use a minislot yet we don't have one, still allow an OP
+  if(!need_full && cc->isop)
+    return TRUE;
+
+  // none of the above? then we're out of slots
+  return FALSE;
+}
 
 
 static void handle_error(struct net *n, int action, GError *err) {
@@ -319,7 +353,7 @@ static void handle_adcget(struct nmdc_cc *cc, char *type, char *id, guint64 star
     needslot = FALSE;
 
   // send
-  if(!needslot || nmdc_cc_slots_in_use() < conf_slots()) {
+  if(request_slot(cc, needslot)) {
     g_free(cc->last_file);
     cc->last_file = vpath;
     cc->last_length = bytes;
@@ -385,11 +419,16 @@ static void handle_mynick(struct nmdc_cc *cc, const char *nick) {
     return;
   }
 
-  // don't allow multiple connections from the same user
+  // Don't allow multiple connections from the same user.
+  // Note: This is usually determined after receiving $Direction, since it is
+  // possible to have two connections with a single user: One for Upload and
+  // one for Download. But since we only support uploading, checking it here is
+  // enough.
   struct nmdc_cc *dup = nmdc_cc_get_conn(cc->hub, nick);
 
   cc->nick_raw = g_strdup(nick);
   cc->nick = g_strdup(u->name);
+  cc->isop = u->isop;
 
   if(dup) {
     g_set_error_literal(&(cc->err), 1, 0, "too many open connections with this user");

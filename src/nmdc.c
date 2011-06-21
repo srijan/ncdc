@@ -369,7 +369,7 @@ static void handle_search(struct nmdc_hub *hub, char *from, int size_m, guint64 
 
   char *hubaddr = net_remoteaddr(hub->net);
   int slots = conf_slots();
-  int slots_free = slots - nmdc_cc_slots_in_use();
+  int slots_free = slots - nmdc_cc_slots_in_use(NULL);
   if(slots_free < 0)
     slots_free = 0;
   char tth[44] = "TTH:";

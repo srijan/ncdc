@@ -1042,7 +1042,7 @@ static void ui_draw_status() {
   // And protocol overhead isn't very significant.
   g_snprintf(buf, 100, "[U:%6d KiB/s]", ratecalc_get(&net_out)/1024);
   mvaddstr(winrows-1, wincols-28, buf);
-  g_snprintf(buf, 100, "[S:%3d/%3d]", nmdc_cc_slots_in_use(), conf_slots());
+  g_snprintf(buf, 100, "[S:%3d/%3d]", nmdc_cc_slots_in_use(NULL), conf_slots());
   mvaddstr(winrows-1, wincols-11, buf);
 
   ui_m_updated = FALSE;

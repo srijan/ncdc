@@ -322,6 +322,7 @@ static struct setting settings[] = {
   { "encoding",      NULL,     get_encoding,    set_encoding,    set_encoding_sug },
   { "log_debug",     "log",    get_bool_f,      set_bool_f,      set_bool_sug     },
   { "nick",          NULL,     get_string,      set_nick,        NULL             }, // global.nick may not be /unset
+  { "share_hidden",  "global", get_bool_f,      set_bool_f,      set_bool_sug     },
   { "show_joinquit", NULL,     get_bool_f,      set_bool_f,      set_bool_sug     },
   { "slots",         "global", get_slots,       set_slots,       NULL             },
   { NULL }

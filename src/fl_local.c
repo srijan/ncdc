@@ -366,12 +366,13 @@ static void fl_hashindex_sethash(struct fl_list *fl, char *tth, time_t lastmod, 
 struct fl_scan_args {
   struct fl_list **file, **res;
   char **path;
+  gboolean inc_hidden;
   gboolean (*donefun)(gpointer);
 };
 
 // recursive
 // Doesn't handle paths longer than PATH_MAX, but I don't think it matters all that much.
-static void fl_scan_dir(struct fl_list *parent, const char *path) {
+static void fl_scan_dir(struct fl_list *parent, const char *path, gboolean inc_hidden) {
   GError *err = NULL;
   GDir *dir = g_dir_open(path, 0, &err);
   if(!dir) {
@@ -382,6 +383,8 @@ static void fl_scan_dir(struct fl_list *parent, const char *path) {
   const char *name;
   while((name = g_dir_read_name(dir))) {
     if(strcmp(name, ".") == 0 || strcmp(name, "..") == 0)
+      continue;
+    if(!inc_hidden && name[0] == '.')
       continue;
     // Try to get a UTF-8 filename which can be converted back.  If it can't be
     // converted back, we won't share the file at all. Keeping track of a
@@ -431,7 +434,7 @@ static void fl_scan_dir(struct fl_list *parent, const char *path) {
     if(!cur->isfile) {
       char *cpath = g_build_filename(path, cur->name, NULL);
       cur->sub = g_sequence_new(fl_list_free);
-      fl_scan_dir(cur, cpath);
+      fl_scan_dir(cur, cpath, inc_hidden);
       g_free(cpath);
     }
   }
@@ -447,7 +450,7 @@ static void fl_scan_thread(gpointer data, gpointer udata) {
     struct fl_list *cur = g_slice_new0(struct fl_list);
     char *tmp = g_filename_from_utf8(args->path[i], -1, NULL, NULL, NULL);
     cur->sub = g_sequence_new(fl_list_free);
-    fl_scan_dir(cur, tmp);
+    fl_scan_dir(cur, tmp, args->inc_hidden);
     g_free(tmp);
     args->res[i] = cur;
   }
@@ -728,6 +731,7 @@ static void fl_refresh_process() {
   struct fl_list *dir = fl_refresh_queue->head->data;
   struct fl_scan_args *args = g_new0(struct fl_scan_args, 1);
   args->donefun = fl_refresh_scanned;
+  args->inc_hidden = g_key_file_get_boolean(conf_file, "global", "share_hidden", NULL);
 
   // one dir, the simple case
   if(dir != fl_local_list) {

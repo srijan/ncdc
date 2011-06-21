@@ -169,7 +169,7 @@ static void ui_msg_draw(struct ui_tab *tab) {
 
 static char *ui_msg_title(struct ui_tab *tab) {
   return g_strdup_printf("Chatting with %s on %s%s.",
-      tab->msg_uname, tab->hub->tab->name, tab->msg_user ? "" : " (disabled)");
+      tab->msg_uname, tab->hub->tab->name, tab->msg_user ? "" : " (offline)");
 }
 
 
@@ -358,6 +358,18 @@ void ui_hub_userlist_open(struct ui_tab *tab) {
     tab->userlist_tab = ui_userlist_create(tab->hub);
     ui_tab_open(tab->userlist_tab);
   }
+}
+
+
+gboolean ui_hub_finduser(struct ui_tab *tab, const char *user, gboolean utf8) {
+  struct nmdc_user *u = utf8 ? nmdc_user_get(tab->hub, user) : g_hash_table_lookup(tab->hub->users, user);
+  if(!u)
+    return FALSE;
+  ui_hub_userlist_open(tab);
+  // u->iter should be valid at this point.
+  tab->userlist_tab->list->sel = u->iter;
+  tab->userlist_tab->user_details = TRUE;
+  return TRUE;
 }
 
 

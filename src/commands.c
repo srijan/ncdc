@@ -872,6 +872,7 @@ static void c_say_sug(char *args, char **sug) {
 }
 
 
+// also used for c_whois
 static void c_msg_sug(char *args, char **sug) {
   nick_sug(args, sug, FALSE);
 }
@@ -904,6 +905,36 @@ static void c_gc(char *args) {
     fl_hashdat_gc();
     ui_m(NULL, 0, "Garbage-collection done.");
   }
+}
+
+
+static void c_whois(char *args) {
+  struct ui_tab *h = tab;
+  char *u = NULL;
+  gboolean utf8 = TRUE;
+  if(tab->type != UIT_HUB && tab->type != UIT_MSG)
+    ui_m(NULL, 0, "This command can only be used on hub and message tabs.");
+  else if(!args[0] && tab->type != UIT_MSG)
+    ui_m(NULL, 0, "No user specified. See `/help whois' for more information.");
+  else if(tab->type == UIT_MSG) {
+    GList *n;
+    for(n=ui_tabs; n; n=n->next) {
+      h = n->data;
+      if(h->type == UIT_HUB && h->hub == tab->hub)
+        break;
+    }
+    g_return_if_fail(n);
+    if(args[0])
+      u = args;
+    else if(tab->msg_user) {
+      utf8 = FALSE;
+      u = tab->msg_user->name_hub;
+    } else
+      u = tab->msg_uname;
+  } else
+    u = args;
+  if(u && !ui_hub_finduser(h, u, utf8))
+    ui_m(NULL, 0, "No user found with that name.");
 }
 
 
@@ -1020,6 +1051,10 @@ static struct cmd cmds[] = {
   { "version", c_version, NULL,
     NULL, "Display version information.",
     ""
+  },
+  { "whois", c_whois, c_msg_sug,
+    "<user>", "Locate a user in the user list.",
+    "This will open the user list and select the given user."
   },
   { "", NULL }
 };

@@ -456,12 +456,16 @@ static void ui_userlist_draw_row(struct ui_listing *list, GSequenceIter *iter, i
   struct ui_userlist_draw_opts *o = dat;
 
   char *tag = user->tag ? g_strdup_printf("<%s>", user->tag) : NULL;
-  int j=2;
+  int j=5;
   if(iter == list->sel) {
     attron(A_BOLD);
     mvaddstr(row, 0, ">");
     attroff(A_BOLD);
   }
+  if(user->isop)
+    mvaddch(row, 2, 'O');
+  if(!user->tag || !strstr(user->tag, ",M:A")) // not the best method...
+    mvaddch(row, 3, 'P');
   DRAW_COL(row, j, o->cw_user,  user->name);
   DRAW_COL(row, j, o->cw_share, user->hasinfo ? str_formatsize(user->sharesize) : "");
   DRAW_COL(row, j, o->cw_desc,  user->desc?user->desc:"");
@@ -480,15 +484,16 @@ static void ui_userlist_draw(struct ui_tab *tab) {
   int num = 2 + (tab->user_hide_conn?0:1) + (tab->user_hide_desc?0:1) + (tab->user_hide_tag?0:1) + (tab->user_hide_mail?0:1);
   o.cw_user = MAX(20, (wincols*6)/(num*10));
   o.cw_share = 12;
-  int i = wincols-o.cw_user-o.cw_share-2; num -= 2; // remaining number of columns
+  int i = wincols-o.cw_user-o.cw_share-5; num -= 2; // remaining number of columns
   o.cw_conn = tab->user_hide_conn ? 0 : (i*6)/(num*10);
   o.cw_desc = tab->user_hide_desc ? 0 : (i*10)/(num*10);
   o.cw_mail = tab->user_hide_mail ? 0 : (i*7)/(num*10);
   o.cw_tag  = tab->user_hide_tag  ? 0 : i-o.cw_conn-o.cw_desc-o.cw_mail;
 
   // header
-  i = 2;
+  i = 5;
   attron(A_BOLD);
+  mvaddstr(1, 2, "OP");
   DRAW_COL(1, i, o.cw_user,  "Username");
   DRAW_COL(1, i, o.cw_share, "Share");
   DRAW_COL(1, i, o.cw_desc,  "Description");

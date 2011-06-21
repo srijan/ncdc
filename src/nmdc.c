@@ -274,7 +274,7 @@ void nmdc_password(struct nmdc_hub *hub, char *pass) {
   g_return_if_fail(!hub->nick_valid);
   char *rpass = !pass ? g_key_file_get_string(conf_file, hub->tab->name, "password", NULL) : g_strdup(pass);
   if(!rpass)
-    ui_m(NULL, 0,
+    ui_m(hub->tab, UIP_HIGH,
       "\nPassword required. Type '/password <your password>' to log in without saving your password."
       "\nOr use '/set password <your password>' to log in and save your password in the config file (unencrypted!).\n");
   else {

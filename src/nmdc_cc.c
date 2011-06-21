@@ -88,6 +88,7 @@ struct nmdc_cc {
   gboolean active : 1;
   gboolean isop : 1;
   gboolean slot_mini : 1;
+  gboolean slot_granted : 1;
   int timeout_src;
   time_t last_action;
   char remoteaddr[24]; // xxx.xxx.xxx.xxx:ppppp
@@ -224,6 +225,10 @@ static gboolean request_slot(struct nmdc_cc *cc, gboolean need_full) {
   int slots = nmdc_cc_slots_in_use(&minislots);
 
   cc->slot_mini = FALSE;
+
+  // if this connection is granted a slot, then just allow it
+  if(cc->slot_granted)
+    return TRUE;
 
   // if we have a free slot, use that
   if(slots < conf_slots())
@@ -429,6 +434,7 @@ static void handle_mynick(struct nmdc_cc *cc, const char *nick) {
   cc->nick_raw = g_strdup(nick);
   cc->nick = g_strdup(u->name);
   cc->isop = u->isop;
+  cc->slot_granted = g_hash_table_lookup(cc->hub->grants, cc->nick_raw) ? TRUE : FALSE;
 
   if(dup) {
     g_set_error_literal(&(cc->err), 1, 0, "too many open connections with this user");

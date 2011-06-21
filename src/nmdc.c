@@ -63,6 +63,10 @@ struct nmdc_hub {
   char *hubname_hub; // in hub encoding
   // user list, key = username (in hub encoding!), value = struct nmdc_user *
   GHashTable *users;
+  // list of users who have been granted a slot. key = username (in hub
+  // encoding), value = (void *)1. A user will stay in this table for as long
+  // as the hub tab is open, I guess that's good enough.
+  GHashTable *grants;
   int sharecount;
   guint64 sharesize;
   // what we and the hub support
@@ -262,6 +266,13 @@ static void user_myinfo(struct nmdc_hub *hub, struct nmdc_user *u, const char *s
 
 
 // hub stuff
+
+
+void nmdc_grant(struct nmdc_hub *hub, struct nmdc_user *u) {
+  if(!g_hash_table_lookup(hub->grants, u->name_hub))
+    g_hash_table_insert(hub->grants, g_strdup(u->name_hub), (void *)1);
+  // TODO: open a connection to the user?
+}
 
 
 void nmdc_send_myinfo(struct nmdc_hub *hub) {
@@ -699,6 +710,7 @@ struct nmdc_hub *nmdc_create(struct ui_tab *tab) {
   hub->net = net_create('|', hub, TRUE, handle_cmd, handle_error);
   hub->tab = tab;
   hub->users = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, user_free);
+  hub->grants = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
   hub->myinfo_timer = g_timeout_add_seconds(5*60, check_myinfo, hub);
   return hub;
 }
@@ -755,6 +767,7 @@ void nmdc_free(struct nmdc_hub *hub) {
   nmdc_disconnect(hub, FALSE);
   net_unref(hub->net);
   g_hash_table_unref(hub->users);
+  g_hash_table_unref(hub->grants);
   g_source_remove(hub->myinfo_timer);
   g_free(hub);
 }

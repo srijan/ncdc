@@ -978,6 +978,26 @@ static void c_whois(char *args) {
 }
 
 
+static void c_grant(char *args) {
+  struct nmdc_user *u = NULL;
+  if(tab->type != UIT_HUB && tab->type != UIT_MSG)
+    ui_m(NULL, 0, "This command can only be used on hub and message tabs.");
+  else if(!args[0] && tab->type != UIT_MSG)
+    ui_m(NULL, 0, "No user specified. See `/help grant' for more information.");
+  else if(args[0])
+    u = nmdc_user_get(tab->hub, args);
+  else
+    u = tab->msg_user;
+
+  if(!u)
+    ui_m(NULL, 0, "No user found with that name.");
+  else {
+    nmdc_grant(tab->hub, u);
+    ui_m(NULL, 0, "Slot granted.");
+  }
+}
+
+
 // definition of the command list
 static struct cmd cmds[] = {
   { "clear", c_clear, NULL,
@@ -1015,6 +1035,16 @@ static struct cmd cmds[] = {
     "Currently, the only thing being cleaned up is the hashdata.dat file.\n\n"
     "This command may take some time to complete, and will fully block ncdc while it is running.\n"
     "You won't have to perform this command very often."
+  },
+  { "grant", c_grant, c_msg_sug,
+    "[<user>]", "Grant someone a slot.",
+    "Granting a slot to someone allows the user to download from you even if you have no free slots.\n\n"
+    "The slot will be granted for as long as the hub tab stays open. If you"
+    " close or re-open the hub tab or if you restart ncdc, the user will have to"
+    " wait for a regular slot. Unless, of course, you /grant a slot again.\n\n"
+    "Also note that a granted slot is specific to a single hub. If the user is"
+    " also on other hubs, he/she will not be granted a slot on those hubs."
+    " (This is a limitation in the NMDC protocol)."
   },
   { "help", c_help, c_help_sug,
     "[<command>]", "Request information on commands.",
@@ -1093,7 +1123,7 @@ static struct cmd cmds[] = {
     ""
   },
   { "whois", c_whois, c_msg_sug,
-    "<user>", "Locate a user in the user list.",
+    "[<user>]", "Locate a user in the user list.",
     "This will open the user list and select the given user."
   },
   { "", NULL }

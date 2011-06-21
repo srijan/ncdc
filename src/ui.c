@@ -556,6 +556,7 @@ static void ui_userlist_key(struct ui_tab *tab, guint64 key) {
   if(ui_listing_key(tab->list, key, winrows/2))
     return;
 
+  struct nmdc_user *sel = g_sequence_iter_is_end(tab->list->sel) ? NULL : g_sequence_get(tab->list->sel);
   gboolean sort = FALSE;
   switch(key) {
   case INPT_CHAR('s'): // s (order by share asc/desc)
@@ -593,16 +594,24 @@ static void ui_userlist_key(struct ui_tab *tab, guint64 key) {
     tab->user_details = !tab->user_details;
     break;
   case INPT_CHAR('m'): // m (/msg user)
-    if(!g_sequence_iter_is_end(tab->list->sel)) {
-      struct nmdc_user *u = g_sequence_get(tab->list->sel);
-      struct ui_tab *t = ui_hub_getmsg(tab, u);
+    if(!sel)
+      ui_m(NULL, 0, "No user selected.");
+    else {
+      struct ui_tab *t = ui_hub_getmsg(tab, sel);
       if(!t) {
-        t = ui_msg_create(tab->hub, u);
+        t = ui_msg_create(tab->hub, sel);
         ui_tab_open(t);
       } else
         ui_tab_cur = g_list_find(ui_tabs, t);
-    } else
+    }
+    break;
+  case INPT_CHAR('g'):
+    if(!sel)
       ui_m(NULL, 0, "No user selected.");
+    else {
+      nmdc_grant(tab->hub, sel);
+      ui_m(NULL, 0, "Slot granted.");
+    }
     break;
   }
 

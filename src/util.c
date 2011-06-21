@@ -68,6 +68,13 @@ GKeyFile *conf_file;
     ? g_key_file_get_##type(conf_file, name, (key), NULL)\
     : g_key_file_get_##type(conf_file, "global", (key), NULL))
 
+#define conf_encoding(hub) (\
+  g_key_file_has_key(conf_file, hub, "encoding", NULL)\
+    ? g_key_file_get_string(conf_file, hub, "encoding", NULL) \
+    : g_key_file_has_key(conf_file, "global", "encoding", NULL) \
+    ? g_key_file_get_string(conf_file, "global", "encoding", NULL) \
+    : g_strdup("UTF-8"))
+
 #define conf_autorefresh() (\
   !g_key_file_has_key(conf_file, "global", "autorefresh", NULL) ? 60\
     : g_key_file_get_integer(conf_file, "global", "autorefresh", NULL))

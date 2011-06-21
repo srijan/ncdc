@@ -86,8 +86,8 @@ struct nmdc_hub {
 // nmdc utility functions (also used by nmdc_cc.c)
 
 char *nmdc_charset_convert(struct nmdc_hub *hub, gboolean to_utf8, const char *str) {
-  char *fmt = conf_hub_get(string, hub->tab->name, "encoding");
-  char *res = str_convert(to_utf8||!fmt?"UTF-8":fmt, !to_utf8||!fmt?"UTF-8":fmt, str);
+  char *fmt = conf_encoding(hub->tab->name);
+  char *res = str_convert(to_utf8?"UTF-8":fmt, !to_utf8?"UTF-8":fmt, str);
   g_free(fmt);
   return res;
 }

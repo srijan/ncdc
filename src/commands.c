@@ -70,14 +70,9 @@ static void get_string(char *group, char *key) {
 }
 
 
-static void get_bool(char *group, char *key) {
-  GError *err = NULL;
-  gboolean val = g_key_file_get_boolean(conf_file, group, key, &err);
-  if(err) {
-    ui_mf(NULL, 0, "%s.%s is not set.", group, key);
-    g_error_free(err);
-  } else
-    ui_mf(NULL, 0, "%s.%s = %s", group, key, val ? "true" : "false");
+// not set => false
+static void get_bool_f(char *group, char *key) {
+  ui_mf(NULL, 0, "%s.%s = %s", group, key, g_key_file_get_boolean(conf_file, group, key, NULL) ? "true" : "false");
 }
 
 
@@ -89,6 +84,14 @@ static void get_int(char *group, char *key) {
     g_error_free(err);
   } else
     ui_mf(NULL, 0, "%s.%s = %d", group, key, val);
+}
+
+
+static gboolean bool_var(const char *val) {
+  if(strcmp(val, "1") == 0 || strcmp(val, "t") == 0 || strcmp(val, "y") == 0
+      || strcmp(val, "true") == 0 || strcmp(val, "yes") == 0 || strcmp(val, "on") == 0)
+    return TRUE;
+  return FALSE;
 }
 
 
@@ -148,6 +151,11 @@ static void set_userinfo(char *group, char *key, char *val) {
 }
 
 
+static void get_encoding(char *group, char *key) {
+  ui_mf(NULL, 0, "%s.%s = %s", group, key, conf_encoding(group));
+}
+
+
 static void set_encoding(char *group, char *key, char *val) {
   GError *err = NULL;
   if(!val)
@@ -161,7 +169,7 @@ static void set_encoding(char *group, char *key, char *val) {
     }
   } else {
     g_key_file_set_string(conf_file, group, key, val);
-    get_string(group, key);
+    get_encoding(group, key);
   }
   // TODO: note that this only affects new incoming data? and that a reconnect
   // may be necessary to re-convert all names/descriptions/stuff?
@@ -185,21 +193,13 @@ static void set_encoding_sug(char *val, char **sug) {
 }
 
 
-static gboolean bool_var(const char *val) {
-  if(strcmp(val, "1") == 0 || strcmp(val, "t") == 0 || strcmp(val, "y") == 0
-      || strcmp(val, "true") == 0 || strcmp(val, "yes") == 0 || strcmp(val, "on") == 0)
-    return TRUE;
-  return FALSE;
-}
-
-
 // generic set function for boolean settings that don't require any special attention
-static void set_bool(char *group, char *key, char *val) {
+static void set_bool_f(char *group, char *key, char *val) {
   if(!val)
     UNSET(group, key);
   else {
     g_key_file_set_boolean(conf_file, group, key, bool_var(val));
-    get_bool(group, key);
+    get_bool_f(group, key);
   }
 }
 
@@ -218,7 +218,7 @@ static void set_autoconnect(char *group, char *key, char *val) {
   if(strcmp(group, "global") == 0 || group[0] != '#')
     ui_m(NULL, 0, "ERROR: autoconnect can only be used as hub setting.");
   else
-    set_bool(group, key, val);
+    set_bool_f(group, key, val);
 }
 
 
@@ -229,7 +229,7 @@ static void set_active(char *group, char *key, char *val) {
     ui_m(NULL, 0, "ERROR: No IP address set. Please use `/set active_ip <your_ip>' first.");
     return;
   }
-  set_bool(group, key, val);
+  set_bool_f(group, key, val);
   nmdc_cc_listen_start();
 }
 
@@ -265,6 +265,12 @@ static void set_active_port(char *group, char *key, char *val) {
 }
 
 
+static void get_autorefresh(char *group, char *key) {
+  int a = conf_autorefresh();
+  ui_mf(NULL, 0, "%s.%s = %d%s", group, key, a, !a ? " (disabled)" : "");
+}
+
+
 static void set_autorefresh(char *group, char *key, char *val) {
   if(!val)
     UNSET(group, key);
@@ -276,9 +282,14 @@ static void set_autorefresh(char *group, char *key, char *val) {
       ui_m(NULL, 0, "Interval between automatic refreshes should be at least 10 minutes.");
     else {
       g_key_file_set_integer(conf_file, group, key, v);
-      get_int(group, key);
+      get_autorefresh(group, key);
     }
   }
+}
+
+
+static void get_slots(char *group, char *key) {
+  ui_mf(NULL, 0, "%s.%s = %d", group, key, conf_slots());
 }
 
 
@@ -291,7 +302,7 @@ static void set_slots(char *group, char *key, char *val) {
       ui_m(NULL, 0, "Invalid number.");
     else {
       g_key_file_set_integer(conf_file, group, key, v);
-      get_int(group, key);
+      get_slots(group, key);
     }
   }
 }
@@ -300,19 +311,19 @@ static void set_slots(char *group, char *key, char *val) {
 // the settings list
 // TODO: help text / documentation?
 static struct setting settings[] = {
-  { "active",        "global", get_bool,   set_active,      NULL             },
-  { "active_ip",     "global", get_string, set_active_ip,   NULL             },
-  { "active_port",   "global", get_int,    set_active_port, NULL,            },
-  { "autoconnect",   NULL,     get_bool,   set_autoconnect, set_bool_sug     }, // may not be used in "global"
-  { "autorefresh",   "global", get_int,    set_autorefresh, NULL             }, // in minutes, 0 = disabled
-  { "connection",    NULL,     get_string, set_userinfo,    NULL             },
-  { "description",   NULL,     get_string, set_userinfo,    NULL             },
-  { "email",         NULL,     get_string, set_userinfo,    NULL             },
-  { "encoding",      NULL,     get_string, set_encoding,    set_encoding_sug },
-  { "log_debug",     "log",    get_bool,   set_bool,        set_bool_sug     },
-  { "nick",          NULL,     get_string, set_nick,        NULL             }, // global.nick may not be /unset
-  { "show_joinquit", NULL,     get_bool,   set_bool,        set_bool_sug     },
-  { "slots",         "global", get_int,    set_slots,       NULL             },
+  { "active",        "global", get_bool_f,      set_active,      NULL             },
+  { "active_ip",     "global", get_string,      set_active_ip,   NULL             },
+  { "active_port",   "global", get_int,         set_active_port, NULL,            },
+  { "autoconnect",   NULL,     get_bool_f,      set_autoconnect, set_bool_sug     }, // may not be used in "global"
+  { "autorefresh",   "global", get_autorefresh, set_autorefresh, NULL             }, // in minutes, 0 = disabled
+  { "connection",    NULL,     get_string,      set_userinfo,    NULL             },
+  { "description",   NULL,     get_string,      set_userinfo,    NULL             },
+  { "email",         NULL,     get_string,      set_userinfo,    NULL             },
+  { "encoding",      NULL,     get_encoding,    set_encoding,    set_encoding_sug },
+  { "log_debug",     "log",    get_bool_f,      set_bool_f,      set_bool_sug     },
+  { "nick",          NULL,     get_string,      set_nick,        NULL             }, // global.nick may not be /unset
+  { "show_joinquit", NULL,     get_bool_f,      set_bool_f,      set_bool_sug     },
+  { "slots",         "global", get_slots,       set_slots,       NULL             },
   { NULL }
 };
 
@@ -537,7 +548,7 @@ static void c_help(char *args) {
     if(!c)
       ui_mf(NULL, 0, "\nUnknown command '%s'.", args);
     else
-      ui_mf(NULL, 0, "\nUsage: /%s %s\n  %s\n%s\n", c->name, c->args ? c->args : "", c->sum, c->desc);
+      ui_mf(NULL, 0, "\nUsage: /%s %s\n  %s\n\n%s\n", c->name, c->args ? c->args : "", c->sum, c->desc);
   }
 }
 
@@ -991,8 +1002,7 @@ static struct cmd cmds[] = {
   },
   { "unset", c_unset, c_set_sugkey,
     "<key>", "Unset a configuration variable.",
-    "This command will remove any value set with the specified variable.\n"
-    "Can be useful to reset a variable back to its global or default value."
+    "This command will reset the variable back to its default value."
   },
   { "unshare", c_unshare, c_unshare_sug,
     "[<name>]", "Remove a directory from your share.",

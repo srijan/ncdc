@@ -939,7 +939,7 @@ static void c_say_sug(char *args, char **sug) {
 }
 
 
-// also used for c_whois
+// also used for c_whois, c_grant and c_kick
 static void c_msg_sug(char *args, char **sug) {
   nick_sug(args, sug, FALSE);
 }
@@ -1031,6 +1031,23 @@ static void c_password(char *args) {
 }
 
 
+static void c_kick(char *args) {
+  if(tab->type != UIT_HUB)
+    ui_m(NULL, 0, "This command can only be used on hub tabs.");
+  else if(!tab->hub->nick_valid)
+    ui_m(NULL, 0, "Not connected or logged in yet.");
+  else if(!args[0])
+    ui_m(NULL, 0, "No user specified.");
+  else {
+    struct nmdc_user *u = nmdc_user_get(tab->hub, args);
+    if(!u)
+      ui_m(NULL, 0, "No user found with that name.");
+    else
+      nmdc_kick(tab->hub, u);
+  }
+}
+
+
 // definition of the command list
 static struct cmd cmds[] = {
   { "clear", c_clear, NULL,
@@ -1083,6 +1100,10 @@ static struct cmd cmds[] = {
     "[<command>]", "Request information on commands.",
     "Use /help without arguments to list all the available commands.\n"
     "Use /help <command> to get information about a particular command."
+  },
+  { "kick", c_kick, c_msg_sug,
+    "<user>", "Kick a user from the hub.",
+    "You need to be an OP to be able to use this command."
   },
   { "msg", c_msg, c_msg_sug,
     "<user> [<message>]", "Send a private message.",

@@ -285,6 +285,12 @@ void nmdc_password(struct nmdc_hub *hub, char *pass) {
 }
 
 
+void nmdc_kick(struct nmdc_hub *hub, struct nmdc_user *u) {
+  g_return_if_fail(hub->nick_valid && u);
+  net_sendf(hub->net, "$Kick %s", u->name_hub);
+}
+
+
 void nmdc_grant(struct nmdc_hub *hub, struct nmdc_user *u) {
   if(!g_hash_table_lookup(hub->grants, u->name_hub))
     g_hash_table_insert(hub->grants, g_strdup(u->name_hub), (void *)1);

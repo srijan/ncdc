@@ -917,13 +917,7 @@ static void c_whois(char *args) {
   else if(!args[0] && tab->type != UIT_MSG)
     ui_m(NULL, 0, "No user specified. See `/help whois' for more information.");
   else if(tab->type == UIT_MSG) {
-    GList *n;
-    for(n=ui_tabs; n; n=n->next) {
-      h = n->data;
-      if(h->type == UIT_HUB && h->hub == tab->hub)
-        break;
-    }
-    g_return_if_fail(n);
+    h = tab->hub->tab;
     if(args[0])
       u = args;
     else if(tab->msg_user) {

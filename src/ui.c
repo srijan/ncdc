@@ -798,6 +798,19 @@ static void ui_conn_draw() {
 static void ui_conn_key(guint64 key) {
   if(ui_listing_key(ui_conn->list, key, (winrows-10)/2))
     return;
+
+  struct nmdc_cc *cc = g_sequence_iter_is_end(ui_conn->list->sel) ? NULL : g_sequence_get(ui_conn->list->sel);
+
+  switch(key) {
+  case INPT_CHAR('f'):
+    if(!cc)
+      ui_m(NULL, 0, "Nothing selected.");
+    else if(!cc->nick_raw || !cc->hub)
+      ui_m(NULL, 0, "User or hub unknown.");
+    else if(!ui_hub_finduser(cc->hub->tab, cc->nick_raw, FALSE))
+      ui_m(NULL, 0, "User has left the hub.");
+    break;
+  }
 }
 
 

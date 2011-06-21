@@ -59,6 +59,8 @@ struct nmdc_hub {
   char *nick;     // UTF-8
   // TRUE is the above nick has also been validated (and we're properly logged in)
   gboolean nick_valid;
+  gboolean isreg; // whether we used a $MyPass to login
+  gboolean isop;  // whether we're in the $OpList or not
   char *hubname;  // UTF-8, or NULL when unknown
   char *hubname_hub; // in hub encoding
   // user list, key = username (in hub encoding!), value = struct nmdc_user *
@@ -275,8 +277,10 @@ void nmdc_password(struct nmdc_hub *hub, char *pass) {
     ui_m(NULL, 0,
       "\nPassword required. Type '/password <your password>' to log in without saving your password."
       "\nOr use '/set password <your password>' to log in and save your password in the config file (unencrypted!).\n");
-  else
+  else {
     net_sendf(hub->net, "$MyPass %s", rpass); // Password is sent raw, not encoded. Don't think encoding really matters here.
+    hub->isreg = TRUE;
+  }
   g_free(rpass);
 }
 
@@ -296,17 +300,22 @@ void nmdc_send_myinfo(struct nmdc_hub *hub) {
   tmp = conf_hub_get(string, hub->tab->name, "connection");  char *conn = nmdc_encode_and_escape(hub, tmp?tmp:""); g_free(tmp);
   tmp = conf_hub_get(string, hub->tab->name, "email");       char *mail = nmdc_encode_and_escape(hub, tmp?tmp:""); g_free(tmp);
 
-  // TODO: differentiate between normal/passworded/OP
-  int hubs = 0;
+  int h_normal = 0, h_reg = 0, h_op = 0;
   GList *n;
   for(n=ui_tabs; n; n=n->next) {
     struct ui_tab *t = n->data;
-    if(t->type == UIT_HUB && t->hub->nick_valid)
-      hubs++;
+    if(t->type != UIT_HUB)
+      continue;
+    if(t->hub->isop)
+      h_op++;
+    else if(t->hub->isreg)
+      h_reg++;
+    else if(t->hub->nick_valid)
+      h_normal++;
   }
 
-  tmp = g_strdup_printf("$MyINFO $ALL %s %s<ncdc V:%s,M:%c,H:%d/0/0,S:%d>$ $%s\01$%s$%"G_GUINT64_FORMAT"$",
-    hub->nick_hub, desc, VERSION, nmdc_cc_listen ? 'A' : 'P', hubs, conf_slots(), conn, mail, fl_local_list_size);
+  tmp = g_strdup_printf("$MyINFO $ALL %s %s<ncdc V:%s,M:%c,H:%d/%d/%d,S:%d>$ $%s\01$%s$%"G_GUINT64_FORMAT"$",
+    hub->nick_hub, desc, VERSION, nmdc_cc_listen ? 'A' : 'P', h_normal, h_reg, h_op, conf_slots(), conn, mail, fl_local_list_size);
   g_free(desc);
   g_free(conn);
   g_free(mail);
@@ -538,6 +547,7 @@ static void handle_cmd(struct net *n, char *cmd) {
     // Actually, we should be going through the entire user list and set
     // isop=FALSE when the user is not listed here. I consider this to be too
     // inefficient and not all that important at this point.
+    hub->isop = FALSE;
     for(cur=list; *cur&&**cur; cur++) {
       struct nmdc_user *u = user_add(hub, *cur);
       if(!u->isop) {
@@ -545,6 +555,8 @@ static void handle_cmd(struct net *n, char *cmd) {
         ui_hub_userchange(hub->tab, UIHUB_UC_NFO, u);
       } else
         u->isop = TRUE;
+      if(strcmp(hub->nick_hub, *cur) == 0)
+        hub->isop = TRUE;
     }
     hub->received_nicklist = TRUE;
     g_strfreev(list);
@@ -767,8 +779,9 @@ void nmdc_disconnect(struct nmdc_hub *hub, gboolean recon) {
   g_free(hub->hubname);  hub->hubname = NULL;
   g_free(hub->hubname_hub);  hub->hubname_hub = NULL;
   g_free(hub->myinfo_last); hub->myinfo_last = NULL;
-  hub->nick_valid = hub->received_nicklist = hub->joincomplete = hub->state
-    = hub->sharecount = hub->sharesize = hub->supports_nogetinfo = 0;
+  hub->nick_valid = hub->isreg = hub->isop = hub->received_nicklist =
+    hub->joincomplete = hub->state = hub->sharecount = hub->sharesize =
+    hub->supports_nogetinfo = 0;
   if(!recon) {
     ui_m(hub->tab, 0, "Disconnected.");
     if(hub->reconnect_timer) {

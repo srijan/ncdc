@@ -364,7 +364,7 @@ static void set_password(char *group, char *key, char *val) {
     UNSET(group, key);
   else {
     g_key_file_set_string(conf_file, group, key, val);
-    if(tab->type == UIT_HUB && tab->hub->state == HUBS_CONNECTED && !tab->hub->nick_valid)
+    if(tab->type == UIT_HUB && tab->hub->net->conn && !tab->hub->nick_valid)
       nmdc_password(tab->hub, NULL);
     ui_m(NULL, 0, "Password saved.");
   }
@@ -675,7 +675,7 @@ static void c_open_sug(char *args, char **sug) {
 static void c_connect(char *args) {
   if(tab->type != UIT_HUB)
     ui_m(NULL, 0, "This command can only be used on hub tabs.");
-  else if(tab->hub->state != HUBS_IDLE)
+  else if(tab->hub->net->connecting || tab->hub->net->conn)
     ui_m(NULL, 0, "Already connected (or connecting). You may want to /disconnect first.");
   else {
     if(args[0]) {
@@ -721,7 +721,7 @@ static void c_disconnect(char *args) {
     ui_m(NULL, 0, "This command does not accept any arguments.");
   else if(tab->type != UIT_HUB)
     ui_m(NULL, 0, "This command can only be used on hub tabs.");
-  else if(tab->hub->state == HUBS_IDLE && !tab->hub->reconnect_timer)
+  else if(!tab->hub->net->conn && !tab->hub->reconnect_timer)
     ui_m(NULL, 0, "Not connected.");
   else if(tab->hub->reconnect_timer) {
     g_source_remove(tab->hub->reconnect_timer);
@@ -737,7 +737,7 @@ static void c_reconnect(char *args) {
   else if(tab->type != UIT_HUB)
     ui_m(NULL, 0, "This command can only be used on hub tabs.");
   else {
-    if(tab->hub->state != HUBS_IDLE)
+    if(tab->hub->net->conn)
       nmdc_disconnect(tab->hub, FALSE);
     c_connect(""); // also checks for the existence of "hubaddr"
   }
@@ -1022,7 +1022,7 @@ static void c_grant(char *args) {
 static void c_password(char *args) {
   if(tab->type != UIT_HUB)
     ui_m(NULL, 0, "This command can only be used on hub tabs.");
-  else if(tab->hub->state != HUBS_CONNECTED)
+  else if(!tab->hub->net->conn)
     ui_m(NULL, 0, "Not connected to a hub. Did you want to use '/set password' instead?");
   else if(tab->hub->nick_valid)
     ui_m(NULL, 0, "Already logged in. Did you want to use '/set password' instead?");

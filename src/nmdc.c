@@ -46,14 +46,9 @@ struct hub_user {
 }
 
 
-#define HUBS_IDLE       0 // must be 0
-#define HUBS_CONNECTING 1
-#define HUBS_CONNECTED  2
-
 struct nmdc_hub {
   struct ui_tab *tab; // to get name (for config) and for logging & setting of title
   struct net *net;
-  int state;
   // nick as used in this connection, NULL when no $ValidateNick has been sent yet
   char *nick_hub; // in hub encoding
   char *nick;     // UTF-8
@@ -647,7 +642,6 @@ static void handle_error(struct net *n, int action, GError *err) {
   switch(action) {
   case NETERR_CONN:
     ui_mf(hub->tab, 0, "Could not connect to hub: %s. Wating 30 seconds before retrying.", err->message);
-    hub->state = HUBS_IDLE;
     hub->reconnect_timer = g_timeout_add_seconds(30, reconnect_timer, hub);
     break;
   case NETERR_RECV:
@@ -676,7 +670,6 @@ struct nmdc_hub *nmdc_create(struct ui_tab *tab) {
 static void handle_connect(struct net *n) {
   struct nmdc_hub *hub = n->handle;
   ui_mf(hub->tab, 0, "Connected to %s.", net_remoteaddr(n));
-  hub->state = HUBS_CONNECTED;
 }
 
 
@@ -690,7 +683,6 @@ void nmdc_connect(struct nmdc_hub *hub) {
   }
 
   ui_mf(hub->tab, 0, "Connecting to %s...", addr);
-  hub->state = HUBS_CONNECTING;
   net_connect(hub->net, addr, 411, handle_connect);
   g_free(addr);
 }
@@ -705,7 +697,7 @@ void nmdc_disconnect(struct nmdc_hub *hub, gboolean recon) {
   g_free(hub->hubname_hub);  hub->hubname_hub = NULL;
   g_free(hub->myinfo_last); hub->myinfo_last = NULL;
   hub->nick_valid = hub->isreg = hub->isop = hub->received_nicklist =
-    hub->joincomplete = hub->state = hub->sharecount = hub->sharesize =
+    hub->joincomplete =  hub->sharecount = hub->sharesize =
     hub->supports_nogetinfo = 0;
   if(!recon) {
     ui_m(hub->tab, 0, "Disconnected.");

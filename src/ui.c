@@ -255,10 +255,10 @@ static void ui_hub_draw(struct ui_tab *tab) {
 
   attron(A_REVERSE);
   mvhline(winrows-4, 0, ' ', wincols);
-  if(tab->hub->state == HUBS_IDLE)
-    mvaddstr(winrows-4, wincols-16, "Not connected.");
-  else if(tab->hub->state == HUBS_CONNECTING)
+  if(tab->hub->net->connecting)
     mvaddstr(winrows-4, wincols-15, "Connecting...");
+  else if(!tab->hub->net->conn)
+    mvaddstr(winrows-4, wincols-16, "Not connected.");
   else if(!tab->hub->nick_valid)
     mvaddstr(winrows-4, wincols-15, "Logging in...");
   else {
@@ -285,10 +285,10 @@ static void ui_hub_draw(struct ui_tab *tab) {
 
 static char *ui_hub_title(struct ui_tab *tab) {
   return g_strdup_printf("%s: %s", tab->name,
-    tab->hub->state == HUBS_IDLE       ? "Not connected." :
-    tab->hub->state == HUBS_CONNECTING ? "Connecting..." :
-    !tab->hub->nick_valid              ? "Logging in..." :
-    tab->hub->hubname                  ? tab->hub->hubname : "Connected.");
+    tab->hub->net->connecting  ? "Connecting..." :
+    !tab->hub->net->conn       ? "Not connected." :
+    !tab->hub->nick_valid      ? "Logging in..." :
+    tab->hub->hubname          ? tab->hub->hubname : "Connected.");
 }
 
 

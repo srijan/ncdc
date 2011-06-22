@@ -70,6 +70,7 @@ struct ratecalc net_in, net_out;
 struct net {
   GSocketConnection *conn;
   GSocket *sock;
+  gboolean connecting;
   // input/output buffers
   GString *in, *out;
   GCancellable *cancel; // used to cancel a connect operation
@@ -377,6 +378,7 @@ static void handle_setconn(struct net *n, GSocketConnection *conn) {
 
 static void handle_connect(GObject *src, GAsyncResult *res, gpointer dat) {
   struct net *n = dat;
+  n->connecting = FALSE;
 
   GError *err = NULL;
   GSocketConnection *conn = g_socket_client_connect_to_host_finish(G_SOCKET_CLIENT(src), res, &err);
@@ -414,6 +416,7 @@ void net_connect(struct net *n, const char *addr, unsigned short defport, void (
 #endif
   g_socket_client_connect_to_host_async(sc, addr, defport, n->cancel, handle_connect, n);
   g_object_unref(sc);
+  n->connecting = TRUE;
 }
 
 

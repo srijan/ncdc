@@ -672,20 +672,28 @@ static void c_open_sug(char *args, char **sug) {
 }
 
 
+static void c_connect_set_hubaddr(char *addr) {
+  // make sure it's a full address in the form of "dchub://hostname:port/"
+  // (doesn't check for validness)
+  GString *a = g_string_new(addr);
+  if(strncmp(a->str, "dchub://", 8) != 0)
+    g_string_prepend(a, "dchub://");
+  if(a->str[a->len-1] != '/')
+    g_string_append_c(a, '/');
+  g_key_file_set_string(conf_file, tab->name, "hubaddr", a->str);
+  conf_save();
+  g_string_free(a, TRUE);
+}
+
+
 static void c_connect(char *args) {
   if(tab->type != UIT_HUB)
     ui_m(NULL, 0, "This command can only be used on hub tabs.");
   else if(tab->hub->net->connecting || tab->hub->net->conn)
     ui_m(NULL, 0, "Already connected (or connecting). You may want to /disconnect first.");
   else {
-    if(args[0]) {
-      if(strncmp(args, "dchub://", 8) == 0)
-        args += 8;
-      if(args[strlen(args)-1] == '/')
-        args[strlen(args)-1] = 0;
-      g_key_file_set_string(conf_file, tab->name, "hubaddr", args);
-      conf_save();
-    }
+    if(args[0])
+      c_connect_set_hubaddr(args);
     if(!g_key_file_has_key(conf_file, tab->name, "hubaddr", NULL))
       ui_m(NULL, 0, "No hub address configured. Use '/connect <address>' to do so.");
     else

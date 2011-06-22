@@ -674,8 +674,17 @@ static void handle_connect(struct net *n) {
 
 
 void hub_connect(struct hub *hub) {
-  char *addr = conf_hub_get(string, hub->tab->name, "hubaddr");
+  char *oaddr = conf_hub_get(string, hub->tab->name, "hubaddr");
+  char *addr = oaddr;
   g_assert(addr);
+  // The address should be in the form of "dchub://hostname:port/", but older
+  // ncdc versions saved it simply as "hostname:port" or even "hostname", so we
+  // need to handle both. No protocol indicator is assumed to be NMDC. No port
+  // is assumed to indicate 411.
+  if(strncmp(addr, "dchub://", 8) == 0)
+    addr += 8;
+  if(addr[strlen(addr)-1] == '/')
+    addr[strlen(addr)-1] = 0;
 
   if(hub->reconnect_timer) {
     g_source_remove(hub->reconnect_timer);
@@ -684,7 +693,7 @@ void hub_connect(struct hub *hub) {
 
   ui_mf(hub->tab, 0, "Connecting to %s...", addr);
   net_connect(hub->net, addr, 411, handle_connect);
-  g_free(addr);
+  g_free(oaddr);
 }
 
 

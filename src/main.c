@@ -271,7 +271,7 @@ int main(int argc, char **argv) {
   g_thread_init(NULL);
   g_type_init();
   conf_init();
-  nmdc_cc_init_global();
+  cc_init_global();
   net_init_global();
 
   // setup logging
@@ -302,7 +302,7 @@ int main(int argc, char **argv) {
     g_error("Can't setup SIGTERM: %s", g_strerror(errno));
 
   fl_init();
-  nmdc_cc_listen_start();
+  cc_listen_start();
   open_autoconnect();
 
   // init and start main loop

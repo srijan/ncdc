@@ -230,7 +230,7 @@ static void set_active(char *group, char *key, char *val) {
     return;
   }
   set_bool_f(group, key, val);
-  nmdc_cc_listen_start();
+  cc_listen_start();
 }
 
 
@@ -261,7 +261,7 @@ static void set_active_port(char *group, char *key, char *val) {
     g_key_file_set_integer(conf_file, group, key, v);
     get_int(group, key);
   }
-  nmdc_cc_listen_start();
+  cc_listen_start();
 }
 
 

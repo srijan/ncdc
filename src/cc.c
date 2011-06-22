@@ -32,40 +32,40 @@
 
 // List of expected incoming connections.
 // This is list managed by the functions/macros below, in addition to
-// nmdc_cc_init_global(), nmdc_cc_remove_hub() and nmdc_cc_get_hub().
+// cc_init_global(), cc_remove_hub() and cc_get_hub().
 
 #if INTERFACE
 
-struct nmdc_cc_expect {
+struct cc_expect {
   struct nmdc_hub *hub;
   char *nick; // hub encoding
   time_t added;
 };
 
-#define nmdc_cc_expect_add(h, n) do {\
-    struct nmdc_cc_expect *e = g_slice_new0(struct nmdc_cc_expect);\
+#define cc_expect_add(h, n) do {\
+    struct cc_expect *e = g_slice_new0(struct cc_expect);\
     e->hub = h;\
     e->nick = g_strdup(n);\
     time(&(e->added));\
-    g_queue_push_tail(nmdc_cc_expected, e);\
+    g_queue_push_tail(cc_expected, e);\
   } while(0)
 
 #endif
 
-GQueue *nmdc_cc_expected;
+GQueue *cc_expected;
 
 
-gboolean nmdc_cc_expect_check(gpointer data) {
+gboolean cc_expect_check(gpointer data) {
   time_t t = time(NULL)-300; // keep them in the list for 5 min.
   GList *p, *n;
-  for(n=nmdc_cc_expected->head; n;) {
+  for(n=cc_expected->head; n;) {
     p = n->next;
-    struct nmdc_cc_expect *e = n->data;
+    struct cc_expect *e = n->data;
     if(e->added < t) {
       g_message("Expected connection from %s on %s, but received none.", e->nick, e->hub->tab->name);
       g_free(e->nick);
-      g_slice_free(struct nmdc_cc_expect, e);
-      g_queue_delete_link(nmdc_cc_expected, n);
+      g_slice_free(struct cc_expect, e);
+      g_queue_delete_link(cc_expected, n);
     } else
       break;
     n = p;
@@ -80,7 +80,7 @@ gboolean nmdc_cc_expect_check(gpointer data) {
 
 #if INTERFACE
 
-struct nmdc_cc {
+struct cc {
   struct net *net;
   struct nmdc_hub *hub;
   char *nick_raw; // hub encoding
@@ -100,16 +100,16 @@ struct nmdc_cc {
   GSequenceIter *iter;
 };
 
-#define nmdc_cc_init_global() do {\
-    nmdc_cc_expected = g_queue_new();\
-    g_timeout_add_seconds_full(G_PRIORITY_LOW, 120, nmdc_cc_expect_check, NULL, NULL);\
-    nmdc_cc_list = g_sequence_new(NULL);\
+#define cc_init_global() do {\
+    cc_expected = g_queue_new();\
+    g_timeout_add_seconds_full(G_PRIORITY_LOW, 120, cc_expect_check, NULL, NULL);\
+    cc_list = g_sequence_new(NULL);\
   } while(0)
 
 #endif
 
 // opened connections - ui_conn is responsible for the ordering
-GSequence *nmdc_cc_list;
+GSequence *cc_list;
 
 
 // When a hub tab is closed (not just disconnected), make sure all hub fields
@@ -119,24 +119,24 @@ GSequence *nmdc_cc_list;
 // $MyNick's being exchanged.)
 // Note that the connection will remain hubless even when the same hub is later
 // opened again. I don't think this is a huge problem, however.
-void nmdc_cc_remove_hub(struct nmdc_hub *hub) {
-  // Remove from nmdc_cc objects
-  GSequenceIter *i = g_sequence_get_begin_iter(nmdc_cc_list);
+void cc_remove_hub(struct nmdc_hub *hub) {
+  // Remove from cc objects
+  GSequenceIter *i = g_sequence_get_begin_iter(cc_list);
   for(; !g_sequence_iter_is_end(i); i=g_sequence_iter_next(i)) {
-    struct nmdc_cc *c = g_sequence_get(i);
+    struct cc *c = g_sequence_get(i);
     if(c->hub == hub)
       c->hub = NULL;
   }
 
   // Remove from expects list
   GList *p, *n;
-  for(n=nmdc_cc_expected->head; n;) {
+  for(n=cc_expected->head; n;) {
     p = n->next;
-    struct nmdc_cc_expect *e = n->data;
+    struct cc_expect *e = n->data;
     if(e->hub == hub) {
       g_free(e->nick);
-      g_slice_free(struct nmdc_cc_expect, e);
-      g_queue_delete_link(nmdc_cc_expected, n);
+      g_slice_free(struct cc_expect, e);
+      g_queue_delete_link(cc_expected, n);
     }
     n = p;
   }
@@ -148,12 +148,12 @@ void nmdc_cc_remove_hub(struct nmdc_hub *hub) {
 // the return value can be larger than the configured number of slots. This
 // also means that an upload that requires a slot will not be granted if there
 // are many transfers active that don't require a slot.
-int nmdc_cc_slots_in_use(int *mini) {
+int cc_slots_in_use(int *mini) {
   int num = 0;
   int m = 0;
-  GSequenceIter *i = g_sequence_get_begin_iter(nmdc_cc_list);
+  GSequenceIter *i = g_sequence_get_begin_iter(cc_list);
   for(; !g_sequence_iter_is_end(i); i=g_sequence_iter_next(i)) {
-    struct nmdc_cc *c = g_sequence_get(i);
+    struct cc *c = g_sequence_get(i);
     if(c->net->file_left)
       num++;
     if(c->net->file_left && c->slot_mini)
@@ -166,10 +166,10 @@ int nmdc_cc_slots_in_use(int *mini) {
 
 
 // Get an already connected user
-static struct nmdc_cc *nmdc_cc_get_conn(struct nmdc_hub *hub, const char *user) {
-  GSequenceIter *i = g_sequence_get_begin_iter(nmdc_cc_list);
+static struct cc *cc_get_conn(struct nmdc_hub *hub, const char *user) {
+  GSequenceIter *i = g_sequence_get_begin_iter(cc_list);
   for(; !g_sequence_iter_is_end(i); i=g_sequence_iter_next(i)) {
-    struct nmdc_cc *c = g_sequence_get(i);
+    struct cc *c = g_sequence_get(i);
     if(c->nick_raw && c->hub == hub && c->net->conn && strcmp(c->nick_raw, user) == 0)
       return c;
   }
@@ -220,9 +220,9 @@ static char *adc_escape(const char *str) {
 
 
 
-static gboolean request_slot(struct nmdc_cc *cc, gboolean need_full) {
+static gboolean request_slot(struct cc *cc, gboolean need_full) {
   int minislots;
-  int slots = nmdc_cc_slots_in_use(&minislots);
+  int slots = cc_slots_in_use(&minislots);
 
   cc->slot_mini = FALSE;
 
@@ -250,15 +250,15 @@ static gboolean request_slot(struct nmdc_cc *cc, gboolean need_full) {
 
 
 static void handle_error(struct net *n, int action, GError *err) {
-  struct nmdc_cc *cc = n->handle;
+  struct cc *cc = n->handle;
   if(!cc->err) // ignore network errors if there already was a protocol error
     g_propagate_error(&(cc->err), g_error_copy(err));
-  nmdc_cc_disconnect(n->handle);
+  cc_disconnect(n->handle);
 }
 
 
 // err->type = 0 -> generic error. otherwise -> no slots
-static void handle_adcget(struct nmdc_cc *cc, char *type, char *id, guint64 start, gint64 bytes, GError **err) {
+static void handle_adcget(struct cc *cc, char *type, char *id, guint64 start, gint64 bytes, GError **err) {
   // tthl
   if(strcmp(type, "tthl") == 0) {
     if(strncmp(id, "TTH/", 4) != 0 || strlen(id) != 4+39 || start != 0 || bytes != -1) {
@@ -378,15 +378,15 @@ static void handle_adcget(struct nmdc_cc *cc, char *type, char *id, guint64 star
 
 
 // Figure out from which hub a connection came
-static struct nmdc_hub *nmdc_cc_get_hub(const char *nick) {
+static struct nmdc_hub *cc_get_hub(const char *nick) {
   GList *n;
-  for(n=nmdc_cc_expected->head; n; n=n->next) {
-    struct nmdc_cc_expect *e = n->data;
+  for(n=cc_expected->head; n; n=n->next) {
+    struct cc_expect *e = n->data;
     if(strcmp(e->nick, nick) == 0) {
       struct nmdc_hub *hub = e->hub;
       g_free(e->nick);
-      g_slice_free(struct nmdc_cc_expect, e);
-      g_queue_delete_link(nmdc_cc_expected, n);
+      g_slice_free(struct cc_expect, e);
+      g_queue_delete_link(cc_expected, n);
       return hub;
     }
   }
@@ -403,24 +403,24 @@ static struct nmdc_hub *nmdc_cc_get_hub(const char *nick) {
 }
 
 
-static void handle_mynick(struct nmdc_cc *cc, const char *nick) {
+static void handle_mynick(struct cc *cc, const char *nick) {
   if(cc->nick) {
     g_warning("Received a $MyNick from %s when we have already received one.", cc->nick);
     return;
   }
 
   if(!cc->hub)
-    cc->hub = nmdc_cc_get_hub(nick);
+    cc->hub = cc_get_hub(nick);
   if(!cc->hub) {
     g_warning("Received incoming connection from %s (%s), who is on none of the connected hubs.", nick, net_remoteaddr(cc->net));
-    nmdc_cc_disconnect(cc);
+    cc_disconnect(cc);
     return;
   }
 
   struct nmdc_user *u = g_hash_table_lookup(cc->hub->users, nick);
   if(!u) {
     g_set_error_literal(&(cc->err), 1, 0, "User is not on the hub");
-    nmdc_cc_disconnect(cc);
+    cc_disconnect(cc);
     return;
   }
 
@@ -429,7 +429,7 @@ static void handle_mynick(struct nmdc_cc *cc, const char *nick) {
   // possible to have two connections with a single user: One for Upload and
   // one for Download. But since we only support uploading, checking it here is
   // enough.
-  struct nmdc_cc *dup = nmdc_cc_get_conn(cc->hub, nick);
+  struct cc *dup = cc_get_conn(cc->hub, nick);
 
   cc->nick_raw = g_strdup(nick);
   cc->nick = g_strdup(u->name);
@@ -438,7 +438,7 @@ static void handle_mynick(struct nmdc_cc *cc, const char *nick) {
 
   if(dup) {
     g_set_error_literal(&(cc->err), 1, 0, "too many open connections with this user");
-    nmdc_cc_disconnect(cc);
+    cc_disconnect(cc);
     return;
   }
 
@@ -450,7 +450,7 @@ static void handle_mynick(struct nmdc_cc *cc, const char *nick) {
 
 
 static void handle_cmd(struct net *n, char *cmd) {
-  struct nmdc_cc *cc = n->handle;
+  struct cc *cc = n->handle;
   GMatchInfo *nfo;
 
   time(&(cc->last_action));
@@ -483,7 +483,7 @@ static void handle_cmd(struct net *n, char *cmd) {
     if(strncmp(lock, "EXTENDEDPROTOCOL", 16) != 0) {
       g_set_error_literal(&(cc->err), 1, 0, "Client does not support ADCGet");
       g_warning("C-C connection with %s (%s), but it does not support EXTENDEDPROTOCOL.", net_remoteaddr(cc->net), cc->nick);
-      nmdc_cc_disconnect(cc);
+      cc_disconnect(cc);
     } else {
       net_send(cc->net, "$Supports MiniSlots XmlBZList ADCGet TTHL TTHF");
       char *key = nmdc_lock2key(lock);
@@ -502,7 +502,7 @@ static void handle_cmd(struct net *n, char *cmd) {
     if(!strstr(list, "ADCGet")) {
       g_set_error_literal(&(cc->err), 1, 0, "Client does not support ADCGet");
       g_warning("C-C connection with %s (%s), but it does not support ADCGet.", net_remoteaddr(cc->net), cc->nick);
-      nmdc_cc_disconnect(cc);
+      cc_disconnect(cc);
     }
     g_free(list);
   }
@@ -520,7 +520,7 @@ static void handle_cmd(struct net *n, char *cmd) {
     if(!cc->nick) {
       g_set_error_literal(&(cc->err), 1, 0, "Received $ADCGET before $MyNick");
       g_warning("Received $ADCGET before $MyNick, disconnecting client.");
-      nmdc_cc_disconnect(cc);
+      cc_disconnect(cc);
     } else if(un_id) {
       GError *err = NULL;
       handle_adcget(cc, type, un_id, st, by, &err);
@@ -543,12 +543,12 @@ static void handle_cmd(struct net *n, char *cmd) {
 
 
 // Hub may be unknown when we start listening on incoming connections.
-struct nmdc_cc *nmdc_cc_create(struct nmdc_hub *hub) {
-  struct nmdc_cc *cc = g_new0(struct nmdc_cc, 1);
+struct cc *cc_create(struct nmdc_hub *hub) {
+  struct cc *cc = g_new0(struct cc, 1);
   cc->net = net_create('|', cc, FALSE, handle_cmd, handle_error);
   cc->hub = hub;
   time(&(cc->last_action));
-  cc->iter = g_sequence_append(nmdc_cc_list, cc);
+  cc->iter = g_sequence_append(cc_list, cc);
   if(ui_conn)
     ui_conn_listchange(cc->iter, UICONN_ADD);
   return cc;
@@ -556,10 +556,10 @@ struct nmdc_cc *nmdc_cc_create(struct nmdc_hub *hub) {
 
 
 static void handle_connect(struct net *n) {
-  struct nmdc_cc *cc = n->handle;
+  struct cc *cc = n->handle;
   time(&(cc->last_action));
   if(!cc->hub)
-    nmdc_cc_disconnect(cc);
+    cc_disconnect(cc);
   else {
     strncpy(cc->remoteaddr, net_remoteaddr(cc->net), 23);
     net_sendf(n, "$MyNick %s", cc->hub->nick_hub);
@@ -568,7 +568,7 @@ static void handle_connect(struct net *n) {
 }
 
 
-void nmdc_cc_connect(struct nmdc_cc *cc, const char *addr) {
+void cc_connect(struct cc *cc, const char *addr) {
   g_return_if_fail(!cc->timeout_src);
   strncpy(cc->remoteaddr, addr, 23);
   net_connect(cc->net, addr, 0, handle_connect);
@@ -576,7 +576,7 @@ void nmdc_cc_connect(struct nmdc_cc *cc, const char *addr) {
 }
 
 
-static void nmdc_cc_incoming(struct nmdc_cc *cc, GSocket *sock) {
+static void cc_incoming(struct cc *cc, GSocket *sock) {
   net_setsock(cc->net, sock);
   cc->active = TRUE;
   strncpy(cc->remoteaddr, net_remoteaddr(cc->net), 23);
@@ -584,12 +584,12 @@ static void nmdc_cc_incoming(struct nmdc_cc *cc, GSocket *sock) {
 
 
 static gboolean handle_timeout(gpointer dat) {
-  nmdc_cc_free(dat);
+  cc_free(dat);
   return FALSE;
 }
 
 
-void nmdc_cc_disconnect(struct nmdc_cc *cc) {
+void cc_disconnect(struct cc *cc) {
   g_return_if_fail(!cc->timeout_src);
   time(&(cc->last_action));
   net_disconnect(cc->net);
@@ -597,9 +597,9 @@ void nmdc_cc_disconnect(struct nmdc_cc *cc) {
 }
 
 
-void nmdc_cc_free(struct nmdc_cc *cc) {
+void cc_free(struct cc *cc) {
   if(!cc->timeout_src)
-    nmdc_cc_disconnect(cc);
+    cc_disconnect(cc);
   if(cc->timeout_src)
     g_source_remove(cc->timeout_src);
   if(ui_conn)
@@ -620,22 +620,22 @@ void nmdc_cc_free(struct nmdc_cc *cc) {
 // Active mode
 
 // listen socket. NULL if we aren't active.
-GSocket *nmdc_cc_listen = NULL;
-char    *nmdc_cc_listen_ip = NULL; // human-readable string. This is the remote IP, not the one we bind to.
-guint16  nmdc_cc_listen_port = 0;
+GSocket *cc_listen = NULL;
+char    *cc_listen_ip = NULL; // human-readable string. This is the remote IP, not the one we bind to.
+guint16  cc_listen_port = 0;
 
-static int nmdc_cc_listen_src = 0;
+static int cc_listen_src = 0;
 
 
 // TODO: immediately send $MyINFO on A/P change?
-void nmdc_cc_listen_stop() {
-  if(!nmdc_cc_listen)
+void cc_listen_stop() {
+  if(!cc_listen)
     return;
-  g_free(nmdc_cc_listen_ip);
-  nmdc_cc_listen_ip = NULL;
-  g_source_remove(nmdc_cc_listen_src);
-  g_object_unref(nmdc_cc_listen);
-  nmdc_cc_listen = FALSE;
+  g_free(cc_listen_ip);
+  cc_listen_ip = NULL;
+  g_source_remove(cc_listen_src);
+  g_object_unref(cc_listen);
+  cc_listen = FALSE;
 }
 
 
@@ -645,21 +645,21 @@ static gboolean listen_handle(GSocket *sock, GIOCondition cond, gpointer dat) {
   if(!s) {
     if(err->code != G_IO_ERROR_WOULD_BLOCK) {
       ui_mf(ui_main, 0, "Listen error: %s. Switching to passive mode.", err->message);
-      nmdc_cc_listen_stop();
+      cc_listen_stop();
     }
     g_error_free(err);
     return FALSE;
   }
-  nmdc_cc_incoming(nmdc_cc_create(NULL), s);
+  cc_incoming(cc_create(NULL), s);
   return TRUE;
 }
 
 
 // more like a "restart()"
-gboolean nmdc_cc_listen_start() {
+gboolean cc_listen_start() {
   GError *err = NULL;
 
-  nmdc_cc_listen_stop();
+  cc_listen_stop();
   if(!g_key_file_get_boolean(conf_file, "global", "active", NULL))
     return FALSE;
 
@@ -692,18 +692,18 @@ gboolean nmdc_cc_listen_start() {
   // attach incoming connections handler to the event loop
   GSource *src = g_socket_create_source(s, G_IO_IN, NULL);
   g_source_set_callback(src, (GSourceFunc)listen_handle, NULL, NULL);
-  nmdc_cc_listen_src = g_source_attach(src, NULL);
+  cc_listen_src = g_source_attach(src, NULL);
   g_source_unref(src);
 
   // set global variables
-  nmdc_cc_listen = s;
-  nmdc_cc_listen_ip = g_key_file_get_string(conf_file, "global", "active_ip", NULL);
+  cc_listen = s;
+  cc_listen_ip = g_key_file_get_string(conf_file, "global", "active_ip", NULL);
   // actual listen port may be different from what we specified (notably when port = 0)
   GSocketAddress *addr = g_socket_get_local_address(s, NULL);
-  nmdc_cc_listen_port = g_inet_socket_address_get_port(G_INET_SOCKET_ADDRESS(addr));
+  cc_listen_port = g_inet_socket_address_get_port(G_INET_SOCKET_ADDRESS(addr));
   g_object_unref(addr);
 
-  ui_mf(ui_main, 0, "Listening on port %d (%s).", nmdc_cc_listen_port, nmdc_cc_listen_ip);
+  ui_mf(ui_main, 0, "Listening on port %d (%s).", cc_listen_port, cc_listen_ip);
   return TRUE;
 }
 

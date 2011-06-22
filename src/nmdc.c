@@ -89,7 +89,7 @@ struct nmdc_hub {
 
 
 
-// nmdc utility functions (also used by nmdc_cc.c)
+// nmdc utility functions (also used by cc.c)
 
 char *nmdc_charset_convert(struct nmdc_hub *hub, gboolean to_utf8, const char *str) {
   char *fmt = conf_encoding(hub->tab->name);
@@ -321,7 +321,7 @@ void nmdc_send_myinfo(struct nmdc_hub *hub) {
   }
 
   tmp = g_strdup_printf("$MyINFO $ALL %s %s<ncdc V:%s,M:%c,H:%d/%d/%d,S:%d>$ $%s\01$%s$%"G_GUINT64_FORMAT"$",
-    hub->nick_hub, desc, VERSION, nmdc_cc_listen ? 'A' : 'P', h_normal, h_reg, h_op, conf_slots(), conn, mail, fl_local_list_size);
+    hub->nick_hub, desc, VERSION, cc_listen ? 'A' : 'P', h_normal, h_reg, h_op, conf_slots(), conn, mail, fl_local_list_size);
   g_free(desc);
   g_free(conn);
   g_free(mail);
@@ -408,7 +408,7 @@ static void handle_search(struct nmdc_hub *hub, char *from, int size_m, guint64 
 
   char *hubaddr = net_remoteaddr(hub->net);
   int slots = conf_slots();
-  int slots_free = slots - nmdc_cc_slots_in_use(NULL);
+  int slots_free = slots - cc_slots_in_use(NULL);
   if(slots_free < 0)
     slots_free = 0;
   char tth[44] = "TTH:";
@@ -636,7 +636,7 @@ static void handle_cmd(struct net *n, char *cmd) {
     if(strcmp(me, hub->nick_hub) != 0)
       g_warning("Received a $ConnectToMe for someone else (to %s from %s)", me, addr);
     else
-      nmdc_cc_connect(nmdc_cc_create(hub), addr);
+      cc_connect(cc_create(hub), addr);
     g_free(me);
     g_free(addr);
   }
@@ -648,9 +648,9 @@ static void handle_cmd(struct net *n, char *cmd) {
     char *me = g_match_info_fetch(nfo, 2);
     if(strcmp(me, hub->nick_hub) != 0)
       g_warning("Received a $RevConnectToMe for someone else (to %s from %s)", me, other);
-    else if(nmdc_cc_listen) {
-      net_sendf(hub->net, "$ConnectToMe %s %s:%d", other, nmdc_cc_listen_ip, nmdc_cc_listen_port);
-      nmdc_cc_expect_add(hub, other);
+    else if(cc_listen) {
+      net_sendf(hub->net, "$ConnectToMe %s %s:%d", other, cc_listen_ip, cc_listen_port);
+      cc_expect_add(hub, other);
     } else
       g_message("Received a $RevConnectToMe, but we're not active.");
     g_free(me);
@@ -803,7 +803,7 @@ void nmdc_disconnect(struct nmdc_hub *hub, gboolean recon) {
 
 
 void nmdc_free(struct nmdc_hub *hub) {
-  nmdc_cc_remove_hub(hub);
+  cc_remove_hub(hub);
   nmdc_disconnect(hub, FALSE);
   net_unref(hub->net);
   g_hash_table_unref(hub->users);

@@ -649,8 +649,8 @@ struct ui_tab *ui_conn;
 
 
 static gint ui_conn_sort_func(gconstpointer da, gconstpointer db, gpointer dat) {
-  const struct nmdc_cc *a = da;
-  const struct nmdc_cc *b = db;
+  const struct cc *a = da;
+  const struct cc *b = db;
   int o = 0;
   if(!o && !a->nick != !b->nick)
     o = a->nick ? 1 : -1;
@@ -667,8 +667,8 @@ struct ui_tab *ui_conn_create() {
   ui_conn->name = "connections";
   ui_conn->type = UIT_CONN;
   // sort the connection list
-  g_sequence_sort(nmdc_cc_list, ui_conn_sort_func, NULL);
-  ui_conn->list = ui_listing_create(nmdc_cc_list);
+  g_sequence_sort(cc_list, ui_conn_sort_func, NULL);
+  ui_conn->list = ui_listing_create(cc_list);
   return ui_conn;
 }
 
@@ -711,7 +711,7 @@ static char *ui_conn_title() {
 
 
 static void ui_conn_draw_row(struct ui_listing *list, GSequenceIter *iter, int row, void *dat) {
-  struct nmdc_cc *cc = g_sequence_get(iter);
+  struct cc *cc = g_sequence_get(iter);
   char tmp[100];
   if(iter == list->sel) {
     attron(A_BOLD);
@@ -777,7 +777,7 @@ static void ui_conn_draw() {
   attroff(A_REVERSE);
 
   // detailed info
-  struct nmdc_cc *cc = g_sequence_iter_is_end(ui_conn->list->sel) ? NULL : g_sequence_get(ui_conn->list->sel);
+  struct cc *cc = g_sequence_iter_is_end(ui_conn->list->sel) ? NULL : g_sequence_get(ui_conn->list->sel);
   if(!cc) {
     mvaddstr(bottom+1, 0, "Nothing selected.");
     return;
@@ -814,7 +814,7 @@ static void ui_conn_key(guint64 key) {
   if(ui_listing_key(ui_conn->list, key, (winrows-10)/2))
     return;
 
-  struct nmdc_cc *cc = g_sequence_iter_is_end(ui_conn->list->sel) ? NULL : g_sequence_get(ui_conn->list->sel);
+  struct cc *cc = g_sequence_iter_is_end(ui_conn->list->sel) ? NULL : g_sequence_get(ui_conn->list->sel);
 
   switch(key) {
   case INPT_CHAR('f'):
@@ -831,7 +831,7 @@ static void ui_conn_key(guint64 key) {
     else if(!cc->net->conn)
       ui_m(NULL, 0, "Not connected.");
     else
-      nmdc_cc_disconnect(cc);
+      cc_disconnect(cc);
     break;
   }
 }
@@ -1060,7 +1060,7 @@ static void ui_draw_status() {
   // And protocol overhead isn't very significant.
   g_snprintf(buf, 100, "[U:%6d KiB/s]", ratecalc_get(&net_out)/1024);
   mvaddstr(winrows-1, wincols-28, buf);
-  g_snprintf(buf, 100, "[S:%3d/%3d]", nmdc_cc_slots_in_use(NULL), conf_slots());
+  g_snprintf(buf, 100, "[S:%3d/%3d]", cc_slots_in_use(NULL), conf_slots());
   mvaddstr(winrows-1, wincols-11, buf);
 
   ui_m_updated = FALSE;

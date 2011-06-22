@@ -89,88 +89,6 @@ struct nmdc_hub {
 
 
 
-// nmdc utility functions (also used by cc.c)
-
-char *nmdc_charset_convert(struct nmdc_hub *hub, gboolean to_utf8, const char *str) {
-  char *fmt = conf_encoding(hub->tab->name);
-  char *res = str_convert(to_utf8?"UTF-8":fmt, !to_utf8?"UTF-8":fmt, str);
-  g_free(fmt);
-  return res;
-}
-
-
-char *nmdc_encode_and_escape(struct nmdc_hub *hub, const char *str) {
-  char *enc = nmdc_charset_convert(hub, FALSE, str);
-  GString *dest = g_string_sized_new(strlen(enc));
-  char *tmp = enc;
-  while(*tmp) {
-    if(*tmp == '$')
-      g_string_append(dest, "&#36;");
-    else if(*tmp == '|')
-      g_string_append(dest, "&#124;");
-    else if(*tmp == '&' && (strncmp(tmp, "&amp;", 5) == 0 || strncmp(tmp, "&#36;", 5) == 0 || strncmp(tmp, "&#124;", 6) == 0))
-      g_string_append(dest, "&amp;");
-    else
-      g_string_append_c(dest, *tmp);
-    tmp++;
-  }
-  g_free(enc);
-  return g_string_free(dest, FALSE);
-}
-
-
-char *nmdc_unescape_and_decode(struct nmdc_hub *hub, const char *str) {
-  GString *dest = g_string_sized_new(strlen(str));
-  while(*str) {
-    if(strncmp(str, "&#36;", 5) == 0) {
-      g_string_append_c(dest, '$');
-      str += 5;
-    } else if(strncmp(str, "&#124;", 6) == 0) {
-      g_string_append_c(dest, '|');
-      str += 6;
-    } else if(strncmp(str, "&amp;", 5) == 0) {
-      g_string_append_c(dest, '&');
-      str += 5;
-    } else {
-      g_string_append_c(dest, *str);
-      str++;
-    }
-  }
-  char *dec = nmdc_charset_convert(hub, TRUE, dest->str);
-  g_string_free(dest, TRUE);
-  return dec;
-}
-
-
-// Info & algorithm @ http://www.teamfair.info/wiki/index.php?title=Lock_to_key
-// This function modifies "lock" in-place for temporary data
-char *nmdc_lock2key(char *lock) {
-  char n;
-  int i;
-  int len = strlen(lock);
-  if(len < 3)
-    return g_strdup("STUPIDKEY!"); // let's not crash on invalid data
-  int fst = lock[0] ^ lock[len-1] ^ lock[len-2] ^ 5;
-  for(i=len-1; i; i--)
-    lock[i] = lock[i] ^ lock[i-1];
-  lock[0] = fst;
-  for(i=0; i<len; i++)
-    lock[i] = ((lock[i]<<4) & 0xF0) | ((lock[i]>>4) & 0x0F);
-  GString *key = g_string_sized_new(len+100);
-  for(i=0; i<len; i++) {
-    n = lock[i];
-    if(n == 0 || n == 5 || n == 36 || n == 96 || n == 124 || n == 126)
-      g_string_append_printf(key, "/%%DCN%03d%%/", n);
-    else
-      g_string_append_c(key, n);
-  }
-  return g_string_free(key, FALSE);
-}
-
-
-
-
-
 // struct nmdc_user related functions
 
 static struct nmdc_user *user_add(struct nmdc_hub *hub, const char *name) {
@@ -179,7 +97,7 @@ static struct nmdc_user *user_add(struct nmdc_hub *hub, const char *name) {
     return u;
   u = g_slice_new0(struct nmdc_user);
   u->name_hub = g_strdup(name);
-  u->name = nmdc_charset_convert(hub, TRUE, name);
+  u->name = charset_convert(hub, TRUE, name);
   g_hash_table_insert(hub->users, u->name_hub, u);
   ui_hub_userchange(hub->tab, UIHUB_UC_JOIN, u);
   return u;
@@ -201,7 +119,7 @@ static void user_free(gpointer dat) {
 // Get a user by a UTF-8 string. May fail if the UTF-8 -> hub encoding is not
 // really one-to-one
 struct nmdc_user *nmdc_user_get(struct nmdc_hub *hub, const char *name) {
-  char *name_hub = nmdc_charset_convert(hub, FALSE, name);
+  char *name_hub = charset_convert(hub, FALSE, name);
   struct nmdc_user *u = g_hash_table_lookup(hub->users, name_hub);
   g_free(name_hub);
   return u;
@@ -473,7 +391,7 @@ static void handle_cmd(struct net *n, char *cmd) {
     char *key = nmdc_lock2key(lock);
     net_sendf(hub->net, "$Key %s", key);
     hub->nick = conf_hub_get(string, hub->tab->name, "nick");
-    hub->nick_hub = nmdc_charset_convert(hub, FALSE, hub->nick);
+    hub->nick_hub = charset_convert(hub, FALSE, hub->nick);
     net_sendf(hub->net, "$ValidateNick %s", hub->nick_hub);
     g_free(key);
     g_free(lock);

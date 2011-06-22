@@ -583,3 +583,128 @@ struct ratecalc {
 
 GSList *ratecalc_list = NULL;
 
+
+
+
+
+// Protocol utility functions
+
+char *charset_convert(struct nmdc_hub *hub, gboolean to_utf8, const char *str) {
+  char *fmt = conf_encoding(hub->tab->name);
+  char *res = str_convert(to_utf8?"UTF-8":fmt, !to_utf8?"UTF-8":fmt, str);
+  g_free(fmt);
+  return res;
+}
+
+
+char *nmdc_encode_and_escape(struct nmdc_hub *hub, const char *str) {
+  char *enc = charset_convert(hub, FALSE, str);
+  GString *dest = g_string_sized_new(strlen(enc));
+  char *tmp = enc;
+  while(*tmp) {
+    if(*tmp == '$')
+      g_string_append(dest, "&#36;");
+    else if(*tmp == '|')
+      g_string_append(dest, "&#124;");
+    else if(*tmp == '&' && (strncmp(tmp, "&amp;", 5) == 0 || strncmp(tmp, "&#36;", 5) == 0 || strncmp(tmp, "&#124;", 6) == 0))
+      g_string_append(dest, "&amp;");
+    else
+      g_string_append_c(dest, *tmp);
+    tmp++;
+  }
+  g_free(enc);
+  return g_string_free(dest, FALSE);
+}
+
+
+char *nmdc_unescape_and_decode(struct nmdc_hub *hub, const char *str) {
+  GString *dest = g_string_sized_new(strlen(str));
+  while(*str) {
+    if(strncmp(str, "&#36;", 5) == 0) {
+      g_string_append_c(dest, '$');
+      str += 5;
+    } else if(strncmp(str, "&#124;", 6) == 0) {
+      g_string_append_c(dest, '|');
+      str += 6;
+    } else if(strncmp(str, "&amp;", 5) == 0) {
+      g_string_append_c(dest, '&');
+      str += 5;
+    } else {
+      g_string_append_c(dest, *str);
+      str++;
+    }
+  }
+  char *dec = charset_convert(hub, TRUE, dest->str);
+  g_string_free(dest, TRUE);
+  return dec;
+}
+
+
+// Info & algorithm @ http://www.teamfair.info/wiki/index.php?title=Lock_to_key
+// This function modifies "lock" in-place for temporary data
+char *nmdc_lock2key(char *lock) {
+  char n;
+  int i;
+  int len = strlen(lock);
+  if(len < 3)
+    return g_strdup("STUPIDKEY!"); // let's not crash on invalid data
+  int fst = lock[0] ^ lock[len-1] ^ lock[len-2] ^ 5;
+  for(i=len-1; i; i--)
+    lock[i] = lock[i] ^ lock[i-1];
+  lock[0] = fst;
+  for(i=0; i<len; i++)
+    lock[i] = ((lock[i]<<4) & 0xF0) | ((lock[i]>>4) & 0x0F);
+  GString *key = g_string_sized_new(len+100);
+  for(i=0; i<len; i++) {
+    n = lock[i];
+    if(n == 0 || n == 5 || n == 36 || n == 96 || n == 124 || n == 126)
+      g_string_append_printf(key, "/%%DCN%03d%%/", n);
+    else
+      g_string_append_c(key, n);
+  }
+  return g_string_free(key, FALSE);
+}
+
+
+// ADC parameter unescaping
+char *adc_unescape(const char *str) {
+  char *dest = g_new(char, strlen(str)+1);
+  char *tmp = dest;
+  while(*str) {
+    if(*str == '\\') {
+      str++;
+      if(*str == 's')
+        *tmp = ' ';
+      else if(*str == 'n')
+        *tmp = '\n';
+      else if(*str == '\\')
+        *tmp = '\\';
+      else {
+        g_free(dest);
+        return NULL;
+      }
+    } else
+      *tmp = *str;
+    tmp++;
+    str++;
+  }
+  *tmp = 0;
+  return dest;
+}
+
+
+// ADC parameter escaping
+char *adc_escape(const char *str) {
+  GString *dest = g_string_sized_new(strlen(str)+50);
+  while(*str) {
+    switch(*str) {
+    case ' ':  g_string_append(dest, "\\s"); break;
+    case '\n': g_string_append(dest, "\\n"); break;
+    case '\\': g_string_append(dest, "\\\\"); break;
+    default: g_string_append_c(dest, *str); break;
+    }
+    str++;
+  }
+  return g_string_free(dest, FALSE);
+}
+

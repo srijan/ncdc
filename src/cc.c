@@ -177,48 +177,6 @@ static struct cc *cc_get_conn(struct nmdc_hub *hub, const char *user) {
 }
 
 
-// ADC parameter unescaping, required for $ADCGET
-static char *adc_unescape(const char *str) {
-  char *dest = g_new(char, strlen(str)+1);
-  char *tmp = dest;
-  while(*str) {
-    if(*str == '\\') {
-      str++;
-      if(*str == 's')
-        *tmp = ' ';
-      else if(*str == 'n')
-        *tmp = '\n';
-      else if(*str == '\\')
-        *tmp = '\\';
-      else {
-        g_free(dest);
-        return NULL;
-      }
-    } else
-      *tmp = *str;
-    tmp++;
-    str++;
-  }
-  *tmp = 0;
-  return dest;
-}
-
-
-static char *adc_escape(const char *str) {
-  GString *dest = g_string_sized_new(strlen(str)+50);
-  while(*str) {
-    switch(*str) {
-    case ' ':  g_string_append(dest, "\\s"); break;
-    case '\n': g_string_append(dest, "\\n"); break;
-    case '\\': g_string_append(dest, "\\\\"); break;
-    default: g_string_append_c(dest, *str); break;
-    }
-    str++;
-  }
-  return g_string_free(dest, FALSE);
-}
-
-
 
 static gboolean request_slot(struct cc *cc, gboolean need_full) {
   int minislots;

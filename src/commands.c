@@ -138,14 +138,14 @@ static void set_userinfo(char *group, char *key, char *val) {
   }
   // hub-specific setting, so only one hub to check
   if(group[0] == '#')
-    nmdc_send_myinfo(tab->hub);
+    hub_send_myinfo(tab->hub);
   // global setting, check affected hubs
   else {
     GList *n;
     for(n=ui_tabs; n; n=n->next) {
       struct ui_tab *t = n->data;
       if(t->type == UIT_HUB && !g_key_file_has_key(conf_file, t->name, key, NULL))
-        nmdc_send_myinfo(t->hub);
+        hub_send_myinfo(t->hub);
     }
   }
 }
@@ -365,7 +365,7 @@ static void set_password(char *group, char *key, char *val) {
   else {
     g_key_file_set_string(conf_file, group, key, val);
     if(tab->type == UIT_HUB && tab->hub->net->conn && !tab->hub->nick_valid)
-      nmdc_password(tab->hub, NULL);
+      hub_password(tab->hub, NULL);
     ui_m(NULL, 0, "Password saved.");
   }
 }
@@ -561,11 +561,11 @@ static void c_say(char *args) {
   else if(!args[0])
     ui_m(NULL, 0, "Message empty.");
   else if(tab->type == UIT_HUB)
-    nmdc_say(tab->hub, args);
+    hub_say(tab->hub, args);
   else if(!tab->msg_user)
     ui_m(NULL, 0, "User is not online.");
   else
-    nmdc_msg(tab->hub, tab->msg_user, args);
+    hub_msg(tab->hub, tab->msg_user, args);
 }
 
 
@@ -595,7 +595,7 @@ static void c_msg(char *args) {
         ui_tab_cur = g_list_find(ui_tabs, t);
       // if we need to send something, do so
       if(sep && *sep)
-        nmdc_msg(tab->hub, t->msg_user, sep);
+        hub_msg(tab->hub, t->msg_user, sep);
     }
   }
 }
@@ -689,7 +689,7 @@ static void c_connect(char *args) {
     if(!g_key_file_has_key(conf_file, tab->name, "hubaddr", NULL))
       ui_m(NULL, 0, "No hub address configured. Use '/connect <address>' to do so.");
     else
-      nmdc_connect(tab->hub);
+      hub_connect(tab->hub);
   }
 }
 
@@ -727,7 +727,7 @@ static void c_disconnect(char *args) {
     g_source_remove(tab->hub->reconnect_timer);
     tab->hub->reconnect_timer = 0;
   } else
-    nmdc_disconnect(tab->hub, FALSE);
+    hub_disconnect(tab->hub, FALSE);
 }
 
 
@@ -738,7 +738,7 @@ static void c_reconnect(char *args) {
     ui_m(NULL, 0, "This command can only be used on hub tabs.");
   else {
     if(tab->hub->net->conn)
-      nmdc_disconnect(tab->hub, FALSE);
+      hub_disconnect(tab->hub, FALSE);
     c_connect(""); // also checks for the existence of "hubaddr"
   }
 }
@@ -1013,7 +1013,7 @@ static void c_grant(char *args) {
   if(!u)
     ui_m(NULL, 0, "No user found with that name.");
   else {
-    nmdc_grant(tab->hub, u);
+    hub_grant(tab->hub, u);
     ui_m(NULL, 0, "Slot granted.");
   }
 }
@@ -1027,7 +1027,7 @@ static void c_password(char *args) {
   else if(tab->hub->nick_valid)
     ui_m(NULL, 0, "Already logged in. Did you want to use '/set password' instead?");
   else
-    nmdc_password(tab->hub, args);
+    hub_password(tab->hub, args);
 }
 
 
@@ -1043,7 +1043,7 @@ static void c_kick(char *args) {
     if(!u)
       ui_m(NULL, 0, "No user found with that name.");
     else
-      nmdc_kick(tab->hub, u);
+      hub_kick(tab->hub, u);
   }
 }
 

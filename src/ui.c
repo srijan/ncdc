@@ -48,7 +48,7 @@ struct ui_tab {
   int prio; // UIP_ type
   char *name;
   struct ui_logwindow *log;    // MAIN, HUB, MSG
-  struct nmdc_hub *hub;        // HUB, USERLIST, MSG
+  struct hub *hub;             // HUB, USERLIST, MSG
   struct ui_listing *list;     // USERLIST, CONN
   // HUB
   struct ui_tab *userlist_tab;
@@ -133,7 +133,7 @@ static void ui_main_key(guint64 key) {
 
 // User message tab
 
-struct ui_tab *ui_msg_create(struct nmdc_hub *hub, struct hub_user *user) {
+struct ui_tab *ui_msg_create(struct hub *hub, struct hub_user *user) {
   struct ui_tab *tab = g_new0(struct ui_tab, 1);
   tab->type = UIT_MSG;
   tab->hub = hub;
@@ -218,10 +218,10 @@ struct ui_tab *ui_hub_create(const char *name) {
   tab->name = g_strdup_printf("#%s", name);
   tab->type = UIT_HUB;
   tab->log = ui_logwindow_create(tab->name);
-  tab->hub = nmdc_create(tab);
+  tab->hub = hub_create(tab);
   // already used this name before? open connection again
   if(g_key_file_has_key(conf_file, tab->name, "hubaddr", NULL))
-    nmdc_connect(tab->hub);
+    hub_connect(tab->hub);
   return tab;
 }
 
@@ -243,7 +243,7 @@ void ui_hub_close(struct ui_tab *tab) {
   // remove ourself from the list
   ui_tab_remove(tab);
 
-  nmdc_free(tab->hub);
+  hub_free(tab->hub);
   ui_logwindow_free(tab->log);
   g_free(tab->name);
   g_free(tab);
@@ -398,7 +398,7 @@ static gint ui_userlist_sort_func(gconstpointer da, gconstpointer db, gpointer d
 }
 
 
-struct ui_tab *ui_userlist_create(struct nmdc_hub *hub) {
+struct ui_tab *ui_userlist_create(struct hub *hub) {
   struct ui_tab *tab = g_new0(struct ui_tab, 1);
   tab->name = g_strdup_printf("@%s", hub->tab->name+1);
   tab->type = UIT_USERLIST;
@@ -610,7 +610,7 @@ static void ui_userlist_key(struct ui_tab *tab, guint64 key) {
     if(!sel)
       ui_m(NULL, 0, "No user selected.");
     else {
-      nmdc_grant(tab->hub, sel);
+      hub_grant(tab->hub, sel);
       ui_m(NULL, 0, "Slot granted.");
     }
     break;

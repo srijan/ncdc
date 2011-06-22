@@ -46,7 +46,7 @@ struct hub_user {
 }
 
 
-struct nmdc_hub {
+struct hub {
   struct ui_tab *tab; // to get name (for config) and for logging & setting of title
   struct net *net;
   // nick as used in this connection, NULL when no $ValidateNick has been sent yet
@@ -86,7 +86,7 @@ struct nmdc_hub {
 
 // struct hub_user related functions
 
-static struct hub_user *user_add(struct nmdc_hub *hub, const char *name) {
+static struct hub_user *user_add(struct hub *hub, const char *name) {
   struct hub_user *u = g_hash_table_lookup(hub->users, name);
   if(u)
     return u;
@@ -113,7 +113,7 @@ static void user_free(gpointer dat) {
 
 // Get a user by a UTF-8 string. May fail if the UTF-8 -> hub encoding is not
 // really one-to-one
-struct hub_user *hub_user_get(struct nmdc_hub *hub, const char *name) {
+struct hub_user *hub_user_get(struct hub *hub, const char *name) {
   char *name_hub = charset_convert(hub, FALSE, name);
   struct hub_user *u = g_hash_table_lookup(hub->users, name_hub);
   g_free(name_hub);
@@ -122,7 +122,7 @@ struct hub_user *hub_user_get(struct nmdc_hub *hub, const char *name) {
 
 
 // Auto-complete suggestions for hub_user_get()
-void hub_user_suggest(struct nmdc_hub *hub, char *str, char **sug) {
+void hub_user_suggest(struct hub *hub, char *str, char **sug) {
   GHashTableIter iter;
   struct hub_user *u;
   int i=0, len = strlen(str);
@@ -134,7 +134,7 @@ void hub_user_suggest(struct nmdc_hub *hub, char *str, char **sug) {
 }
 
 
-static void user_myinfo(struct nmdc_hub *hub, struct hub_user *u, const char *str) {
+static void user_myinfo(struct hub *hub, struct hub_user *u, const char *str) {
   static GRegex *nfo_reg = NULL;
   static GRegex *nfo_notag = NULL;
   if(!nfo_reg) //          desc   tag               conn   flag   email     share
@@ -183,7 +183,7 @@ static void user_myinfo(struct nmdc_hub *hub, struct hub_user *u, const char *st
 // hub stuff
 
 
-void nmdc_password(struct nmdc_hub *hub, char *pass) {
+void hub_password(struct hub *hub, char *pass) {
   g_return_if_fail(!hub->nick_valid);
   char *rpass = !pass ? g_key_file_get_string(conf_file, hub->tab->name, "password", NULL) : g_strdup(pass);
   if(!rpass)
@@ -198,20 +198,20 @@ void nmdc_password(struct nmdc_hub *hub, char *pass) {
 }
 
 
-void nmdc_kick(struct nmdc_hub *hub, struct hub_user *u) {
+void hub_kick(struct hub *hub, struct hub_user *u) {
   g_return_if_fail(hub->nick_valid && u);
   net_sendf(hub->net, "$Kick %s", u->name_hub);
 }
 
 
-void nmdc_grant(struct nmdc_hub *hub, struct hub_user *u) {
+void hub_grant(struct hub *hub, struct hub_user *u) {
   if(!g_hash_table_lookup(hub->grants, u->name_hub))
     g_hash_table_insert(hub->grants, g_strdup(u->name_hub), (void *)1);
   // TODO: open a connection to the user?
 }
 
 
-void nmdc_send_myinfo(struct nmdc_hub *hub) {
+void hub_send_myinfo(struct hub *hub) {
   if(!hub->nick_valid)
     return;
   char *tmp;
@@ -249,7 +249,7 @@ void nmdc_send_myinfo(struct nmdc_hub *hub) {
 }
 
 
-void nmdc_say(struct nmdc_hub *hub, const char *str) {
+void hub_say(struct hub *hub, const char *str) {
   if(!hub->nick_valid)
     return;
   char *msg = nmdc_encode_and_escape(hub, str);
@@ -258,7 +258,7 @@ void nmdc_say(struct nmdc_hub *hub, const char *str) {
 }
 
 
-void nmdc_msg(struct nmdc_hub *hub, struct hub_user *user, const char *str) {
+void hub_msg(struct hub *hub, struct hub_user *user, const char *str) {
   char *msg = nmdc_encode_and_escape(hub, str);
   net_sendf(hub->net, "$To: %s From: %s $<%s> %s", user->name_hub, hub->nick_hub, hub->nick_hub, msg);
   g_free(msg);
@@ -269,7 +269,7 @@ void nmdc_msg(struct nmdc_hub *hub, struct hub_user *user, const char *str) {
 }
 
 
-static void handle_search(struct nmdc_hub *hub, char *from, int size_m, guint64 size, int type, char *query) {
+static void handle_search(struct hub *hub, char *from, int size_m, guint64 size, int type, char *query) {
   static char *exts[][10] = { { },
     { "mp3", "mp2", "wav", "au", "rm", "mid", "sm" },
     { "zip", "arj", "rar", "lzh", "gz", "z", "arc", "pak" },
@@ -356,7 +356,7 @@ static void handle_search(struct nmdc_hub *hub, char *from, int size_m, guint64 
 
 
 static void handle_cmd(struct net *n, char *cmd) {
-  struct nmdc_hub *hub = n->handle;
+  struct hub *hub = n->handle;
   GMatchInfo *nfo;
 
   // create regexes (declared statically, allocated/compiled on first call)
@@ -413,7 +413,7 @@ static void handle_cmd(struct net *n, char *cmd) {
         ui_m(hub->tab, 0, "Nick validated.");
         hub->nick_valid = TRUE;
         net_send(hub->net, "$Version 1,0091");
-        nmdc_send_myinfo(hub);
+        hub_send_myinfo(hub);
         net_send(hub->net, "$GetNickList");
       }
     } else {
@@ -536,7 +536,7 @@ static void handle_cmd(struct net *n, char *cmd) {
     char *addr = g_match_info_fetch(nfo, 1);
     char *eaddr = nmdc_unescape_and_decode(hub, addr);
     ui_mf(hub->tab, UIP_HIGH, "\nThe hub is requesting you to move to %s.\nType `/connect %s' to do so.\n", eaddr, eaddr);
-    nmdc_disconnect(hub, FALSE);
+    hub_disconnect(hub, FALSE);
     g_free(eaddr);
     g_free(addr);
   }
@@ -591,7 +591,7 @@ static void handle_cmd(struct net *n, char *cmd) {
 
   // $GetPass
   if(strncmp(cmd, "$GetPass", 8) == 0)
-    nmdc_password(hub, NULL);
+    hub_password(hub, NULL);
 
   // $BadPass
   if(strncmp(cmd, "$BadPass", 8) == 0) {
@@ -599,19 +599,19 @@ static void handle_cmd(struct net *n, char *cmd) {
       ui_m(hub->tab, 0, "Wrong password. Use '/set password <password>' to edit your password or '/unset password' to reset it.");
     else
       ui_m(hub->tab, 0, "Wrong password. Type /reconnect to try again.");
-    nmdc_disconnect(hub, FALSE);
+    hub_disconnect(hub, FALSE);
   }
 
   // $ValidateDenide
   if(strncmp(cmd, "$ValidateDenide", 15) == 0) {
     ui_m(hub->tab, 0, "Username invalid or already taken.");
-    nmdc_disconnect(hub, TRUE);
+    hub_disconnect(hub, TRUE);
   }
 
   // $HubIsFull
   if(strncmp(cmd, "$HubIsFull", 10) == 0) {
     ui_m(hub->tab, 0, "Hub is full.");
-    nmdc_disconnect(hub, TRUE);
+    hub_disconnect(hub, TRUE);
   }
 
   // global hub message
@@ -621,20 +621,20 @@ static void handle_cmd(struct net *n, char *cmd) {
 
 
 static gboolean check_myinfo(gpointer data) {
-  nmdc_send_myinfo(data);
+  hub_send_myinfo(data);
   return TRUE;
 }
 
 
 static gboolean reconnect_timer(gpointer dat) {
-  nmdc_connect(dat);
-  ((struct nmdc_hub *)dat)->reconnect_timer = 0;
+  hub_connect(dat);
+  ((struct hub *)dat)->reconnect_timer = 0;
   return FALSE;
 }
 
 
 static void handle_error(struct net *n, int action, GError *err) {
-  struct nmdc_hub *hub = n->handle;
+  struct hub *hub = n->handle;
 
   if(err->code == G_IO_ERROR_CANCELLED)
     return;
@@ -646,18 +646,18 @@ static void handle_error(struct net *n, int action, GError *err) {
     break;
   case NETERR_RECV:
     ui_mf(hub->tab, 0, "Read error: %s", err->message);
-    nmdc_disconnect(hub, TRUE);
+    hub_disconnect(hub, TRUE);
     break;
   case NETERR_SEND:
     ui_mf(hub->tab, 0, "Write error: %s", err->message);
-    nmdc_disconnect(hub, TRUE);
+    hub_disconnect(hub, TRUE);
     break;
   }
 }
 
 
-struct nmdc_hub *nmdc_create(struct ui_tab *tab) {
-  struct nmdc_hub *hub = g_new0(struct nmdc_hub, 1);
+struct hub *hub_create(struct ui_tab *tab) {
+  struct hub *hub = g_new0(struct hub, 1);
   hub->net = net_create('|', hub, TRUE, handle_cmd, handle_error);
   hub->tab = tab;
   hub->users = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, user_free);
@@ -668,12 +668,12 @@ struct nmdc_hub *nmdc_create(struct ui_tab *tab) {
 
 
 static void handle_connect(struct net *n) {
-  struct nmdc_hub *hub = n->handle;
+  struct hub *hub = n->handle;
   ui_mf(hub->tab, 0, "Connected to %s.", net_remoteaddr(n));
 }
 
 
-void nmdc_connect(struct nmdc_hub *hub) {
+void hub_connect(struct hub *hub) {
   char *addr = conf_hub_get(string, hub->tab->name, "hubaddr");
   g_assert(addr);
 
@@ -688,7 +688,7 @@ void nmdc_connect(struct nmdc_hub *hub) {
 }
 
 
-void nmdc_disconnect(struct nmdc_hub *hub, gboolean recon) {
+void hub_disconnect(struct hub *hub, gboolean recon) {
   net_disconnect(hub->net);
   g_hash_table_remove_all(hub->users);
   g_free(hub->nick);     hub->nick = NULL;
@@ -712,9 +712,9 @@ void nmdc_disconnect(struct nmdc_hub *hub, gboolean recon) {
 }
 
 
-void nmdc_free(struct nmdc_hub *hub) {
+void hub_free(struct hub *hub) {
   cc_remove_hub(hub);
-  nmdc_disconnect(hub, FALSE);
+  hub_disconnect(hub, FALSE);
   net_unref(hub->net);
   g_hash_table_unref(hub->users);
   g_hash_table_unref(hub->grants);

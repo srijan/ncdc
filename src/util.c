@@ -589,7 +589,7 @@ GSList *ratecalc_list = NULL;
 
 // Protocol utility functions
 
-char *charset_convert(struct nmdc_hub *hub, gboolean to_utf8, const char *str) {
+char *charset_convert(struct hub *hub, gboolean to_utf8, const char *str) {
   char *fmt = conf_encoding(hub->tab->name);
   char *res = str_convert(to_utf8?"UTF-8":fmt, !to_utf8?"UTF-8":fmt, str);
   g_free(fmt);
@@ -597,7 +597,7 @@ char *charset_convert(struct nmdc_hub *hub, gboolean to_utf8, const char *str) {
 }
 
 
-char *nmdc_encode_and_escape(struct nmdc_hub *hub, const char *str) {
+char *nmdc_encode_and_escape(struct hub *hub, const char *str) {
   char *enc = charset_convert(hub, FALSE, str);
   GString *dest = g_string_sized_new(strlen(enc));
   char *tmp = enc;
@@ -617,7 +617,7 @@ char *nmdc_encode_and_escape(struct nmdc_hub *hub, const char *str) {
 }
 
 
-char *nmdc_unescape_and_decode(struct nmdc_hub *hub, const char *str) {
+char *nmdc_unescape_and_decode(struct hub *hub, const char *str) {
   GString *dest = g_string_sized_new(strlen(str));
   while(*str) {
     if(strncmp(str, "&#36;", 5) == 0) {

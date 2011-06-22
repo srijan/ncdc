@@ -39,11 +39,11 @@
 
 // forward declaration for data types
 // (some of these remain incomplete, others are defined in interfaces)
-struct fl_list;
-struct net;
 struct cc;
-struct nmdc_hub;
+struct fl_list;
+struct hub;
 struct hub_user;
+struct net;
 struct tth_ctx;
 struct ui_listing;
 struct ui_logwindow;
@@ -52,12 +52,12 @@ struct ui_textinput;
 
 
 // include the auto-generated header files
+#include "cc.h"
 #include "commands.h"
 #include "fl_local.h"
 #include "fl_util.h"
+#include "hub.h"
 #include "main.h"
-#include "nmdc.h"
-#include "cc.h"
 #include "net.h"
 #include "tth.h"
 #include "ui.h"

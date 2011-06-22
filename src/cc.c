@@ -37,7 +37,7 @@
 #if INTERFACE
 
 struct cc_expect {
-  struct nmdc_hub *hub;
+  struct hub *hub;
   char *nick; // hub encoding
   time_t added;
 };
@@ -82,7 +82,7 @@ gboolean cc_expect_check(gpointer data) {
 
 struct cc {
   struct net *net;
-  struct nmdc_hub *hub;
+  struct hub *hub;
   char *nick_raw; // hub encoding
   char *nick;     // UTF-8
   gboolean active : 1;
@@ -119,7 +119,7 @@ GSequence *cc_list;
 // $MyNick's being exchanged.)
 // Note that the connection will remain hubless even when the same hub is later
 // opened again. I don't think this is a huge problem, however.
-void cc_remove_hub(struct nmdc_hub *hub) {
+void cc_remove_hub(struct hub *hub) {
   // Remove from cc objects
   GSequenceIter *i = g_sequence_get_begin_iter(cc_list);
   for(; !g_sequence_iter_is_end(i); i=g_sequence_iter_next(i)) {
@@ -166,7 +166,7 @@ int cc_slots_in_use(int *mini) {
 
 
 // Get an already connected user
-static struct cc *cc_get_conn(struct nmdc_hub *hub, const char *user) {
+static struct cc *cc_get_conn(struct hub *hub, const char *user) {
   GSequenceIter *i = g_sequence_get_begin_iter(cc_list);
   for(; !g_sequence_iter_is_end(i); i=g_sequence_iter_next(i)) {
     struct cc *c = g_sequence_get(i);
@@ -336,12 +336,12 @@ static void handle_adcget(struct cc *cc, char *type, char *id, guint64 start, gi
 
 
 // Figure out from which hub a connection came
-static struct nmdc_hub *cc_get_hub(const char *nick) {
+static struct hub *cc_get_hub(const char *nick) {
   GList *n;
   for(n=cc_expected->head; n; n=n->next) {
     struct cc_expect *e = n->data;
     if(strcmp(e->nick, nick) == 0) {
-      struct nmdc_hub *hub = e->hub;
+      struct hub *hub = e->hub;
       g_free(e->nick);
       g_slice_free(struct cc_expect, e);
       g_queue_delete_link(cc_expected, n);
@@ -501,7 +501,7 @@ static void handle_cmd(struct net *n, char *cmd) {
 
 
 // Hub may be unknown when we start listening on incoming connections.
-struct cc *cc_create(struct nmdc_hub *hub) {
+struct cc *cc_create(struct hub *hub) {
   struct cc *cc = g_new0(struct cc, 1);
   cc->net = net_create('|', cc, FALSE, handle_cmd, handle_error);
   cc->hub = hub;

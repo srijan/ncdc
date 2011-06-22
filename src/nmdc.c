@@ -622,7 +622,8 @@ static void handle_cmd(struct net *n, char *cmd) {
   if(g_regex_match(forcemove, cmd, 0, &nfo)) { // 1 = addr
     char *addr = g_match_info_fetch(nfo, 1);
     char *eaddr = nmdc_unescape_and_decode(hub, addr);
-    ui_mf(hub->tab, 0, "\nThe hub is requesting you to move to %s.\nType `/connect %s' to do so.\n", eaddr, eaddr);
+    ui_mf(hub->tab, UIP_HIGH, "\nThe hub is requesting you to move to %s.\nType `/connect %s' to do so.\n", eaddr, eaddr);
+    nmdc_disconnect(hub, FALSE);
     g_free(eaddr);
     g_free(addr);
   }

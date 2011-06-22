@@ -54,7 +54,7 @@ struct ui_tab {
   struct ui_tab *userlist_tab;
   gboolean hub_joincomplete;
   // MSG
-  struct nmdc_user *msg_user;
+  struct hub_user *msg_user;
   char *msg_uname;
   // USERLIST
   gboolean user_details;
@@ -133,7 +133,7 @@ static void ui_main_key(guint64 key) {
 
 // User message tab
 
-struct ui_tab *ui_msg_create(struct nmdc_hub *hub, struct nmdc_user *user) {
+struct ui_tab *ui_msg_create(struct nmdc_hub *hub, struct hub_user *user) {
   struct ui_tab *tab = g_new0(struct ui_tab, 1);
   tab->type = UIT_MSG;
   tab->hub = hub;
@@ -188,7 +188,7 @@ static void ui_msg_msg(struct ui_tab *tab, const char *msg) {
 }
 
 
-static void ui_msg_joinquit(struct ui_tab *tab, gboolean join, struct nmdc_user *user) {
+static void ui_msg_joinquit(struct ui_tab *tab, gboolean join, struct hub_user *user) {
   if(join) {
     ui_mf(tab, 0, "%s has joined.", user->name);
     tab->msg_user = user;
@@ -303,7 +303,7 @@ static void ui_hub_key(struct ui_tab *tab, guint64 key) {
 }
 
 
-struct ui_tab *ui_hub_getmsg(struct ui_tab *tab, struct nmdc_user *user) {
+struct ui_tab *ui_hub_getmsg(struct ui_tab *tab, struct hub_user *user) {
   // This is slow when many tabs are open, should be improved...
   GList *t;
   struct ui_tab *mt;
@@ -316,7 +316,7 @@ struct ui_tab *ui_hub_getmsg(struct ui_tab *tab, struct nmdc_user *user) {
 }
 
 
-void ui_hub_userchange(struct ui_tab *tab, int change, struct nmdc_user *user) {
+void ui_hub_userchange(struct ui_tab *tab, int change, struct hub_user *user) {
   // notify msg tab, if any
   if(change == UIHUB_UC_JOIN || change == UIHUB_UC_QUIT) {
     struct ui_tab *t = ui_hub_getmsg(tab, user);
@@ -340,7 +340,7 @@ void ui_hub_userchange(struct ui_tab *tab, int change, struct nmdc_user *user) {
 }
 
 
-void ui_hub_msg(struct ui_tab *tab, struct nmdc_user *user, const char *msg) {
+void ui_hub_msg(struct ui_tab *tab, struct hub_user *user, const char *msg) {
   struct ui_tab *t = ui_hub_getmsg(tab, user);
   if(!t) {
     t = ui_msg_create(tab->hub, user);
@@ -363,7 +363,7 @@ void ui_hub_userlist_open(struct ui_tab *tab) {
 
 
 gboolean ui_hub_finduser(struct ui_tab *tab, const char *user, gboolean utf8) {
-  struct nmdc_user *u = utf8 ? nmdc_user_get(tab->hub, user) : g_hash_table_lookup(tab->hub->users, user);
+  struct hub_user *u = utf8 ? hub_user_get(tab->hub, user) : g_hash_table_lookup(tab->hub->users, user);
   if(!u)
     return FALSE;
   ui_hub_userlist_open(tab);
@@ -380,8 +380,8 @@ gboolean ui_hub_finduser(struct ui_tab *tab, const char *user, gboolean utf8) {
 // Userlist tab
 
 static gint ui_userlist_sort_func(gconstpointer da, gconstpointer db, gpointer dat) {
-  const struct nmdc_user *a = da;
-  const struct nmdc_user *b = db;
+  const struct hub_user *a = da;
+  const struct hub_user *b = db;
   struct ui_tab *tab = dat;
   int o = 0;
   if(!o && tab->user_opfirst && !a->isop != !b->isop)
@@ -414,7 +414,7 @@ struct ui_tab *ui_userlist_create(struct nmdc_hub *hub) {
   // linked lists, since it uses a faster sorting algorithm)
   GHashTableIter iter;
   g_hash_table_iter_init(&iter, hub->users);
-  struct nmdc_user *u;
+  struct hub_user *u;
   while(g_hash_table_iter_next(&iter, NULL, (gpointer *)&u))
     u->iter = g_sequence_insert_sorted(users, u, ui_userlist_sort_func, tab);
   tab->list = ui_listing_create(users);
@@ -425,7 +425,7 @@ struct ui_tab *ui_userlist_create(struct nmdc_hub *hub) {
 void ui_userlist_close(struct ui_tab *tab) {
   tab->hub->tab->userlist_tab = NULL;
   ui_tab_remove(tab);
-  // To clean things up, we should also reset all nmdc_user->iter fields. But
+  // To clean things up, we should also reset all hub_user->iter fields. But
   // this isn't all that necessary since they won't be used anymore until they
   // get reset in a subsequent ui_userlist_create().
   g_sequence_free(tab->list->list);
@@ -453,7 +453,7 @@ struct ui_userlist_draw_opts {
 
 
 static void ui_userlist_draw_row(struct ui_listing *list, GSequenceIter *iter, int row, void *dat) {
-  struct nmdc_user *user = g_sequence_get(iter);
+  struct hub_user *user = g_sequence_get(iter);
   struct ui_userlist_draw_opts *o = dat;
 
   char *tag = user->tag ? g_strdup_printf("<%s>", user->tag) : NULL;
@@ -525,7 +525,7 @@ static void ui_userlist_draw(struct ui_tab *tab) {
   if(g_sequence_iter_is_end(tab->list->sel))
     mvaddstr(bottom+1, 2, "No user selected.");
   else {
-    struct nmdc_user *u = g_sequence_get(tab->list->sel);
+    struct hub_user *u = g_sequence_get(tab->list->sel);
     attron(A_BOLD);
     mvaddstr(bottom+1,  8, "Username:");
     mvaddstr(bottom+1, 45, "Share:");
@@ -557,7 +557,7 @@ static void ui_userlist_key(struct ui_tab *tab, guint64 key) {
   if(ui_listing_key(tab->list, key, winrows/2))
     return;
 
-  struct nmdc_user *sel = g_sequence_iter_is_end(tab->list->sel) ? NULL : g_sequence_get(tab->list->sel);
+  struct hub_user *sel = g_sequence_iter_is_end(tab->list->sel) ? NULL : g_sequence_get(tab->list->sel);
   gboolean sort = FALSE;
   switch(key) {
   case INPT_CHAR('s'): // s (order by share asc/desc)
@@ -627,7 +627,7 @@ static void ui_userlist_key(struct ui_tab *tab, guint64 key) {
 }
 
 
-void ui_userlist_userchange(struct ui_tab *tab, int change, struct nmdc_user *user) {
+void ui_userlist_userchange(struct ui_tab *tab, int change, struct hub_user *user) {
   if(change == UIHUB_UC_JOIN) {
     user->iter = g_sequence_insert_sorted(tab->list->list, user, ui_userlist_sort_func, tab);
     ui_listing_inserted(tab->list);

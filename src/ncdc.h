@@ -43,7 +43,7 @@ struct fl_list;
 struct net;
 struct cc;
 struct nmdc_hub;
-struct nmdc_user;
+struct hub_user;
 struct tth_ctx;
 struct ui_listing;
 struct ui_logwindow;

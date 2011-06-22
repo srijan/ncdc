@@ -31,7 +31,7 @@
 
 #if INTERFACE
 
-struct nmdc_user {
+struct hub_user {
   gboolean hasinfo : 1;
   gboolean isop : 1;
   gboolean isjoined : 1; // managed by ui_hub_userchange()
@@ -63,7 +63,7 @@ struct nmdc_hub {
   gboolean isop;  // whether we're in the $OpList or not
   char *hubname;  // UTF-8, or NULL when unknown
   char *hubname_hub; // in hub encoding
-  // user list, key = username (in hub encoding!), value = struct nmdc_user *
+  // user list, key = username (in hub encoding!), value = struct hub_user *
   GHashTable *users;
   // list of users who have been granted a slot. key = username (in hub
   // encoding), value = (void *)1. A user will stay in this table for as long
@@ -89,13 +89,13 @@ struct nmdc_hub {
 
 
 
-// struct nmdc_user related functions
+// struct hub_user related functions
 
-static struct nmdc_user *user_add(struct nmdc_hub *hub, const char *name) {
-  struct nmdc_user *u = g_hash_table_lookup(hub->users, name);
+static struct hub_user *user_add(struct nmdc_hub *hub, const char *name) {
+  struct hub_user *u = g_hash_table_lookup(hub->users, name);
   if(u)
     return u;
-  u = g_slice_new0(struct nmdc_user);
+  u = g_slice_new0(struct hub_user);
   u->name_hub = g_strdup(name);
   u->name = charset_convert(hub, TRUE, name);
   g_hash_table_insert(hub->users, u->name_hub, u);
@@ -105,31 +105,31 @@ static struct nmdc_user *user_add(struct nmdc_hub *hub, const char *name) {
 
 
 static void user_free(gpointer dat) {
-  struct nmdc_user *u = dat;
+  struct hub_user *u = dat;
   g_free(u->name_hub);
   g_free(u->name);
   g_free(u->desc);
   g_free(u->tag);
   g_free(u->conn);
   g_free(u->mail);
-  g_slice_free(struct nmdc_user, u);
+  g_slice_free(struct hub_user, u);
 }
 
 
 // Get a user by a UTF-8 string. May fail if the UTF-8 -> hub encoding is not
 // really one-to-one
-struct nmdc_user *nmdc_user_get(struct nmdc_hub *hub, const char *name) {
+struct hub_user *hub_user_get(struct nmdc_hub *hub, const char *name) {
   char *name_hub = charset_convert(hub, FALSE, name);
-  struct nmdc_user *u = g_hash_table_lookup(hub->users, name_hub);
+  struct hub_user *u = g_hash_table_lookup(hub->users, name_hub);
   g_free(name_hub);
   return u;
 }
 
 
-// Auto-complete suggestions for nmdc_user_get()
-void nmdc_user_suggest(struct nmdc_hub *hub, char *str, char **sug) {
+// Auto-complete suggestions for hub_user_get()
+void hub_user_suggest(struct nmdc_hub *hub, char *str, char **sug) {
   GHashTableIter iter;
-  struct nmdc_user *u;
+  struct hub_user *u;
   int i=0, len = strlen(str);
   g_hash_table_iter_init(&iter, hub->users);
   while(i<20 && g_hash_table_iter_next(&iter, NULL, (gpointer *)&u))
@@ -139,7 +139,7 @@ void nmdc_user_suggest(struct nmdc_hub *hub, char *str, char **sug) {
 }
 
 
-static void user_myinfo(struct nmdc_hub *hub, struct nmdc_user *u, const char *str) {
+static void user_myinfo(struct nmdc_hub *hub, struct hub_user *u, const char *str) {
   static GRegex *nfo_reg = NULL;
   static GRegex *nfo_notag = NULL;
   if(!nfo_reg) //          desc   tag               conn   flag   email     share
@@ -203,13 +203,13 @@ void nmdc_password(struct nmdc_hub *hub, char *pass) {
 }
 
 
-void nmdc_kick(struct nmdc_hub *hub, struct nmdc_user *u) {
+void nmdc_kick(struct nmdc_hub *hub, struct hub_user *u) {
   g_return_if_fail(hub->nick_valid && u);
   net_sendf(hub->net, "$Kick %s", u->name_hub);
 }
 
 
-void nmdc_grant(struct nmdc_hub *hub, struct nmdc_user *u) {
+void nmdc_grant(struct nmdc_hub *hub, struct hub_user *u) {
   if(!g_hash_table_lookup(hub->grants, u->name_hub))
     g_hash_table_insert(hub->grants, g_strdup(u->name_hub), (void *)1);
   // TODO: open a connection to the user?
@@ -263,7 +263,7 @@ void nmdc_say(struct nmdc_hub *hub, const char *str) {
 }
 
 
-void nmdc_msg(struct nmdc_hub *hub, struct nmdc_user *user, const char *str) {
+void nmdc_msg(struct nmdc_hub *hub, struct hub_user *user, const char *str) {
   char *msg = nmdc_encode_and_escape(hub, str);
   net_sendf(hub->net, "$To: %s From: %s $<%s> %s", user->name_hub, hub->nick_hub, hub->nick_hub, msg);
   g_free(msg);
@@ -422,7 +422,7 @@ static void handle_cmd(struct net *n, char *cmd) {
         net_send(hub->net, "$GetNickList");
       }
     } else {
-      struct nmdc_user *u = user_add(hub, nick);
+      struct hub_user *u = user_add(hub, nick);
       if(!u->hasinfo && !hub->supports_nogetinfo)
         net_sendf(hub->net, "$GetINFO %s", nick);
     }
@@ -433,7 +433,7 @@ static void handle_cmd(struct net *n, char *cmd) {
   // $Quit
   if(g_regex_match(quit, cmd, 0, &nfo)) { // 1 = nick
     char *nick = g_match_info_fetch(nfo, 1);
-    struct nmdc_user *u = g_hash_table_lookup(hub->users, nick);
+    struct hub_user *u = g_hash_table_lookup(hub->users, nick);
     if(u) {
       ui_hub_userchange(hub->tab, UIHUB_UC_QUIT, u);
       hub->sharecount--;
@@ -452,7 +452,7 @@ static void handle_cmd(struct net *n, char *cmd) {
     g_free(str);
     char **cur;
     for(cur=list; *cur&&**cur; cur++) {
-      struct nmdc_user *u = user_add(hub, *cur);
+      struct hub_user *u = user_add(hub, *cur);
       if(!u->hasinfo && !hub->supports_nogetinfo)
         net_sendf(hub->net, "$GetINFO %s %s", *cur, hub->nick_hub);
     }
@@ -473,7 +473,7 @@ static void handle_cmd(struct net *n, char *cmd) {
     // inefficient and not all that important at this point.
     hub->isop = FALSE;
     for(cur=list; *cur&&**cur; cur++) {
-      struct nmdc_user *u = user_add(hub, *cur);
+      struct hub_user *u = user_add(hub, *cur);
       if(!u->isop) {
         u->isop = TRUE;
         ui_hub_userchange(hub->tab, UIHUB_UC_NFO, u);
@@ -491,7 +491,7 @@ static void handle_cmd(struct net *n, char *cmd) {
   if(g_regex_match(myinfo, cmd, 0, &nfo)) { // 1 = nick, 2 = info string
     char *nick = g_match_info_fetch(nfo, 1);
     char *str = g_match_info_fetch(nfo, 2);
-    struct nmdc_user *u = user_add(hub, nick);
+    struct hub_user *u = user_add(hub, nick);
     if(!u->hasinfo)
       hub->sharecount++;
     else
@@ -522,7 +522,7 @@ static void handle_cmd(struct net *n, char *cmd) {
     char *to = g_match_info_fetch(nfo, 1);
     char *from = g_match_info_fetch(nfo, 2);
     char *msg = g_match_info_fetch(nfo, 3);
-    struct nmdc_user *u = g_hash_table_lookup(hub->users, from);
+    struct hub_user *u = g_hash_table_lookup(hub->users, from);
     if(!u)
       g_warning("[hub: %s] Got a $To from `%s', who is not on this hub!", hub->tab->name, from);
     else {

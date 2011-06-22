@@ -582,7 +582,7 @@ static void c_msg(char *args) {
   else if(!args[0])
     ui_m(NULL, 0, "No user specified. See `/help msg' for more information.");
   else {
-    struct nmdc_user *u = nmdc_user_get(tab->hub, args);
+    struct hub_user *u = hub_user_get(tab->hub, args);
     if(!u)
       ui_m(NULL, 0, "No user found with that name. Note that usernames are case-sensitive.");
     else {
@@ -917,7 +917,7 @@ static void nick_sug(char *args, char **sug, gboolean append) {
   char *nick = args+strlen(args);
   while(nick > args && *(nick-1) != ' ' && *(nick-1) != ',' && *(nick-1) != ':')
     nick--;
-  nmdc_user_suggest(t->hub, nick, sug);
+  hub_user_suggest(t->hub, nick, sug);
   // optionally append ": " after the nick
   if(append && nick == args) {
     char **n;
@@ -1000,13 +1000,13 @@ static void c_whois(char *args) {
 
 
 static void c_grant(char *args) {
-  struct nmdc_user *u = NULL;
+  struct hub_user *u = NULL;
   if(tab->type != UIT_HUB && tab->type != UIT_MSG)
     ui_m(NULL, 0, "This command can only be used on hub and message tabs.");
   else if(!args[0] && tab->type != UIT_MSG)
     ui_m(NULL, 0, "No user specified. See `/help grant' for more information.");
   else if(args[0])
-    u = nmdc_user_get(tab->hub, args);
+    u = hub_user_get(tab->hub, args);
   else
     u = tab->msg_user;
 
@@ -1039,7 +1039,7 @@ static void c_kick(char *args) {
   else if(!args[0])
     ui_m(NULL, 0, "No user specified.");
   else {
-    struct nmdc_user *u = nmdc_user_get(tab->hub, args);
+    struct hub_user *u = hub_user_get(tab->hub, args);
     if(!u)
       ui_m(NULL, 0, "No user found with that name.");
     else

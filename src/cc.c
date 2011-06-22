@@ -375,7 +375,7 @@ static void handle_mynick(struct cc *cc, const char *nick) {
     return;
   }
 
-  struct nmdc_user *u = g_hash_table_lookup(cc->hub->users, nick);
+  struct hub_user *u = g_hash_table_lookup(cc->hub->users, nick);
   if(!u) {
     g_set_error_literal(&(cc->err), 1, 0, "User is not on the hub");
     cc_disconnect(cc);

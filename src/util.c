@@ -100,6 +100,43 @@ GKeyFile *conf_file;
 #endif
 
 
+
+static void generate_pid() {
+  // g_rand_new() uses four bytes from /dev/urandom when it's available. Doing
+  // that twice (i.e. reading 8 bytes) should generate enough randomness for a
+  // PID. In the case that it uses the current time as fallback, avoid using
+  // the same number twice by calling g_rand_set_seed() on the second one.
+  GRand *r = g_rand_new();
+  guint32 r1 = g_rand_int(r);
+  g_rand_free(r);
+  r = g_rand_new();
+  g_rand_set_seed(r, g_rand_int(r));
+  guint32 r2 = g_rand_int(r);
+  g_rand_free(r);
+
+  // now that we have two random integers, hash them to generate our PID
+  static struct tth_ctx tth; // better not allocate this on the stack
+  char pid[24];
+  tth_init(&tth, 8);
+  tth_update(&tth, (char *)&r1, 4);
+  tth_update(&tth, (char *)&r2, 4);
+  tth_final(&tth, pid);
+
+  // now hash the PID so we have our CID
+  char cid[24];
+  tth_init(&tth, 24);
+  tth_update(&tth, pid, 24);
+  tth_final(&tth, cid);
+
+  // encode and save
+  char enc[40] = {};
+  base32_encode(pid, enc);
+  g_key_file_set_string(conf_file, "global", "pid", enc);
+  base32_encode(cid, enc);
+  g_key_file_set_string(conf_file, "global", "cid", enc);
+}
+
+
 void conf_init() {
   // get location of the configuration directory
   conf_dir = g_getenv("NCDC_DIR");
@@ -157,6 +194,9 @@ void conf_init() {
     g_key_file_set_string(conf_file, "global", "nick", nick);
     g_free(nick);
   }
+  // make sure we have a PID and CID
+  if(!g_key_file_has_key(conf_file, "global", "pid", NULL))
+    generate_pid();
   conf_save();
   g_free(cf);
 }

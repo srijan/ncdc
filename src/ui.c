@@ -825,6 +825,14 @@ static void ui_conn_key(guint64 key) {
     else if(!ui_hub_finduser(cc->hub->tab, cc->nick_raw, FALSE))
       ui_m(NULL, 0, "User has left the hub.");
     break;
+  case INPT_CHAR('d'):
+    if(!cc)
+      ui_m(NULL, 0, "Nothing selected.");
+    else if(!cc->net->conn)
+      ui_m(NULL, 0, "Not connected.");
+    else
+      nmdc_cc_disconnect(cc);
+    break;
   }
 }
 

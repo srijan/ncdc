@@ -933,7 +933,7 @@ GString *adc_generate(char type, int cmd, int source, int dest) {
 }
 
 
-void adc_append(GString *c, char *name, char *arg) {
+void adc_append(GString *c, const char *name, const char *arg) {
   g_string_append_c(c, ' ');
   if(name)
     g_string_append(c, name);

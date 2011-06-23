@@ -489,20 +489,37 @@ void hub_send_nfo(struct hub *hub) {
 void hub_say(struct hub *hub, const char *str) {
   if(!hub->nick_valid)
     return;
-  char *msg = nmdc_encode_and_escape(hub, str);
-  net_sendf(hub->net, "<%s> %s", hub->nick_hub, msg);
-  g_free(msg);
+  if(hub->adc) {
+    GString *c = adc_generate('B', ADCC_MSG, hub->sid, 0);
+    adc_append(c, NULL, str);
+    net_send(hub->net, c->str);
+    g_string_free(c, TRUE);
+  } else {
+    char *msg = nmdc_encode_and_escape(hub, str);
+    net_sendf(hub->net, "<%s> %s", hub->nick_hub, msg);
+    g_free(msg);
+  }
 }
 
 
 void hub_msg(struct hub *hub, struct hub_user *user, const char *str) {
-  char *msg = nmdc_encode_and_escape(hub, str);
-  net_sendf(hub->net, "$To: %s From: %s $<%s> %s", user->name_hub, hub->nick_hub, hub->nick_hub, msg);
-  g_free(msg);
-  // emulate protocol echo
-  msg = g_strdup_printf("<%s> %s", hub->nick, str);
-  ui_hub_msg(hub->tab, user, msg);
-  g_free(msg);
+  if(hub->adc) {
+    GString *c = adc_generate('E', ADCC_MSG, hub->sid, user->sid);
+    adc_append(c, NULL, str);
+    char enc[5] = {};
+    ADC_EFCC(hub->sid, enc);
+    g_string_append_printf(c, " PM%s", enc);
+    net_send(hub->net, c->str);
+    g_string_free(c, TRUE);
+  } else {
+    char *msg = nmdc_encode_and_escape(hub, str);
+    net_sendf(hub->net, "$To: %s From: %s $<%s> %s", user->name_hub, hub->nick_hub, hub->nick_hub, msg);
+    g_free(msg);
+    // emulate protocol echo
+    msg = g_strdup_printf("<%s> %s", hub->nick, str);
+    ui_hub_msg(hub->tab, user, msg);
+    g_free(msg);
+  }
 }
 
 
@@ -607,6 +624,28 @@ static void adc_handle(struct hub *hub, char *msg) {
       if(cmd.argv[0][1] == '2') {
         g_warning("ADC Error (fatal): %d %s", code, cmd.argv[1]);
         hub_disconnect(hub, FALSE); // TODO: whether we should reconnect or not depends on the error code
+      }
+    }
+    break;
+
+  case ADCC_MSG:;
+    if(cmd.argc < 1 || (cmd.type != 'B' && cmd.type != 'E'))
+      g_warning("Invalid message from %s: %s", net_remoteaddr(hub->net), msg);
+    else {
+      char *pm = adc_getparam(cmd.argv+1, "PM", NULL);
+      gboolean me = adc_getparam(cmd.argv+1, "ME", NULL) != NULL;
+      struct hub_user *u = g_hash_table_lookup(hub->sessions, GINT_TO_POINTER(cmd.source));
+      if(pm && (cmd.type != 'E' || strlen(pm) != 4 || ADC_DFCC(pm) != cmd.source))
+        g_warning("Group chat is not supported yet. (%s: %s)", net_remoteaddr(hub->net), msg);
+      else if(!u)
+        g_warning("Message from someone not on this hub. (%s: %s)", net_remoteaddr(hub->net), msg);
+      else {
+        char *m = g_strdup_printf(me ? "** %s %s" : "<%s> %s", u->name, cmd.argv[0]);
+        if(cmd.type == 'E')
+          ui_hub_msg(hub->tab, u, m);
+        else
+          ui_m(hub->tab, UIM_CHAT|UIP_MED, m);
+        g_free(m);
       }
     }
     break;

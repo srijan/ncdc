@@ -35,12 +35,18 @@ struct hub_user {
   gboolean hasinfo : 1;
   gboolean isop : 1;
   gboolean isjoined : 1; // managed by ui_hub_userchange()
+  gboolean active : 1;
+  unsigned char h_norm;
+  unsigned char h_reg;
+  unsigned char h_op;
+  unsigned char slots;
+  unsigned int as;         // auto-open slot if upload is below n bytes/s
   char *name;     // UTF-8
-  char *name_hub; // hub-encoded
+  char *name_hub; // hub-encoded (NMDC)
   char *desc;
-  char *tag;
   char *conn;
   char *mail;
+  char *client;
   int sid;        // for ADC
   char cid[24];   // for ADC
   guint64 sharesize;
@@ -114,9 +120,9 @@ static void user_free(gpointer dat) {
   g_free(u->name_hub);
   g_free(u->name);
   g_free(u->desc);
-  g_free(u->tag);
   g_free(u->conn);
   g_free(u->mail);
+  g_free(u->client);
   g_slice_free(struct hub_user, u);
 }
 
@@ -146,93 +152,198 @@ void hub_user_suggest(struct hub *hub, char *str, char **sug) {
 }
 
 
-static void user_nmdc_nfo(struct hub *hub, struct hub_user *u, const char *str) {
-  static GRegex *nfo_reg = NULL;
-  static GRegex *nfo_notag = NULL;
-  if(!nfo_reg) //          desc   tag               conn   flag   email     share
-    nfo_reg = g_regex_new("([^$]*)<([^>$]+)>\\$.\\$([^$]*)(\\C)\\$([^$]*)\\$([0-9]+)\\$", G_REGEX_OPTIMIZE|G_REGEX_RAW, 0, NULL);
-  if(!nfo_notag) //          desc   tag      conn   flag    email     share
-    nfo_notag = g_regex_new("([^$]*)()\\$.\\$([^$]*)(\\C)\\$([^$]*)\\$([0-9]+)\\$", G_REGEX_OPTIMIZE|G_REGEX_RAW, 0, NULL);
-
-  GMatchInfo *nfo = NULL;
-  gboolean match = g_regex_match(nfo_reg, str, 0, &nfo);
-  if(!match) {
-    g_match_info_free(nfo);
-    match = g_regex_match(nfo_notag, str, 0, &nfo);
-  }
-  if(match) {
-    g_free(u->desc);
-    g_free(u->tag);
-    g_free(u->conn);
-    g_free(u->mail);
-    char *desc = g_match_info_fetch(nfo, 1);
-    char *tag = g_match_info_fetch(nfo, 2);
-    char *conn = g_match_info_fetch(nfo, 3);
-    //char *flag = g_match_info_fetch(nfo, 4); // currently ignored
-    char *mail = g_match_info_fetch(nfo, 5);
-    char *share = g_match_info_fetch(nfo, 6);
-    u->sharesize = g_ascii_strtoull(share, NULL, 10);
-    u->desc = desc[0] ? nmdc_unescape_and_decode(hub, desc) : NULL;
-    u->tag  = tag[0]  ? nmdc_unescape_and_decode(hub, tag)  : NULL;
-    u->conn = conn[0] ? nmdc_unescape_and_decode(hub, conn) : NULL;
-    u->mail = mail[0] ? nmdc_unescape_and_decode(hub, mail) : NULL;
-    g_free(desc);
-    g_free(tag);
-    g_free(conn);
-    g_free(mail);
-    g_free(share);
-    u->hasinfo = TRUE;
-    ui_hub_userchange(hub->tab, UIHUB_UC_NFO, u);
-  } else
-    g_critical("Don't understand MyINFO string: %s", str);
-  g_match_info_free(nfo);
+char *hub_user_tag(struct hub_user *u) {
+  if(!u->client || !u->slots)
+    return NULL;
+  GString *t = g_string_new("");
+  g_string_printf(t, "<%s,M:%c,H:%d/%d/%d,S:%d", u->client,
+    u->active ? 'A' : 'P', u->h_norm, u->h_reg, u->h_op, u->slots);
+  if(u->as)
+    g_string_append_printf(t, ",O:%d", u->as/1024);
+  g_string_append_c(t, '>');
+  return g_string_free(t, FALSE);
 }
 
 
-static void user_adc_nfo(struct hub *hub, struct hub_user *u, struct adc_cmd *cmd) {
-  char *p;
+#define cleanspace(str) do {\
+    while(*(str) == ' ')\
+      (str)++;\
+    while((str)[0] && (str)[strlen(str)-1] == ' ')\
+      (str)[strlen(str)-1] = 0;\
+  } while(0)
 
+static void user_nmdc_nfo(struct hub *hub, struct hub_user *u, char *str) {
+  // these all point into *str. *str is modified to contain zeroes in the correct positions
+  char *next, *tmp;
+  char *desc = NULL;
+  char *client = NULL;
+  char *conn = NULL;
+  char *mail = NULL;
+  gboolean active = FALSE;
+  unsigned char h_norm = 0;
+  unsigned char h_reg = 0;
+  unsigned char h_op = 0;
+  unsigned char slots = 0;
+  unsigned int as = 0;
+  guint64 share = 0;
+
+  if(!(next = index(str, '$')) || strlen(next) < 3 || next[2] != '$')
+    return;
+  *next = 0; next += 3;
+
+  // tag
+  if(str[0] && str[strlen(str)-1] == '>' && (tmp = rindex(str, '<'))) {
+    *tmp = 0;
+    tmp++;
+    tmp[strlen(tmp)-1] = 0;
+    // tmp now points to the contents of the tag
+    char *t;
+
+#define L(s) do {\
+    if(!client)\
+      client = tmp;\
+    else if(strcmp(tmp, "M:A") == 0)\
+      active = TRUE;\
+    else\
+      (void) (sscanf(tmp, "H:%hhu/%hhu/%hhu", &h_norm, &h_reg, &h_op)\
+      || sscanf(tmp, "S:%hhu", &slots)\
+      || sscanf(tmp, "O:%u", &as));\
+  } while(0)
+
+    while((t = index(tmp, ','))) {
+      *t = 0;
+      L(tmp);
+      tmp = t+1;
+    }
+    L(tmp);
+  }
+
+  // description
+  desc = str;
+  cleanspace(desc);
+
+  // connection and flag
+  str = next;
+  if(!(next = index(str, '$')))
+    return;
+  *next = 0; next++;
+
+  // we currently ignore the flag
+  str[strlen(str)-1] = 0;
+
+  conn = str;
+  cleanspace(conn);
+
+  // email
+  str = next;
+  if(!(next = index(str, '$')))
+    return;
+  *next = 0; next++;
+
+  mail = str;
+  cleanspace(mail);
+
+  // share
+  str = next;
+  if(!(next = index(str, '$')))
+    return;
+  *next = 0;
+  share = g_ascii_strtoull(str, NULL, 10);
+
+  // If we still haven't 'return'ed yet, that means we have a correct $MyINFO. Now we can update the struct.
+  g_free(u->desc);
+  g_free(u->client);
+  g_free(u->conn);
+  g_free(u->mail);
+  u->sharesize = share;
+  u->desc = desc[0] ? nmdc_unescape_and_decode(hub, desc) : NULL;
+  u->client = client && client[0] ? g_strdup(client) : NULL;
+  u->conn = conn[0] ? nmdc_unescape_and_decode(hub, conn) : NULL;
+  u->mail = mail[0] ? nmdc_unescape_and_decode(hub, mail) : NULL;
+  u->h_norm = h_norm;
+  u->h_reg = h_reg;
+  u->h_op = h_op;
+  u->slots = slots;
+  u->as = as*1024;
+  u->hasinfo = TRUE;
+  u->active = active;
+  ui_hub_userchange(hub->tab, UIHUB_UC_NFO, u);
+}
+
+#undef cleanspace
+
+
+#define P(a,b) (((a)<<8) + (b))
+
+static void user_adc_nfo(struct hub *hub, struct hub_user *u, struct adc_cmd *cmd) {
   u->hasinfo = TRUE;
   // sid
   if(!u->sid)
     g_hash_table_insert(hub->sessions, GINT_TO_POINTER(cmd->source), u);
   u->sid = cmd->source;
 
-  // Note: Walking through the argv array once is faster than calling adc_getparam() each time...
-
-  // nick
-  if((p = adc_getparam(cmd->argv, "NI", NULL))) {
-    g_hash_table_steal(hub->users, u->name);
-    g_free(u->name);
-    u->name = g_strdup(p);
-    g_hash_table_insert(hub->users, u->name, u);
+  // This is faster than calling adc_getparam() each time
+  char **n;
+  for(n=cmd->argv; n&&*n; n++) {
+    if(strlen(*n) < 2)
+      continue;
+    char *p = *n+2;
+    switch(P(**n, (*n)[1])) {
+    case P('N','I'): // nick
+      g_hash_table_steal(hub->users, u->name);
+      g_free(u->name);
+      u->name = g_strdup(p);
+      g_hash_table_insert(hub->users, u->name, u);
+      break;
+    case P('D','E'): // description
+      g_free(u->desc);
+      u->desc = p[0] ? g_strdup(p) : NULL;
+      break;
+    case P('V','E'): // client name + version
+      g_free(u->client);
+      u->client = p[0] ? g_strdup(p) : NULL;
+      break;
+    case P('E','M'): // mail
+      g_free(u->mail);
+      u->mail = p[0] ? g_strdup(p) : NULL;
+      break;
+    case P('I','D'): // CID
+      // Note that the ADC spec allows hashes of varying length. I'm limiting
+      // myself to 39 here since that is more memory-efficient.
+      if(strlen(p) == 39)
+        base32_decode(p, u->cid);
+      break;
+    case P('S','S'): // share size
+      u->sharesize = g_ascii_strtoull(p, NULL, 10);
+      break;
+    case P('H','N'): // h_norm
+      u->h_norm = strtol(p, NULL, 10);
+      break;
+    case P('H','R'): // h_reg
+      u->h_reg = strtol(p, NULL, 10);
+      break;
+    case P('H','O'): // h_op
+      u->h_op = strtol(p, NULL, 10);
+      break;
+    case P('S','L'): // slots
+      u->slots = strtol(p, NULL, 10);
+      break;
+    case P('A','S'): // as
+      u->slots = strtol(p, NULL, 10);
+      break;
+    case P('S','U'): // supports
+      u->active = !!strstr(p, "TCP4") || !!strstr(p, "TCP6");
+      break;
+    case P('C','T'): // client type (only used to figure out u->isop)
+      u->isop = strtol(p, NULL, 10) >= 4;
+      break;
+    }
   }
-
-  // description
-  if((p = adc_getparam(cmd->argv, "DE", NULL))) {
-    g_free(u->desc);
-    u->desc = g_strdup(p);
-  }
-
-  // mail
-  if((p = adc_getparam(cmd->argv, "EM", NULL))) {
-    g_free(u->mail);
-    u->mail = g_strdup(p);
-  }
-
-  // CID. Note that the ADC spec allows hashes of varying length. I'm limiting
-  // myself to 39 here since that is more memory-efficient.
-  if((p = adc_getparam(cmd->argv, "ID", NULL)) && strlen(p) == 39)
-    base32_decode(p, u->cid);
-
-  // share size
-  if((p = adc_getparam(cmd->argv, "SS", NULL)))
-    u->sharesize = g_ascii_strtoull(p, NULL, 10);
-
-  // TODO: other info
 
   ui_hub_userchange(hub->tab, UIHUB_UC_NFO, u);
 }
+
+#undef P
 
 
 

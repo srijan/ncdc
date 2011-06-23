@@ -456,7 +456,7 @@ static void ui_userlist_draw_row(struct ui_listing *list, GSequenceIter *iter, i
   struct hub_user *user = g_sequence_get(iter);
   struct ui_userlist_draw_opts *o = dat;
 
-  char *tag = user->tag ? g_strdup_printf("<%s>", user->tag) : NULL;
+  char *tag = hub_user_tag(user);
   int j=5;
   if(iter == list->sel) {
     attron(A_BOLD);
@@ -465,7 +465,7 @@ static void ui_userlist_draw_row(struct ui_listing *list, GSequenceIter *iter, i
   }
   if(user->isop)
     mvaddch(row, 2, 'O');
-  if(!user->tag || !strstr(user->tag, ",M:A")) // not the best method...
+  if(!user->active)
     mvaddch(row, 3, 'P');
   DRAW_COL(row, j, o->cw_user,  user->name);
   DRAW_COL(row, j, o->cw_share, user->hasinfo ? str_formatsize(user->sharesize) : "");
@@ -541,12 +541,12 @@ static void ui_userlist_draw(struct ui_tab *tab) {
     mvaddstr(bottom+1, 52, tmp);
     mvaddstr(bottom+2, 18, u->hasinfo ? u->conn : "-");
     mvaddstr(bottom+2, 52, u->hasinfo ? u->mail : "-");
-    if(u->hasinfo && u->tag)
-      g_snprintf(tmp, 200, "%s <%s>", u->desc?u->desc:"", u->tag);
-    else if(u->desc)
-      strncpy(tmp, u->desc, 200);
+    char *tag = hub_user_tag(u);
+    if(u->hasinfo)
+      g_snprintf(tmp, 200, "%s %s", u->desc?u->desc:"", tag?tag:"");
     else
       strcpy(tmp, "-");
+    g_free(tag);
     mvaddstr(bottom+3, 18, tmp);
   }
 }

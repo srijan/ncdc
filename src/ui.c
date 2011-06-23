@@ -263,7 +263,7 @@ static void ui_hub_draw(struct ui_tab *tab) {
     mvaddstr(winrows-4, wincols-15, "Logging in...");
   else {
     char *addr = conf_hub_get(string, tab->name, "hubaddr");
-    char *tmp = g_strdup_printf("%s @ dchub://%s/%s", tab->hub->nick, addr,
+    char *tmp = g_strdup_printf("%s @ %s%s", tab->hub->nick, addr,
       tab->hub->isop ? " (operator)" : tab->hub->isreg ? " (registered)" : "");
     mvaddstr(winrows-4, 0, tmp);
     g_free(addr);

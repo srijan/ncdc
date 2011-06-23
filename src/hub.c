@@ -36,11 +36,13 @@ struct hub_user {
   gboolean isop : 1;
   gboolean isjoined : 1; // managed by ui_hub_userchange()
   char *name;     // UTF-8
-  char *name_hub; // hub-encoded (used as hash key)
+  char *name_hub; // hub-encoded
   char *desc;
   char *tag;
   char *conn;
   char *mail;
+  int sid;        // for ADC
+  char cid[24];   // for ADC
   guint64 sharesize;
   GSequenceIter *iter; // used by ui_userlist_*
 }
@@ -63,6 +65,7 @@ struct hub {
   char *hubname_hub; // in hub encoding (NMDC only)
   // user list, key = username (in hub encoding for NMDC), value = struct hub_user *
   GHashTable *users;
+  GHashTable *sessions; // user list, with sid as index (ADC only)
   // list of users who have been granted a slot. key = username (in hub
   // encoding), value = (void *)1. A user will stay in this table for as long
   // as the hub tab is open, I guess that's good enough.
@@ -78,7 +81,7 @@ struct hub {
   // last MyINFO or BINF string
   char *myinfo_last;
   // whether we've fetched the complete user list (and their $MyINFO's)
-  gboolean received_nicklist; // true on first $NickList or $OpList
+  gboolean received_first; // true if one precondition for joincomplete is satisfied.
   gboolean joincomplete;
 };
 
@@ -94,9 +97,13 @@ static struct hub_user *user_add(struct hub *hub, const char *name) {
   if(u)
     return u;
   u = g_slice_new0(struct hub_user);
-  u->name_hub = g_strdup(name);
-  u->name = charset_convert(hub, TRUE, name);
-  g_hash_table_insert(hub->users, u->name_hub, u);
+  if(hub->adc)
+    u->name = g_strdup(name);
+  else {
+    u->name_hub = g_strdup(name);
+    u->name = charset_convert(hub, TRUE, name);
+  }
+  g_hash_table_insert(hub->users, hub->adc ? u->name : u->name_hub, u);
   ui_hub_userchange(hub->tab, UIHUB_UC_JOIN, u);
   return u;
 }
@@ -114,9 +121,11 @@ static void user_free(gpointer dat) {
 }
 
 
-// Get a user by a UTF-8 string. May fail if the UTF-8 -> hub encoding is not
-// really one-to-one
+// Get a user by a UTF-8 string. May fail for NMDC if the UTF-8 -> hub encoding
+// is not really one-to-one.
 struct hub_user *hub_user_get(struct hub *hub, const char *name) {
+  if(hub->adc)
+    return g_hash_table_lookup(hub->users, name);
   char *name_hub = charset_convert(hub, FALSE, name);
   struct hub_user *u = g_hash_table_lookup(hub->users, name_hub);
   g_free(name_hub);
@@ -137,7 +146,7 @@ void hub_user_suggest(struct hub *hub, char *str, char **sug) {
 }
 
 
-static void user_myinfo(struct hub *hub, struct hub_user *u, const char *str) {
+static void user_nmdc_nfo(struct hub *hub, struct hub_user *u, const char *str) {
   static GRegex *nfo_reg = NULL;
   static GRegex *nfo_notag = NULL;
   if(!nfo_reg) //          desc   tag               conn   flag   email     share
@@ -177,6 +186,52 @@ static void user_myinfo(struct hub *hub, struct hub_user *u, const char *str) {
   } else
     g_critical("Don't understand MyINFO string: %s", str);
   g_match_info_free(nfo);
+}
+
+
+static void user_adc_nfo(struct hub *hub, struct hub_user *u, struct adc_cmd *cmd) {
+  char *p;
+
+  u->hasinfo = TRUE;
+  // sid
+  if(!u->sid)
+    g_hash_table_insert(hub->sessions, GINT_TO_POINTER(cmd->source), u);
+  u->sid = cmd->source;
+
+  // Note: Walking through the argv array once is faster than calling adc_getparam() each time...
+
+  // nick
+  if((p = adc_getparam(cmd->argv, "NI", NULL))) {
+    g_hash_table_steal(hub->users, u->name);
+    g_free(u->name);
+    u->name = g_strdup(p);
+    g_hash_table_insert(hub->users, u->name, u);
+  }
+
+  // description
+  if((p = adc_getparam(cmd->argv, "DE", NULL))) {
+    g_free(u->desc);
+    u->desc = g_strdup(p);
+  }
+
+  // mail
+  if((p = adc_getparam(cmd->argv, "EM", NULL))) {
+    g_free(u->mail);
+    u->mail = g_strdup(p);
+  }
+
+  // CID. Note that the ADC spec allows hashes of varying length. I'm limiting
+  // myself to 39 here since that is more memory-efficient.
+  if((p = adc_getparam(cmd->argv, "ID", NULL)) && strlen(p) == 39)
+    base32_decode(p, u->cid);
+
+  // share size
+  if((p = adc_getparam(cmd->argv, "SS", NULL)))
+    u->sharesize = g_ascii_strtoull(p, NULL, 10);
+
+  // TODO: other info
+
+  ui_hub_userchange(hub->tab, UIHUB_UC_NFO, u);
 }
 
 
@@ -247,6 +302,7 @@ void hub_send_myinfo(struct hub *hub) {
       g_free(cid);
       g_free(pid);
     }
+    // TODO: SS, 'TCP4' on active
     g_string_append_printf(cmd, " VEncdc\\s%s I40.0.0.0 SL%d HN%d HR%d HO%d",
       VERSION, conf_slots(), h_normal, h_reg, h_op);
     if(desc)
@@ -305,6 +361,9 @@ static void adc_handle(struct hub *hub, char *msg) {
   struct adc_cmd cmd;
   GError *err = NULL;
 
+  if(!msg[0])
+    return;
+
   adc_parse(msg, &cmd, &err);
   if(err) {
     g_warning("ADC parse error from %s: %s. --> %s", net_remoteaddr(hub->net), err->message, msg);
@@ -330,14 +389,61 @@ static void adc_handle(struct hub *hub, char *msg) {
     break;
 
   case ADCC_INF:
+    // inf from hub
     if(cmd.type == 'I') {
-      // TODO: set hubname
+      // Get hub name. Some hubs (PyAdc) send multiple 'NI's, ignore the first one in that case. :-/
+      char **left = NULL;
+      char *hname = adc_getparam(cmd.argv, "NI", &left);
+      if(left)
+        hname = adc_getparam(left, "NI", NULL);
+      if(hname) {
+        g_free(hub->hubname);
+        hub->hubname = g_strdup(hname);
+      }
+      // set state
       if(hub->state == ADC_S_IDENTIFY || hub->state == ADC_S_VERIFY) {
         hub->state = ADC_S_NORMAL;
         hub->nick_valid = TRUE;
       }
+    } else if(cmd.type == 'B') {
+      char *nick = adc_getparam(cmd.argv, "NI", NULL);
+      struct hub_user *u = g_hash_table_lookup(hub->sessions, GINT_TO_POINTER(cmd.source));
+      if(!u && nick)
+        u = user_add(hub, nick);
+      if(!u)
+        g_warning("INF for user who is not on the hub (%s): %s", net_remoteaddr(hub->net), msg);
+      else {
+        if(!u->hasinfo)
+          hub->sharecount++;
+        else
+          hub->sharesize -= u->sharesize;
+        user_adc_nfo(hub, u, &cmd);
+        hub->sharesize += u->sharesize;
+        // if we received our own INF, that means the user list is complete.
+        if(u->sid == hub->sid) {
+          hub->joincomplete = hub->received_first;
+          hub->received_first = TRUE;
+        }
+      }
     }
-    // TODO: parse BINF's
+    break;
+
+  case ADCC_QUI:
+    if(cmd.type != 'I' || cmd.argc < 1 || strlen(cmd.argv[0]) != 4)
+      g_warning("Invalid message from %s: %s", net_remoteaddr(hub->net), msg);
+    else {
+      int sid = ADC_DFCC(cmd.argv[0]);
+      struct hub_user *u = g_hash_table_lookup(hub->sessions, GINT_TO_POINTER(sid));
+      if(sid == hub->sid) // TODO: properly handle TL, RD and do something with MS
+        hub_disconnect(hub, TRUE);
+      else if(u) { // TODO: handle DI, and perhaps do something with MS
+        ui_hub_userchange(hub->tab, UIHUB_UC_QUIT, u);
+        hub->sharecount--;
+        hub->sharesize -= u->sharesize;
+        g_hash_table_remove(hub->users, u->name);
+      } else
+        g_warning("QUI for user who is not on the hub (%s): %s", net_remoteaddr(hub->net), msg);
+    }
     break;
 
   case ADCC_STA:
@@ -525,8 +631,10 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
     struct hub_user *u = g_hash_table_lookup(hub->users, nick);
     if(u) {
       ui_hub_userchange(hub->tab, UIHUB_UC_QUIT, u);
-      hub->sharecount--;
-      hub->sharesize -= u->sharesize;
+      if(u->hasinfo) {
+        hub->sharecount--;
+        hub->sharesize -= u->sharesize;
+      }
       g_hash_table_remove(hub->users, nick);
     }
     g_free(nick);
@@ -545,7 +653,7 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
       if(!u->hasinfo && !hub->supports_nogetinfo)
         net_sendf(hub->net, "$GetINFO %s %s", *cur, hub->nick_hub);
     }
-    hub->received_nicklist = TRUE;
+    hub->received_first = TRUE;
     g_strfreev(list);
   }
   g_match_info_free(nfo);
@@ -571,7 +679,7 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
       if(strcmp(hub->nick_hub, *cur) == 0)
         hub->isop = TRUE;
     }
-    hub->received_nicklist = TRUE;
+    hub->received_first = TRUE;
     g_strfreev(list);
   }
   g_match_info_free(nfo);
@@ -585,12 +693,12 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
       hub->sharecount++;
     else
       hub->sharesize -= u->sharesize;
-    user_myinfo(hub, u, str);
+    user_nmdc_nfo(hub, u, str);
     if(!u->hasinfo)
       hub->sharecount--;
     else
       hub->sharesize += u->sharesize;
-    if(hub->received_nicklist && !hub->joincomplete && hub->sharecount == g_hash_table_size(hub->users))
+    if(hub->received_first && !hub->joincomplete && hub->sharecount == g_hash_table_size(hub->users))
       hub->joincomplete = TRUE;
     g_free(str);
     g_free(nick);
@@ -766,6 +874,7 @@ struct hub *hub_create(struct ui_tab *tab) {
   hub->tab = tab;
   hub->users = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, user_free);
   hub->grants = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+  hub->sessions = g_hash_table_new(g_direct_hash, g_direct_equal);
   hub->myinfo_timer = g_timeout_add_seconds(5*60, check_myinfo, hub);
   return hub;
 }
@@ -814,13 +923,14 @@ void hub_connect(struct hub *hub) {
 
 void hub_disconnect(struct hub *hub, gboolean recon) {
   net_disconnect(hub->net);
+  g_hash_table_remove_all(hub->sessions);
   g_hash_table_remove_all(hub->users);
   g_free(hub->nick);     hub->nick = NULL;
   g_free(hub->nick_hub); hub->nick_hub = NULL;
   g_free(hub->hubname);  hub->hubname = NULL;
   g_free(hub->hubname_hub);  hub->hubname_hub = NULL;
   g_free(hub->myinfo_last); hub->myinfo_last = NULL;
-  hub->nick_valid = hub->isreg = hub->isop = hub->received_nicklist =
+  hub->nick_valid = hub->isreg = hub->isop = hub->received_first =
     hub->joincomplete =  hub->sharecount = hub->sharesize =
     hub->supports_nogetinfo = hub->state = 0;
   if(!recon) {
@@ -841,6 +951,7 @@ void hub_free(struct hub *hub) {
   hub_disconnect(hub, FALSE);
   net_unref(hub->net);
   g_hash_table_unref(hub->users);
+  g_hash_table_unref(hub->sessions);
   g_hash_table_unref(hub->grants);
   g_source_remove(hub->myinfo_timer);
   g_free(hub);

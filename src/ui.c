@@ -332,8 +332,8 @@ void ui_hub_userchange(struct ui_tab *tab, int change, struct hub_user *user) {
   gboolean log = conf_hub_get(boolean, tab->name, "show_joinquit");
   if(change == UIHUB_UC_NFO && !user->isjoined) {
     user->isjoined = TRUE;
-    if(log && tab->hub->joincomplete
-        && (!tab->hub->nick_valid || strcmp(tab->hub->nick_hub, user->name_hub) != 0))
+    if(log && tab->hub->joincomplete && (!tab->hub->nick_valid
+        || (tab->hub->adc ? (tab->hub->sid != user->sid) : (strcmp(tab->hub->nick_hub, user->name_hub) != 0))))
       ui_mf(tab, 0, "%s has joined.", user->name);
   } else if(change == UIHUB_UC_QUIT && log)
     ui_mf(tab, 0, "%s has quit.", user->name);
@@ -390,7 +390,7 @@ static gint ui_userlist_sort_func(gconstpointer da, gconstpointer db, gpointer d
     o = a->sharesize > b->sharesize ? 1 : a->sharesize < b->sharesize ? -1 : 0;
   if(!o) // TODO: this is noticably slow on large hubs, cache g_utf8_collate_key()
     o = g_utf8_collate(a->name, b->name);
-  if(!o)
+  if(!o && a->name_hub && b->name_hub)
     o = strcmp(a->name_hub, b->name_hub);
   if(!o)
     o = a > b ? 1 : -1;

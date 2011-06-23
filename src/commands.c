@@ -995,7 +995,7 @@ static void c_whois(char *args) {
     h = tab->hub->tab;
     if(args[0])
       u = args;
-    else if(tab->msg_user) {
+    else if(!tab->hub->adc && tab->msg_user) {
       utf8 = FALSE;
       u = tab->msg_user->name_hub;
     } else

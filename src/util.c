@@ -846,7 +846,7 @@ void adc_parse(const char *str, struct adc_cmd *c, GError **err) {
       g_set_error_literal(err, 1, 0, "Invalid characters after argument.");
       return;
     }
-    off += off[4] ? 4 : 5;
+    off += off[4] ? 5 : 4;
   }
 
   // type = D|E, next argument must be the destination SID
@@ -860,7 +860,7 @@ void adc_parse(const char *str, struct adc_cmd *c, GError **err) {
       g_set_error_literal(err, 1, 0, "Invalid characters after argument.");
       return;
     }
-    off += off[4] ? 4 : 5;
+    off += off[4] ? 5 : 4;
   }
 
   // type = F, next argument must be the feature list (which we'll simply ignore)
@@ -870,13 +870,13 @@ void adc_parse(const char *str, struct adc_cmd *c, GError **err) {
       g_set_error_literal(err, 1, 0, "Message too short");
       return;
     }
-    off += off[l] ? l : l+1;
+    off += off[l] ? l+1 : l;
   }
 
   // parse the rest of the arguments
   char **s = g_strsplit(off, " ", 0);
-  c->argc = g_strv_length(s);
-  if(c->argc) {
+  c->argc = s ? g_strv_length(s) : 0;
+  if(s) {
     char **a = g_new0(char *, c->argc+1);
     int i;
     for(i=0; i<c->argc; i++) {
@@ -894,6 +894,19 @@ void adc_parse(const char *str, struct adc_cmd *c, GError **err) {
     c->argv = a;
   } else
     c->argv = NULL;
+}
+
+
+char *adc_getparam(char **a, char *name, char ***left) {
+  while(a && *a) {
+    if(**a && **a == name[0] && (*a)[1] == name[1]) {
+      if(left)
+        *left = a+1;
+      return *a+2;
+    }
+    a++;
+  }
+  return NULL;
 }
 
 

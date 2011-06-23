@@ -76,7 +76,7 @@ static guint64 tiger_sboxes[4][256];
 #define t4 tiger_sboxes[3]
 
 
-static void tiger_init(struct tiger_ctx *ctx) {
+void tiger_init(struct tiger_ctx *ctx) {
   ctx->length = 0;
 
   /* initialize algorithm state */
@@ -189,7 +189,7 @@ static void tiger_process_block(guint64 state[3], guint64 *block) {
 }
 
 
-static void tiger_update(struct tiger_ctx *ctx, const char *msg, size_t size) {
+void tiger_update(struct tiger_ctx *ctx, const char *msg, size_t size) {
   size_t index = (size_t)ctx->length & 63;
   size_t left;
   ctx->length += size;
@@ -227,7 +227,7 @@ static void tiger_update(struct tiger_ctx *ctx, const char *msg, size_t size) {
 }
 
 
-static void tiger_final(struct tiger_ctx *ctx, char result[24]) {
+void tiger_final(struct tiger_ctx *ctx, char result[24]) {
   unsigned index = (unsigned)ctx->length & 63;
   guint64 *msg64 = (guint64 *)ctx->message;
 

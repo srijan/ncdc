@@ -47,18 +47,21 @@ struct hub_user {
 
 
 struct hub {
+  gboolean adc; // TRUE = ADC, FALSE = NMDC protocol.
+  int state;    // ADC_S_* (ADC only)
   struct ui_tab *tab; // to get name (for config) and for logging & setting of title
   struct net *net;
-  // nick as used in this connection, NULL when no $ValidateNick has been sent yet
-  char *nick_hub; // in hub encoding
+  // nick as used in this connection, NULL when not sent yet
+  char *nick_hub; // in hub encoding (NMDC only)
   char *nick;     // UTF-8
+  int sid;        // session ID (ADC only)
   // TRUE is the above nick has also been validated (and we're properly logged in)
   gboolean nick_valid;
-  gboolean isreg; // whether we used a $MyPass to login
-  gboolean isop;  // whether we're in the $OpList or not
+  gboolean isreg; // whether we used a password to login
+  gboolean isop;  // whether we're an OP or not
   char *hubname;  // UTF-8, or NULL when unknown
-  char *hubname_hub; // in hub encoding
-  // user list, key = username (in hub encoding!), value = struct hub_user *
+  char *hubname_hub; // in hub encoding (NMDC only)
+  // user list, key = username (in hub encoding for NMDC), value = struct hub_user *
   GHashTable *users;
   // list of users who have been granted a slot. key = username (in hub
   // encoding), value = (void *)1. A user will stay in this table for as long
@@ -72,7 +75,7 @@ struct hub {
   guint myinfo_timer;
   // reconnect timer (30 sec.)
   guint reconnect_timer;
-  // last MyINFO string
+  // last MyINFO or BINF string
   char *myinfo_last;
   // whether we've fetched the complete user list (and their $MyINFO's)
   gboolean received_nicklist; // true on first $NickList or $OpList
@@ -211,13 +214,13 @@ void hub_grant(struct hub *hub, struct hub_user *u) {
 }
 
 
+// TODO: incremental INF's
 void hub_send_myinfo(struct hub *hub) {
-  if(!hub->nick_valid)
+  if(!hub->nick_valid && !hub->adc)
     return;
-  char *tmp;
-  tmp = conf_hub_get(string, hub->tab->name, "description"); char *desc = nmdc_encode_and_escape(hub, tmp?tmp:""); g_free(tmp);
-  tmp = conf_hub_get(string, hub->tab->name, "connection");  char *conn = nmdc_encode_and_escape(hub, tmp?tmp:""); g_free(tmp);
-  tmp = conf_hub_get(string, hub->tab->name, "email");       char *mail = nmdc_encode_and_escape(hub, tmp?tmp:""); g_free(tmp);
+  char *desc = conf_hub_get(string, hub->tab->name, "description");
+  char *conn = conf_hub_get(string, hub->tab->name, "connection");
+  char *mail = conf_hub_get(string, hub->tab->name, "email");
 
   int h_normal = 0, h_reg = 0, h_op = 0;
   GList *n;
@@ -233,19 +236,48 @@ void hub_send_myinfo(struct hub *hub) {
       h_normal++;
   }
 
-  tmp = g_strdup_printf("$MyINFO $ALL %s %s<ncdc V:%s,M:%c,H:%d/%d/%d,S:%d>$ $%s\01$%s$%"G_GUINT64_FORMAT"$",
-    hub->nick_hub, desc, VERSION, cc_listen ? 'A' : 'P', h_normal, h_reg, h_op, conf_slots(), conn, mail, fl_local_list_size);
+  char *nfo;
+  if(hub->adc) {
+    GString *cmd = adc_generate('B', ADCC_INF, hub->sid, 0);
+    // only send CID and PID in the identify stage
+    if(hub->state == ADC_S_IDENTIFY) {
+      char *cid = g_key_file_get_string(conf_file, "global", "cid", NULL);
+      char *pid = g_key_file_get_string(conf_file, "global", "pid", NULL);
+      g_string_append_printf(cmd, " ID%s PD%s", cid, pid);
+      g_free(cid);
+      g_free(pid);
+    }
+    g_string_append_printf(cmd, " VEncdc\\s%s I40.0.0.0 SL%d HN%d HR%d HO%d",
+      VERSION, conf_slots(), h_normal, h_reg, h_op);
+    if(desc)
+      adc_append(cmd, "DE", desc);
+    if(mail)
+      adc_append(cmd, "EM", mail);
+    adc_append(cmd, "NI", hub->nick);
+    nfo = g_string_free(cmd, FALSE);
+  } else {
+    char *ndesc = nmdc_encode_and_escape(hub, desc?desc:"");
+    char *nconn = nmdc_encode_and_escape(hub, conn?conn:"");
+    char *nmail = nmdc_encode_and_escape(hub, mail?mail:"");
+    nfo = g_strdup_printf("$MyINFO $ALL %s %s<ncdc V:%s,M:%c,H:%d/%d/%d,S:%d>$ $%s\01$%s$%"G_GUINT64_FORMAT"$",
+      hub->nick_hub, ndesc, VERSION, cc_listen ? 'A' : 'P', h_normal, h_reg, h_op,
+      conf_slots(), nconn, nmail, fl_local_list_size);
+    g_free(ndesc);
+    g_free(nconn);
+    g_free(nmail);
+  }
+
   g_free(desc);
   g_free(conn);
   g_free(mail);
 
-  // send the MyINFO command only when it's different from the last one we sent
-  if(!hub->myinfo_last || strcmp(tmp, hub->myinfo_last) != 0) {
+  // send the command only when it's different from the last one we sent
+  if(!hub->myinfo_last || strcmp(nfo, hub->myinfo_last) != 0) {
     g_free(hub->myinfo_last);
-    hub->myinfo_last = tmp;
-    net_send(hub->net, tmp);
+    hub->myinfo_last = nfo;
+    net_send(hub->net, nfo);
   } else
-    g_free(tmp);
+    g_free(nfo);
 }
 
 
@@ -269,7 +301,70 @@ void hub_msg(struct hub *hub, struct hub_user *user, const char *str) {
 }
 
 
-static void handle_search(struct hub *hub, char *from, int size_m, guint64 size, int type, char *query) {
+static void adc_handle(struct hub *hub, char *msg) {
+  struct adc_cmd cmd;
+  GError *err = NULL;
+
+  adc_parse(msg, &cmd, &err);
+  if(err) {
+    g_warning("ADC parse error from %s: %s. --> %s", net_remoteaddr(hub->net), err->message, msg);
+    g_error_free(err);
+    return;
+  }
+
+  switch(cmd.cmd) {
+  case ADCC_SID:
+    if(hub->state != ADC_S_PROTOCOL || cmd.type != 'I' || cmd.argc != 1 || strlen(cmd.argv[0]) != 4)
+      g_warning("Invalid message from %s: %s", net_remoteaddr(hub->net), msg);
+    else {
+      hub->sid = ADC_DFCC(cmd.argv[0]);
+      hub->state = ADC_S_IDENTIFY;
+      hub->nick = conf_hub_get(string, hub->tab->name, "nick");
+      hub_send_myinfo(hub);
+    }
+    break;
+
+  case ADCC_SUP:
+    // TODO: do something with it.
+    // For C-C connections, this enables the IDENTIFY state, but for hubs it's the SID command that does this.
+    break;
+
+  case ADCC_INF:
+    if(cmd.type == 'I') {
+      // TODO: set hubname
+      if(hub->state == ADC_S_IDENTIFY || hub->state == ADC_S_VERIFY) {
+        hub->state = ADC_S_NORMAL;
+        hub->nick_valid = TRUE;
+      }
+    }
+    // TODO: parse BINF's
+    break;
+
+  case ADCC_STA:
+    if(cmd.argc < 2 || strlen(cmd.argv[0]) != 3)
+      g_warning("Invalid message from %s: %s", net_remoteaddr(hub->net), msg);
+    else {
+      int code = (cmd.argv[0][1]-'0')*10 + (cmd.argv[0][2]-'0');
+      if(!code)
+        ui_m(hub->tab, 0, cmd.argv[1]);
+      if(cmd.argv[0][1] == '1')
+        g_message("ADC Error (recoverable): %d %s", code, cmd.argv[1]);
+      if(cmd.argv[0][1] == '2') {
+        g_warning("ADC Error (fatal): %d %s", code, cmd.argv[1]);
+        hub_disconnect(hub, FALSE); // TODO: whether we should reconnect or not depends on the error code
+      }
+    }
+    break;
+
+  default:
+    g_message("Unknown command from %s: %s", net_remoteaddr(hub->net), msg);
+  }
+
+  g_strfreev(cmd.argv);
+}
+
+
+static void nmdc_search(struct hub *hub, char *from, int size_m, guint64 size, int type, char *query) {
   static char *exts[][10] = { { },
     { "mp3", "mp2", "wav", "au", "rm", "mid", "sm" },
     { "zip", "arj", "rar", "lzh", "gz", "z", "arc", "pak" },
@@ -355,8 +450,7 @@ static void handle_search(struct hub *hub, char *from, int size_m, guint64 size,
 }
 
 
-static void handle_cmd(struct net *n, char *cmd) {
-  struct hub *hub = n->handle;
+static void nmdc_handle(struct hub *hub, char *cmd) {
   GMatchInfo *nfo;
 
   // create regexes (declared statically, allocated/compiled on first call)
@@ -579,7 +673,7 @@ static void handle_cmd(struct net *n, char *cmd) {
     char *size = g_match_info_fetch(nfo, 4);
     char *type = g_match_info_fetch(nfo, 5);
     char *query = g_match_info_fetch(nfo, 6);
-    handle_search(hub, from, sizerestrict[0] == 'F' ? 0 : ismax[0] == 'T' ? -1 : 1, g_ascii_strtoull(size, NULL, 10), type[0]-'0', query);
+    nmdc_search(hub, from, sizerestrict[0] == 'F' ? 0 : ismax[0] == 'T' ? -1 : 1, g_ascii_strtoull(size, NULL, 10), type[0]-'0', query);
     g_free(from);
     g_free(sizerestrict);
     g_free(ismax);
@@ -633,6 +727,15 @@ static gboolean reconnect_timer(gpointer dat) {
 }
 
 
+static void handle_cmd(struct net *n, char *cmd) {
+  struct hub *hub = n->handle;
+  if(hub->adc)
+    adc_handle(hub, cmd);
+  else
+    nmdc_handle(hub, cmd);
+}
+
+
 static void handle_error(struct net *n, int action, GError *err) {
   struct hub *hub = n->handle;
 
@@ -658,6 +761,7 @@ static void handle_error(struct net *n, int action, GError *err) {
 
 struct hub *hub_create(struct ui_tab *tab) {
   struct hub *hub = g_new0(struct hub, 1);
+  // actual separator is set in handle_connect()
   hub->net = net_create('|', hub, TRUE, handle_cmd, handle_error);
   hub->tab = tab;
   hub->users = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, user_free);
@@ -670,6 +774,12 @@ struct hub *hub_create(struct ui_tab *tab) {
 static void handle_connect(struct net *n) {
   struct hub *hub = n->handle;
   ui_mf(hub->tab, 0, "Connected to %s.", net_remoteaddr(n));
+  // we can safely change the separator here, since command processing only
+  // starts *after* this callback.
+  hub->net->eom[0] = hub->adc ? '\n' : '|';
+
+  if(hub->adc)
+    net_send(hub->net, "HSUP ADBASE ADTIGR");
 }
 
 
@@ -681,8 +791,13 @@ void hub_connect(struct hub *hub) {
   // ncdc versions saved it simply as "hostname:port" or even "hostname", so we
   // need to handle both. No protocol indicator is assumed to be NMDC. No port
   // is assumed to indicate 411.
+  hub->adc = FALSE;
   if(strncmp(addr, "dchub://", 8) == 0)
     addr += 8;
+  else if(strncmp(addr, "adc://", 6) == 0) {
+    addr += 6;
+    hub->adc = TRUE;
+  }
   if(addr[strlen(addr)-1] == '/')
     addr[strlen(addr)-1] = 0;
 
@@ -707,7 +822,7 @@ void hub_disconnect(struct hub *hub, gboolean recon) {
   g_free(hub->myinfo_last); hub->myinfo_last = NULL;
   hub->nick_valid = hub->isreg = hub->isop = hub->received_nicklist =
     hub->joincomplete =  hub->sharecount = hub->sharesize =
-    hub->supports_nogetinfo = 0;
+    hub->supports_nogetinfo = hub->state = 0;
   if(!recon) {
     ui_m(hub->tab, 0, "Disconnected.");
     if(hub->reconnect_timer) {

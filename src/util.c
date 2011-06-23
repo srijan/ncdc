@@ -115,18 +115,18 @@ static void generate_pid() {
   g_rand_free(r);
 
   // now that we have two random integers, hash them to generate our PID
-  static struct tth_ctx tth; // better not allocate this on the stack
+  static struct tiger_ctx t; // better not allocate this on the stack
   char pid[24];
-  tth_init(&tth, 8);
-  tth_update(&tth, (char *)&r1, 4);
-  tth_update(&tth, (char *)&r2, 4);
-  tth_final(&tth, pid);
+  tiger_init(&t);
+  tiger_update(&t, (char *)&r1, 4);
+  tiger_update(&t, (char *)&r2, 4);
+  tiger_final(&t, pid);
 
   // now hash the PID so we have our CID
   char cid[24];
-  tth_init(&tth, 24);
-  tth_update(&tth, pid, 24);
-  tth_final(&tth, cid);
+  tiger_init(&t);
+  tiger_update(&t, pid, 24);
+  tiger_final(&t, cid);
 
   // encode and save
   char enc[40] = {};
@@ -746,5 +746,186 @@ char *adc_escape(const char *str) {
     str++;
   }
   return g_string_free(dest, FALSE);
+}
+
+
+#if INTERFACE
+
+// Only writes to the first 4 bytes of str, does not add a padding \0.
+#define ADC_EFCC(sid, str) do {\
+    (str)[0] = ((sid)>> 0) & 0xFF;\
+    (str)[1] = ((sid)>> 8) & 0xFF;\
+    (str)[2] = ((sid)>>16) & 0xFF;\
+    (str)[3] = ((sid)>>24) & 0xFF;\
+  } while(0)
+
+// and the reverse
+#define ADC_DFCC(str) ((str)[0] + ((str)[1]<<8) + ((str)[2]<<16) + ((str)[3]<<24))
+
+
+#define ADC_TOCMDV(a, b, c) ((a) + ((b)<<8) + ((c)<<16))
+#define ADC_TOCMD(str) ADC_TOCMDV((str)[0], (str)[1], (str)[2])
+
+enum adc_commands {
+#define C(n, a, b, c) ADCC_##n = ADC_TOCMDV(a,b,c)
+  // Base commands (copied from DC++ / AdcCommand.h)
+  C(SUP, 'S','U','P'), // F,T,C    - PROTOCOL, NORMAL
+  C(STA, 'S','T','A'), // F,T,C,U  - All
+  C(INF, 'I','N','F'), // F,T,C    - IDENTIFY, NORMAL
+  C(MSG, 'M','S','G'), // F,T      - NORMAL
+  C(SCH, 'S','C','H'), // F,T,C    - NORMAL (can be in U, but is discouraged)
+  C(RES, 'R','E','S'), // F,T,C,U  - NORMAL
+  C(CTM, 'C','T','M'), // F,T      - NORMAL
+  C(RCM, 'R','C','M'), // F,T      - NORMAL
+  C(GPA, 'G','P','A'), // F        - VERIFY
+  C(PAS, 'P','A','S'), // T        - VERIFY
+  C(QUI, 'Q','U','I'), // F        - IDENTIFY, VERIFY, NORMAL
+  C(GET, 'G','E','T'), // C        - NORMAL (extensions may use in it F/T as well)
+  C(GFI, 'G','F','I'), // C        - NORMAL
+  C(SND, 'S','N','D'), // C        - NORMAL (extensions may use it in F/T as well)
+  C(SID, 'S','I','D')  // F        - PROTOCOL
+#undef C
+};
+
+
+struct adc_cmd {
+  char type;  // B|C|D|E|F|H|I|U
+  int cmd;    // ADCC_*, but can also be something else. Unhandled commands should be ignored anyway.
+  int source; // Only when type = B|D|E|F
+  int dest;   // Only when type = D|E
+  char **argv;
+  char argc;
+};
+
+
+// ADC Protocol states.
+#define ADC_S_PROTOCOL 0
+#define ADC_S_IDENTIFY 1
+#define ADC_S_VERIFY   2
+#define ADC_S_NORMAL   3
+#define ADC_S_DATA     4
+
+#endif
+
+
+void adc_parse(const char *str, struct adc_cmd *c, GError **err) {
+  if(!g_utf8_validate(str, -1, NULL)) {
+    g_set_error_literal(err, 1, 0, "Invalid encoding.");
+    return;
+  }
+
+  if(strlen(str) < 4) {
+    g_set_error_literal(err, 1, 0, "Message too short.");
+    return;
+  }
+
+  if(*str != 'B' && *str != 'C' && *str != 'D' && *str != 'E' && *str != 'F' && *str != 'H' && *str != 'I' && *str != 'U') {
+    g_set_error_literal(err, 1, 0, "Invalid ADC type");
+    return;
+  }
+  c->type = *str;
+  c->cmd = ADC_TOCMD(str+1);
+
+  const char *off = str+4;
+  if(off[0] && off[0] != ' ') {
+    g_set_error_literal(err, 1, 0, "Invalid characters after command.");
+    return;
+  }
+  off++;
+
+  // type = U, first argument is source CID. But we don't handle that here.
+
+  // type = B|D|E|F, first argument must be the source SID
+  if(c->type == 'B' || c->type == 'D' || c->type == 'E' || c->type == 'F') {
+    if(strlen(off) < 4) {
+      g_set_error_literal(err, 1, 0, "Message too short");
+      return;
+    }
+    c->source = ADC_DFCC(off);
+    if(off[4] && off[4] != ' ') {
+      g_set_error_literal(err, 1, 0, "Invalid characters after argument.");
+      return;
+    }
+    off += off[4] ? 4 : 5;
+  }
+
+  // type = D|E, next argument must be the destination SID
+  if(c->type == 'D' || c->type == 'E') {
+    if(strlen(off) < 4) {
+      g_set_error_literal(err, 1, 0, "Message too short");
+      return;
+    }
+    c->dest = ADC_DFCC(off);
+    if(off[4] && off[4] != ' ') {
+      g_set_error_literal(err, 1, 0, "Invalid characters after argument.");
+      return;
+    }
+    off += off[4] ? 4 : 5;
+  }
+
+  // type = F, next argument must be the feature list (which we'll simply ignore)
+  if(c->type == 'F') {
+    int l = index(off, ' ') ? index(off, ' ')-off : strlen(off);
+    if((l % 5) != 0) {
+      g_set_error_literal(err, 1, 0, "Message too short");
+      return;
+    }
+    off += off[l] ? l : l+1;
+  }
+
+  // parse the rest of the arguments
+  char **s = g_strsplit(off, " ", 0);
+  c->argc = g_strv_length(s);
+  if(c->argc) {
+    char **a = g_new0(char *, c->argc+1);
+    int i;
+    for(i=0; i<c->argc; i++) {
+      a[i] = adc_unescape(s[i]);
+      if(!a[i]) {
+        g_set_error_literal(err, 1, 0, "Invalid escape in argument.");
+        break;
+      }
+    }
+    g_strfreev(s);
+    if(i < c->argc) {
+      g_strfreev(a);
+      return;
+    }
+    c->argv = a;
+  } else
+    c->argv = NULL;
+}
+
+
+GString *adc_generate(char type, int cmd, int source, int dest) {
+  GString *c = g_string_sized_new(100);
+  g_string_append_c(c, type);
+  char r[5] = {};
+  ADC_EFCC(cmd, r);
+  g_string_append(c, r);
+
+  if(source) {
+    g_string_append_c(c, ' ');
+    ADC_EFCC(source, r);
+    g_string_append(c, r);
+  }
+
+  if(dest) {
+    g_string_append_c(c, ' ');
+    ADC_EFCC(dest, r);
+    g_string_append(c, r);
+  }
+
+  return c;
+}
+
+
+void adc_append(GString *c, char *name, char *arg) {
+  g_string_append_c(c, ' ');
+  if(name)
+    g_string_append(c, name);
+  char *enc = adc_escape(arg);
+  g_string_append(c, enc);
+  g_free(enc);
 }
 

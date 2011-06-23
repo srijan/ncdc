@@ -676,7 +676,7 @@ static void c_connect_set_hubaddr(char *addr) {
   // make sure it's a full address in the form of "dchub://hostname:port/"
   // (doesn't check for validness)
   GString *a = g_string_new(addr);
-  if(strncmp(a->str, "dchub://", 8) != 0)
+  if(strncmp(a->str, "dchub://", 8) != 0 && strncmp(a->str, "adc://", 6) != 0)
     g_string_prepend(a, "dchub://");
   if(a->str[a->len-1] != '/')
     g_string_append_c(a, '/');

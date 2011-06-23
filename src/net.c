@@ -360,7 +360,6 @@ static void handle_setconn(struct net *n, GSocketConnection *conn) {
   g_socket_set_timeout(n->sock, 0);
 #endif
   time(&(n->timeout_last));
-  n->timeout_src = g_timeout_add_seconds(5, handle_timer, n);
   if(n->keepalive)
     g_socket_set_keepalive(n->sock, TRUE);
   g_socket_set_blocking(n->sock, FALSE);
@@ -457,6 +456,7 @@ struct net *net_create(char term, void *han, gboolean keepalive, void (*rfunc)(s
   n->keepalive = keepalive;
   n->cb_rcv = rfunc;
   n->cb_err = errfunc;
+  n->timeout_src = g_timeout_add_seconds(5, handle_timer, n);
   return n;
 }
 

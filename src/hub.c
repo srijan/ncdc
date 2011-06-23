@@ -81,11 +81,14 @@ struct hub {
   // what we and the hub support
   gboolean supports_nogetinfo;
   // MyINFO send timer (event loop source id)
-  guint myinfo_timer;
+  guint nfo_timer;
   // reconnect timer (30 sec.)
   guint reconnect_timer;
-  // last MyINFO or BINF string
-  char *myinfo_last;
+  // last info we sent to the hub
+  char *nfo_desc, *nfo_conn, *nfo_mail;
+  unsigned char nfo_slots, nfo_h_norm, nfo_h_reg, nfo_h_op;
+  guint64 nfo_share;
+  unsigned short nfo_active;
   // whether we've fetched the complete user list (and their $MyINFO's)
   gboolean received_first; // true if one precondition for joincomplete is satisfied.
   gboolean joincomplete;
@@ -380,15 +383,21 @@ void hub_grant(struct hub *hub, struct hub_user *u) {
 }
 
 
-// TODO: incremental INF's
-void hub_send_myinfo(struct hub *hub) {
-  if(!hub->nick_valid && !hub->adc)
-    return;
-  char *desc = conf_hub_get(string, hub->tab->name, "description");
-  char *conn = conf_hub_get(string, hub->tab->name, "connection");
-  char *mail = conf_hub_get(string, hub->tab->name, "email");
+#define streq(a) ((!a && !hub->nfo_##a) || (a && hub->nfo_##a && strcmp(a, hub->nfo_##a) == 0))
+#define eq(a) (a == hub->nfo_##a)
 
-  int h_normal = 0, h_reg = 0, h_op = 0;
+void hub_send_nfo(struct hub *hub) {
+  // get info, to be compared with hub->nfo_
+  char *desc, *conn, *mail;
+  unsigned char slots, h_norm, h_reg, h_op;
+  guint64 share;
+  unsigned short active;
+
+  desc = conf_hub_get(string, hub->tab->name, "description");
+  conn = conf_hub_get(string, hub->tab->name, "connection");
+  mail = conf_hub_get(string, hub->tab->name, "email");
+
+  h_norm = h_reg = h_op = 0;
   GList *n;
   for(n=ui_tabs; n; n=n->next) {
     struct ui_tab *t = n->data;
@@ -399,53 +408,82 @@ void hub_send_myinfo(struct hub *hub) {
     else if(t->hub->isreg)
       h_reg++;
     else if(t->hub->nick_valid)
-      h_normal++;
+      h_norm++;
+  }
+  if(!hub->nick_valid)
+    h_norm++;
+  slots = conf_slots();
+  active = cc_listen ? cc_listen_port : 0;
+  share = fl_local_list_size;
+
+  // check whether we need to make any further effort
+  if(hub->nick_valid && streq(desc) && streq(conn) && streq(mail)
+      && eq(slots) && eq(h_norm) && eq(h_reg) && eq(h_op) && eq(share) && eq(active)) {
+    g_free(desc);
+    g_free(conn);
+    g_free(mail);
+    return;
   }
 
   char *nfo;
-  if(hub->adc) {
+  // ADC
+  if(hub->adc) { // TODO: US,DS,SS,SF, SU=TCP4 on active
     GString *cmd = adc_generate('B', ADCC_INF, hub->sid, 0);
-    // only send CID and PID in the identify stage
-    if(hub->state == ADC_S_IDENTIFY) {
+    // send non-changing stuff in the IDENTIFY state
+    gboolean f = hub->state == ADC_S_IDENTIFY;
+    if(f) {
       char *cid = g_key_file_get_string(conf_file, "global", "cid", NULL);
       char *pid = g_key_file_get_string(conf_file, "global", "pid", NULL);
-      g_string_append_printf(cmd, " ID%s PD%s", cid, pid);
+      g_string_append_printf(cmd, " ID%s PD%s I40.0.0.0 VEncdc\\s%s", cid, pid, VERSION);
       g_free(cid);
       g_free(pid);
+      adc_append(cmd, "NI", hub->nick);
     }
-    // TODO: SS, 'TCP4' on active
-    g_string_append_printf(cmd, " VEncdc\\s%s I40.0.0.0 SL%d HN%d HR%d HO%d",
-      VERSION, conf_slots(), h_normal, h_reg, h_op);
-    if(desc)
-      adc_append(cmd, "DE", desc);
-    if(mail)
-      adc_append(cmd, "EM", mail);
-    adc_append(cmd, "NI", hub->nick);
+    if(f || !eq(slots))
+      g_string_append_printf(cmd, " SL%d", slots);
+    if(f || !eq(h_norm))
+      g_string_append_printf(cmd, " HN%d", h_norm);
+    if(f || !eq(h_reg))
+      g_string_append_printf(cmd, " HR%d", h_reg);
+    if(f || !eq(h_op))
+      g_string_append_printf(cmd, " HO%d", h_op);
+    if(f || !streq(desc))
+      adc_append(cmd, "DE", desc?desc:"");
+    if(f || !streq(mail))
+      adc_append(cmd, "EM", mail?mail:"");
     nfo = g_string_free(cmd, FALSE);
+
+  // NMDC
   } else {
     char *ndesc = nmdc_encode_and_escape(hub, desc?desc:"");
     char *nconn = nmdc_encode_and_escape(hub, conn?conn:"");
     char *nmail = nmdc_encode_and_escape(hub, mail?mail:"");
     nfo = g_strdup_printf("$MyINFO $ALL %s %s<ncdc V:%s,M:%c,H:%d/%d/%d,S:%d>$ $%s\01$%s$%"G_GUINT64_FORMAT"$",
-      hub->nick_hub, ndesc, VERSION, cc_listen ? 'A' : 'P', h_normal, h_reg, h_op,
-      conf_slots(), nconn, nmail, fl_local_list_size);
+      hub->nick_hub, ndesc, VERSION, active ? 'A' : 'P', h_norm, h_reg, h_op,
+      slots, nconn, nmail, share);
     g_free(ndesc);
     g_free(nconn);
     g_free(nmail);
   }
 
-  g_free(desc);
-  g_free(conn);
-  g_free(mail);
+  // send
+  net_send(hub->net, nfo);
+  g_free(nfo);
 
-  // send the command only when it's different from the last one we sent
-  if(!hub->myinfo_last || strcmp(nfo, hub->myinfo_last) != 0) {
-    g_free(hub->myinfo_last);
-    hub->myinfo_last = nfo;
-    net_send(hub->net, nfo);
-  } else
-    g_free(nfo);
+  // update
+  g_free(hub->nfo_desc); hub->nfo_desc = desc;
+  g_free(hub->nfo_conn); hub->nfo_conn = conn;
+  g_free(hub->nfo_mail); hub->nfo_mail = mail;
+  hub->nfo_slots = slots;
+  hub->nfo_h_norm = h_norm;
+  hub->nfo_h_reg = h_reg;
+  hub->nfo_h_op = h_op;
+  hub->nfo_share = share;
+  hub->nfo_active = active;
 }
+
+#undef eq
+#undef streq
 
 
 void hub_say(struct hub *hub, const char *str) {
@@ -490,7 +528,7 @@ static void adc_handle(struct hub *hub, char *msg) {
       hub->sid = ADC_DFCC(cmd.argv[0]);
       hub->state = ADC_S_IDENTIFY;
       hub->nick = conf_hub_get(string, hub->tab->name, "nick");
-      hub_send_myinfo(hub);
+      hub_send_nfo(hub);
     }
     break;
 
@@ -722,10 +760,10 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
       // just ignore the second one
       if(!hub->nick_valid) {
         ui_m(hub->tab, 0, "Nick validated.");
-        hub->nick_valid = TRUE;
         net_send(hub->net, "$Version 1,0091");
-        hub_send_myinfo(hub);
+        hub_send_nfo(hub);
         net_send(hub->net, "$GetNickList");
+        hub->nick_valid = TRUE;
       }
     } else {
       struct hub_user *u = user_add(hub, nick);
@@ -933,8 +971,8 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
 }
 
 
-static gboolean check_myinfo(gpointer data) {
-  hub_send_myinfo(data);
+static gboolean check_nfo(gpointer data) {
+  hub_send_nfo(data);
   return TRUE;
 }
 
@@ -986,7 +1024,7 @@ struct hub *hub_create(struct ui_tab *tab) {
   hub->users = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, user_free);
   hub->grants = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
   hub->sessions = g_hash_table_new(g_direct_hash, g_direct_equal);
-  hub->myinfo_timer = g_timeout_add_seconds(5*60, check_myinfo, hub);
+  hub->nfo_timer = g_timeout_add_seconds(5*60, check_nfo, hub);
   return hub;
 }
 
@@ -1040,7 +1078,6 @@ void hub_disconnect(struct hub *hub, gboolean recon) {
   g_free(hub->nick_hub); hub->nick_hub = NULL;
   g_free(hub->hubname);  hub->hubname = NULL;
   g_free(hub->hubname_hub);  hub->hubname_hub = NULL;
-  g_free(hub->myinfo_last); hub->myinfo_last = NULL;
   hub->nick_valid = hub->isreg = hub->isop = hub->received_first =
     hub->joincomplete =  hub->sharecount = hub->sharesize =
     hub->supports_nogetinfo = hub->state = 0;
@@ -1061,10 +1098,13 @@ void hub_free(struct hub *hub) {
   cc_remove_hub(hub);
   hub_disconnect(hub, FALSE);
   net_unref(hub->net);
+  g_free(hub->nfo_desc);
+  g_free(hub->nfo_conn);
+  g_free(hub->nfo_mail);
   g_hash_table_unref(hub->users);
   g_hash_table_unref(hub->sessions);
   g_hash_table_unref(hub->grants);
-  g_source_remove(hub->myinfo_timer);
+  g_source_remove(hub->nfo_timer);
   g_free(hub);
 }
 

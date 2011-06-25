@@ -91,6 +91,8 @@ struct net {
   // be freed. Will not be called in the case of G_IO_ERROR_CANCELLED. All
   // errors are fatal, and net_disconnect() should be called in the callback.
   void (*cb_err)(struct net *, int, GError *);
+  // special hook that is called when data has arrived but before it is processed.
+  void (*cb_datain)(struct net *, char *data);
   // message termination character
   char eom[2];
   // Whether this connection should be kept alive or not. When true, keepalive
@@ -177,10 +179,6 @@ static void consume_input(struct net *n) {
   char *sep;
   gssize consumed = 0;
 
-  // we need to be able to access the net object after calling a callback that
-  // may do an unref().
-  net_ref(n);
-
   while(n->conn && (sep = strchr(str, n->eom[0]))) {
     consumed += 1 + sep - str;
     *sep = 0;
@@ -191,7 +189,6 @@ static void consume_input(struct net *n) {
   }
   if(consumed)
     g_string_erase(n->in, 0, consumed);
-  net_unref(n);
 }
 
 
@@ -223,6 +220,10 @@ static gboolean handle_input(GSocket *sock, GIOCondition cond, gpointer dat) {
   struct net *n = dat;
   time(&(n->timeout_last));
 
+  // we need to be able to access the net object after calling callbacks that
+  // may do an unref().
+  net_ref(n);
+
   // make sure enough space is available in the input buffer (ugly hack, GString has no simple grow function)
   if(n->in->allocated_len - n->in->len < 1024) {
     // don't allow the buffer to grow beyond 1MB
@@ -244,7 +245,10 @@ static gboolean handle_input(GSocket *sock, GIOCondition cond, gpointer dat) {
   ratecalc_add(n->rate_in, read);
   n->in->len += read;
   n->in->str[n->in->len] = 0;
+  if(n->cb_datain)
+    n->cb_datain(n, n->in->str + (n->in->len - read));
   consume_input(n);
+  net_unref(n);
   return TRUE;
 }
 

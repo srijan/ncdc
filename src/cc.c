@@ -38,11 +38,15 @@
 
 struct cc_expect {
   struct hub *hub;
-  char *nick; // hub encoding
+  gboolean adc;
+  char *nick;   // NMDC, hub encoding
+  char cid[24]; // ADC
+  char *token;  // ADC
+  int sid;      // ADC (prevents a user-by-CID lookup table, but does not allow a user to reconnect the hub while connecting here)
   time_t added;
 };
 
-#define cc_expect_add(h, n) do {\
+#define cc_expect_nmdc_add(h, n) do {\
     struct cc_expect *e = g_slice_new0(struct cc_expect);\
     e->hub = h;\
     e->nick = g_strdup(n);\
@@ -50,9 +54,28 @@ struct cc_expect {
     g_queue_push_tail(cc_expected, e);\
   } while(0)
 
+#define cc_expect_adc_add(h, c, t, s) do {\
+    struct cc_expect *e = g_slice_new0(struct cc_expect);\
+    e->adc = TRUE;\
+    e->hub = h;\
+    memcpy(e->cid, c, 24);\
+    e->token = g_strdup(t);\
+    e->sid = s;\
+    time(&(e->added));\
+    g_queue_push_tail(cc_expected, e);\
+  } while(0)
+
 #endif
 
 GQueue *cc_expected;
+
+
+#define cc_expect_rm(e) do {\
+    g_free(e->token);\
+    g_free(e->nick);\
+    g_slice_free(struct cc_expect, e);\
+    g_queue_delete_link(cc_expected, n);\
+  } while(0)
 
 
 gboolean cc_expect_check(gpointer data) {
@@ -63,9 +86,7 @@ gboolean cc_expect_check(gpointer data) {
     struct cc_expect *e = n->data;
     if(e->added < t) {
       g_message("Expected connection from %s on %s, but received none.", e->nick, e->hub->tab->name);
-      g_free(e->nick);
-      g_slice_free(struct cc_expect, e);
-      g_queue_delete_link(cc_expected, n);
+      cc_expect_rm(e);
     } else
       break;
     n = p;
@@ -137,11 +158,8 @@ void cc_remove_hub(struct hub *hub) {
   for(n=cc_expected->head; n;) {
     p = n->next;
     struct cc_expect *e = n->data;
-    if(e->hub == hub) {
-      g_free(e->nick);
-      g_slice_free(struct cc_expect, e);
-      g_queue_delete_link(cc_expected, n);
-    }
+    if(e->hub == hub)
+      cc_expect_rm(e);
     n = p;
   }
 }
@@ -188,20 +206,29 @@ static gboolean cc_check_dupe(struct cc *cc) {
 
 
 // Figure out from which hub a connection came
-static struct hub *cc_get_hub(struct cc *cc) {
+static struct hub *cc_get_hub(struct cc *cc, int *sid) {
   GList *n;
   for(n=cc_expected->head; n; n=n->next) {
     struct cc_expect *e = n->data;
-    if(strcmp(e->nick, cc->nick_raw) == 0) {
+    // NMDC (cc->nick_raw must be known)
+    if(!cc->adc && !e->adc && strcmp(e->nick, cc->nick_raw) == 0) {
       struct hub *hub = e->hub;
-      g_free(e->nick);
-      g_slice_free(struct cc_expect, e);
-      g_queue_delete_link(cc_expected, n);
+      cc_expect_rm(e);
+      return hub;
+    }
+    // ADC (cc->cid and cc->token must be known)
+    if(cc->adc && e->adc && memcmp(cc->cid, e->cid, 24) == 0 && strcmp(cc->token, e->token) == 0) {
+      struct hub *hub = e->hub;
+      *sid = e->sid;
+      cc_expect_rm(e);
       return hub;
     }
   }
 
-  // This is a fallback, and quite an ugly one at that.
+  if(cc->adc)
+    return NULL;
+
+  // This is a fallback for NMDC, and quite an ugly one at that.
   for(n=ui_tabs; n; n=n->next) {
     struct ui_tab *t = n->data;
     if(t->type == UIT_HUB && g_hash_table_lookup(t->hub->users, cc->nick_raw)) {
@@ -377,6 +404,30 @@ static void handle_adcget(struct cc *cc, char *type, char *id, guint64 start, gi
 }
 
 
+// To be called when we know with which user and on which hub this connection is.
+static void handle_id(struct cc *cc, struct hub_user *u) {
+  cc->nick = g_strdup(u->name);
+  cc->isop = u->isop;
+  if(cc->adc)
+    memcpy(cc->cid, u->cid, 24);
+
+  // Don't allow multiple connections from the same user.
+  // Note: This is usually determined after receiving $Direction (in NMDC),
+  // since it is possible to have two connections with a single user: One for
+  // Upload and one for Download. But since we only support uploading, checking
+  // it here is enough.
+  if(cc_check_dupe(cc)) {
+    g_set_error_literal(&(cc->err), 1, 0, "too many open connections with this user");
+    cc_disconnect(cc);
+    return;
+  }
+
+  // TODO: ADC should use CIDs here...
+  if(!cc->adc)
+    cc->slot_granted = g_hash_table_lookup(cc->hub->grants, cc->nick_raw) ? TRUE : FALSE;
+}
+
+
 static void adc_handle(struct cc *cc, char *msg) {
   struct adc_cmd cmd;
   GError *err = NULL;
@@ -421,17 +472,27 @@ static void adc_handle(struct cc *cc, char *msg) {
     if(cc->state == ADC_S_IDENTIFY) {
       cc->state = ADC_S_NORMAL;
       char *id = adc_getparam(cmd.argv, "ID", NULL);
+      char *token = adc_getparam(cmd.argv, "TO", NULL);
       char cid[24];
       if(strlen(id) == 39)
         base32_decode(id, cid);
-      if(!id) {
-        g_warning("User did not sent a CID. (%s): %s", net_remoteaddr(cc->net), msg);
+      if(!id || (cc->active && !token)) {
+        g_warning("User did not sent a CID or token. (%s): %s", net_remoteaddr(cc->net), msg);
         cc_disconnect(cc);
       } else if(strlen(id) != 39 || (!cc->active && memcmp(cid, cc->cid, 24) != 0)) {
         g_warning("Incorrect CID. (%s): %s", net_remoteaddr(cc->net), msg);
         cc_disconnect(cc);
       } else if(cc->active) {
-        // TODO: if cc->active, figure out hub, validate token and get nick
+        int sid;
+        cc->token = g_strdup(token);
+        memcpy(cc->cid, cid, 24);
+        cc->hub = cc_get_hub(cc, &sid);
+        struct hub_user *u = cc->hub ? g_hash_table_lookup(cc->hub->sessions, GINT_TO_POINTER(sid)) : NULL;
+        if(!u) {
+          g_warning("Unexpected ADC connection. (%s): %s", net_remoteaddr(cc->net), msg);
+          cc_disconnect(cc);
+        } else
+          handle_id(cc, u);
       }
     }
     break;
@@ -461,30 +522,6 @@ static void adc_handle(struct cc *cc, char *msg) {
 }
 
 
-// To be called when we know with which user and on which hub this connection is.
-static void handle_id(struct cc *cc, struct hub_user *u) {
-  cc->nick = g_strdup(u->name);
-  cc->isop = u->isop;
-  if(cc->adc)
-    memcpy(cc->cid, u->cid, 24);
-
-  // Don't allow multiple connections from the same user.
-  // Note: This is usually determined after receiving $Direction (in NMDC),
-  // since it is possible to have two connections with a single user: One for
-  // Upload and one for Download. But since we only support uploading, checking
-  // it here is enough.
-  if(cc_check_dupe(cc)) {
-    g_set_error_literal(&(cc->err), 1, 0, "too many open connections with this user");
-    cc_disconnect(cc);
-    return;
-  }
-
-  // TODO: ADC should use CIDs here...
-  if(!cc->adc)
-    cc->slot_granted = g_hash_table_lookup(cc->hub->grants, cc->nick_raw) ? TRUE : FALSE;
-}
-
-
 static void nmdc_mynick(struct cc *cc, const char *nick) {
   if(cc->nick) {
     g_warning("Received a $MyNick from %s when we have already received one.", cc->nick);
@@ -494,7 +531,7 @@ static void nmdc_mynick(struct cc *cc, const char *nick) {
   cc->nick_raw = g_strdup(nick);
 
   if(!cc->hub)
-    cc->hub = cc_get_hub(cc);
+    cc->hub = cc_get_hub(cc, NULL);
   if(!cc->hub) {
     g_warning("Received incoming connection from %s (%s), who is on none of the connected hubs.", nick, net_remoteaddr(cc->net));
     cc_disconnect(cc);
@@ -679,9 +716,21 @@ void cc_adc_connect(struct cc *cc, struct hub_user *u, unsigned short port, char
 }
 
 
+static void handle_detectprotocol(struct net *net, char *dat) {
+  struct cc *cc = net->handle;
+  net->cb_datain = NULL;
+  if(dat[0] == 'C') {
+    cc->adc = TRUE;
+    net->eom[0] = '\n';
+  }
+  // otherwise, assume defaults (= NMDC)
+}
+
+
 static void cc_incoming(struct cc *cc, GSocket *sock) {
   net_setsock(cc->net, sock);
   cc->active = TRUE;
+  cc->net->cb_datain = handle_detectprotocol;
   strncpy(cc->remoteaddr, net_remoteaddr(cc->net), 23);
 }
 

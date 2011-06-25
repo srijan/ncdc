@@ -89,7 +89,7 @@ struct hub {
   char *nfo_desc, *nfo_conn, *nfo_mail;
   unsigned char nfo_slots, nfo_h_norm, nfo_h_reg, nfo_h_op;
   guint64 nfo_share;
-  unsigned short nfo_active;
+  guint32 nfo_ip4;
   // whether we've fetched the complete user list (and their $MyINFO's)
   gboolean received_first; // true if one precondition for joincomplete is satisfied.
   gboolean joincomplete;
@@ -397,7 +397,7 @@ void hub_send_nfo(struct hub *hub) {
   char *desc, *conn, *mail;
   unsigned char slots, h_norm, h_reg, h_op;
   guint64 share;
-  unsigned short active;
+  guint32 ip4;
 
   desc = conf_hub_get(string, hub->tab->name, "description");
   conn = conf_hub_get(string, hub->tab->name, "connection");
@@ -419,12 +419,12 @@ void hub_send_nfo(struct hub *hub) {
   if(!hub->nick_valid)
     h_norm++;
   slots = conf_slots();
-  active = cc_listen ? cc_listen_port : 0;
+  ip4 = cc_listen ? ip4_pack(cc_listen_ip) : 0;
   share = fl_local_list_size;
 
   // check whether we need to make any further effort
   if(hub->nick_valid && streq(desc) && streq(conn) && streq(mail)
-      && eq(slots) && eq(h_norm) && eq(h_reg) && eq(h_op) && eq(share) && eq(active)) {
+      && eq(slots) && eq(h_norm) && eq(h_reg) && eq(h_op) && eq(share) && eq(ip4)) {
     g_free(desc);
     g_free(conn);
     g_free(mail);
@@ -433,18 +433,24 @@ void hub_send_nfo(struct hub *hub) {
 
   char *nfo;
   // ADC
-  if(hub->adc) { // TODO: US,DS,SS,SF, SU=TCP4 on active
+  if(hub->adc) { // TODO: US,DS,SF
     GString *cmd = adc_generate('B', ADCC_INF, hub->sid, 0);
     // send non-changing stuff in the IDENTIFY state
     gboolean f = hub->state == ADC_S_IDENTIFY;
     if(f) {
       char *cid = g_key_file_get_string(conf_file, "global", "cid", NULL);
       char *pid = g_key_file_get_string(conf_file, "global", "pid", NULL);
-      g_string_append_printf(cmd, " ID%s PD%s I40.0.0.0 VEncdc\\s%s", cid, pid, VERSION);
+      g_string_append_printf(cmd, " ID%s PD%s VEncdc\\s%s", cid, pid, VERSION);
       g_free(cid);
       g_free(pid);
       adc_append(cmd, "NI", hub->nick);
     }
+    if(f || !eq(ip4)) {
+      g_string_append_printf(cmd, " I4%s", ip4_unpack(ip4)); // ip4 = 0 == 0.0.0.0, which is exactly what we want
+      g_string_append(cmd, ip4 ? " SUTCP4" : "SU");
+    }
+    if(f || !eq(share))
+      g_string_append_printf(cmd, " SS%"G_GUINT64_FORMAT, share);
     if(f || !eq(slots))
       g_string_append_printf(cmd, " SL%d", slots);
     if(f || !eq(h_norm))
@@ -465,7 +471,7 @@ void hub_send_nfo(struct hub *hub) {
     char *nconn = nmdc_encode_and_escape(hub, conn?conn:"");
     char *nmail = nmdc_encode_and_escape(hub, mail?mail:"");
     nfo = g_strdup_printf("$MyINFO $ALL %s %s<ncdc V:%s,M:%c,H:%d/%d/%d,S:%d>$ $%s\01$%s$%"G_GUINT64_FORMAT"$",
-      hub->nick_hub, ndesc, VERSION, active ? 'A' : 'P', h_norm, h_reg, h_op,
+      hub->nick_hub, ndesc, VERSION, ip4 ? 'A' : 'P', h_norm, h_reg, h_op,
       slots, nconn, nmail, share);
     g_free(ndesc);
     g_free(nconn);
@@ -485,7 +491,7 @@ void hub_send_nfo(struct hub *hub) {
   hub->nfo_h_reg = h_reg;
   hub->nfo_h_op = h_op;
   hub->nfo_share = share;
-  hub->nfo_active = active;
+  hub->nfo_ip4 = ip4;
 }
 
 #undef eq
@@ -620,7 +626,7 @@ static void adc_handle(struct hub *hub, char *msg) {
         hub->sharesize -= u->sharesize;
         g_hash_table_remove(hub->users, u->name);
       } else
-        g_warning("QUI for user who is not on the hub (%s): %s", net_remoteaddr(hub->net), msg);
+        g_message("QUI for user who is not on the hub (%s): %s", net_remoteaddr(hub->net), msg);
     }
     break;
 
@@ -666,6 +672,39 @@ static void adc_handle(struct hub *hub, char *msg) {
         g_string_free(r, TRUE);
       } else
         cc_adc_connect(cc_create(hub), u, port, cmd.argv[2]);
+    }
+    break;
+
+  case ADCC_RCM:
+    if(cmd.argc < 2 || cmd.type != 'D' || cmd.dest != hub->sid)
+      g_warning("Invalid message from %s: %s", net_remoteaddr(hub->net), msg);
+    else if(strcmp(cmd.argv[0], "ADC/1.0") != 0 && strcmp(cmd.argv[0], "ADC/0.10") != 0) {
+      GString *r = adc_generate('D', ADCC_STA, hub->sid, cmd.source);
+      g_string_append(r, " 141 Unknown\\protocol");
+      adc_append(r, "PR", cmd.argv[0]);
+      adc_append(r, "TO", cmd.argv[1]);
+      net_send(hub->net, r->str);
+      g_string_free(r, TRUE);
+    } else if(!cc_listen) {
+      GString *r = adc_generate('D', ADCC_STA, hub->sid, cmd.source);
+      g_string_append(r, " 142 Not\\sactive");
+      adc_append(r, "PR", cmd.argv[0]);
+      adc_append(r, "TO", cmd.argv[1]);
+      net_send(hub->net, r->str);
+      g_string_free(r, TRUE);
+    } else {
+      struct hub_user *u = g_hash_table_lookup(hub->sessions, GINT_TO_POINTER(cmd.source));
+      if(!u)
+        g_warning("RCM from user who is not on the hub (%s): %s", net_remoteaddr(hub->net), msg);
+      else {
+        GString *r = adc_generate('D', ADCC_CTM, hub->sid, cmd.source);
+        adc_append(r, NULL, cmd.argv[0]);
+        g_string_append_printf(r, " %d", cc_listen_port);
+        adc_append(r, NULL, cmd.argv[1]);
+        net_send(hub->net, r->str);
+        g_string_free(r, TRUE);
+        cc_expect_adc_add(hub, u->cid, cmd.argv[1], cmd.source);
+      }
     }
     break;
 
@@ -994,7 +1033,7 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
       g_warning("Received a $RevConnectToMe for someone else (to %s from %s)", me, other);
     else if(cc_listen) {
       net_sendf(hub->net, "$ConnectToMe %s %s:%d", other, cc_listen_ip, cc_listen_port);
-      cc_expect_add(hub, other);
+      cc_expect_nmdc_add(hub, other);
     } else
       g_message("Received a $RevConnectToMe, but we're not active.");
     g_free(me);

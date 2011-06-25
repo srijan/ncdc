@@ -83,15 +83,19 @@ gboolean cc_expect_check(gpointer data) {
 struct cc {
   struct net *net;
   struct hub *hub;
-  char *nick_raw; // hub encoding
-  char *nick;     // UTF-8
+  char *nick_raw; // (NMDC)
+  char *nick;
+  gboolean adc : 1;
   gboolean active : 1;
   gboolean isop : 1;
   gboolean slot_mini : 1;
   gboolean slot_granted : 1;
+  int state;      // (ADC)
+  char cid[24];   // (ADC);
   int timeout_src;
   time_t last_action;
   char remoteaddr[24]; // xxx.xxx.xxx.xxx:ppppp
+  char *token;    // (ADC)
   char *last_file;
   guint64 last_size;
   guint64 last_length;
@@ -165,17 +169,42 @@ int cc_slots_in_use(int *mini) {
 }
 
 
-// Get an already connected user
-static struct cc *cc_get_conn(struct hub *hub, const char *user) {
+// check whether we've got a duplicate
+static gboolean cc_get_conn(struct cc *cc) {
   GSequenceIter *i = g_sequence_get_begin_iter(cc_list);
   for(; !g_sequence_iter_is_end(i); i=g_sequence_iter_next(i)) {
     struct cc *c = g_sequence_get(i);
-    if(c->nick_raw && c->hub == hub && c->net->conn && strcmp(c->nick_raw, user) == 0)
-      return c;
+    if(c->nick_raw && c->hub == cc->hub && c->net->conn && cc != c && strcmp(c->nick_raw, cc->nick_raw) == 0)
+      return TRUE;
+  }
+  return FALSE;
+}
+
+
+// Figure out from which hub a connection came
+static struct hub *cc_get_hub(struct cc *cc) {
+  GList *n;
+  for(n=cc_expected->head; n; n=n->next) {
+    struct cc_expect *e = n->data;
+    if(strcmp(e->nick, cc->nick_raw) == 0) {
+      struct hub *hub = e->hub;
+      g_free(e->nick);
+      g_slice_free(struct cc_expect, e);
+      g_queue_delete_link(cc_expected, n);
+      return hub;
+    }
+  }
+
+  // This is a fallback, and quite an ugly one at that.
+  for(n=ui_tabs; n; n=n->next) {
+    struct ui_tab *t = n->data;
+    if(t->type == UIT_HUB && g_hash_table_lookup(t->hub->users, cc->nick_raw)) {
+      g_warning("Unexpected incoming connection from %s", cc->nick_raw);
+      return t->hub;
+    }
   }
   return NULL;
 }
-
 
 
 static gboolean request_slot(struct cc *cc, gboolean need_full) {
@@ -334,41 +363,88 @@ static void handle_adcget(struct cc *cc, char *type, char *id, guint64 start, gi
 }
 
 
+static void adc_handle(struct cc *cc, char *msg) {
+  struct adc_cmd cmd;
+  GError *err = NULL;
 
-// Figure out from which hub a connection came
-static struct hub *cc_get_hub(const char *nick) {
-  GList *n;
-  for(n=cc_expected->head; n; n=n->next) {
-    struct cc_expect *e = n->data;
-    if(strcmp(e->nick, nick) == 0) {
-      struct hub *hub = e->hub;
-      g_free(e->nick);
-      g_slice_free(struct cc_expect, e);
-      g_queue_delete_link(cc_expected, n);
-      return hub;
-    }
+  if(!msg[0])
+    return;
+
+  adc_parse(msg, &cmd, &err);
+  if(err) {
+    g_warning("ADC parse error from %s: %s. --> %s", net_remoteaddr(cc->net), err->message, msg);
+    g_error_free(err);
+    return;
   }
 
-  // This is a fallback, and quite an ugly one at that.
-  for(n=ui_tabs; n; n=n->next) {
-    struct ui_tab *t = n->data;
-    if(t->type == UIT_HUB && g_hash_table_lookup(t->hub->users, nick)) {
-      g_warning("Unexpected incoming connection from %s", nick);
-      return t->hub;
-    }
+  if(cmd.type != 'C') {
+    g_warning("Not a client command from %s: %s. --> %s", net_remoteaddr(cc->net), err->message, msg);
+    g_strfreev(cmd.argv);
+    return;
   }
-  return NULL;
+
+  switch(cmd.cmd) {
+
+  case ADCC_SUP:
+    // TODO: actually do something with the arguments.
+    if(cc->state == ADC_S_PROTOCOL) {
+      cc->state = ADC_S_IDENTIFY;
+      if(cc->active)
+        net_send(cc->net, "CSUP ADBASE ADTIGR ADBZIP");
+
+      GString *r = adc_generate('C', ADCC_INF, 0, 0);
+      char *cid = g_key_file_get_string(conf_file, "global", "cid", NULL);
+      adc_append(r, "ID", cid);
+      if(!cc->active)
+        adc_append(r, "TO", cc->token);
+      net_send(cc->net, r->str);
+      g_free(cid);
+      g_string_free(r, TRUE);
+    }
+    break;
+
+  case ADCC_INF:
+    if(cc->state == ADC_S_IDENTIFY) {
+      cc->state = ADC_S_NORMAL;
+      char *id = adc_getparam(cmd.argv, "ID", NULL);
+      char cid[24];
+      if(strlen(id) == 39)
+        base32_decode(id, cid);
+      if(!id) {
+        g_warning("User did not sent a CID. (%s): %s", net_remoteaddr(cc->net), msg);
+        cc_disconnect(cc);
+      } else if(strlen(id) != 39 || (!cc->active && memcmp(cid, cc->cid, 24) != 0)) {
+        g_warning("Incorrect CID. (%s): %s", net_remoteaddr(cc->net), msg);
+        cc_disconnect(cc);
+      } else {
+        // TODO: if cc->active, figure out hub, validate token and get nick
+        memcpy(cc->cid, cid, 24);
+      }
+    }
+    break;
+
+  case ADCC_GET:
+    // TODO
+    break;
+
+  default:
+    g_message("Unknown command from %s: %s", net_remoteaddr(cc->net), msg);
+  }
+
+  g_strfreev(cmd.argv);
 }
 
 
-static void handle_mynick(struct cc *cc, const char *nick) {
+static void nmdc_mynick(struct cc *cc, const char *nick) {
   if(cc->nick) {
     g_warning("Received a $MyNick from %s when we have already received one.", cc->nick);
     return;
   }
 
+  cc->nick_raw = g_strdup(nick);
+
   if(!cc->hub)
-    cc->hub = cc_get_hub(nick);
+    cc->hub = cc_get_hub(cc);
   if(!cc->hub) {
     g_warning("Received incoming connection from %s (%s), who is on none of the connected hubs.", nick, net_remoteaddr(cc->net));
     cc_disconnect(cc);
@@ -382,23 +458,21 @@ static void handle_mynick(struct cc *cc, const char *nick) {
     return;
   }
 
+  cc->nick = g_strdup(u->name);
+  cc->isop = u->isop;
+
   // Don't allow multiple connections from the same user.
   // Note: This is usually determined after receiving $Direction, since it is
   // possible to have two connections with a single user: One for Upload and
   // one for Download. But since we only support uploading, checking it here is
   // enough.
-  struct cc *dup = cc_get_conn(cc->hub, nick);
-
-  cc->nick_raw = g_strdup(nick);
-  cc->nick = g_strdup(u->name);
-  cc->isop = u->isop;
-  cc->slot_granted = g_hash_table_lookup(cc->hub->grants, cc->nick_raw) ? TRUE : FALSE;
-
-  if(dup) {
+  if(cc_get_conn(cc)) {
     g_set_error_literal(&(cc->err), 1, 0, "too many open connections with this user");
     cc_disconnect(cc);
     return;
   }
+
+  cc->slot_granted = g_hash_table_lookup(cc->hub->grants, cc->nick_raw) ? TRUE : FALSE;
 
   if(cc->active) {
     net_sendf(cc->net, "$MyNick %s", cc->hub->nick_hub);
@@ -407,8 +481,7 @@ static void handle_mynick(struct cc *cc, const char *nick) {
 }
 
 
-static void handle_cmd(struct net *n, char *cmd) {
-  struct cc *cc = n->handle;
+static void nmdc_handle(struct cc *cc, char *cmd) {
   GMatchInfo *nfo;
 
   time(&(cc->last_action));
@@ -427,7 +500,7 @@ static void handle_cmd(struct net *n, char *cmd) {
   // $MyNick
   if(g_regex_match(mynick, cmd, 0, &nfo)) { // 1 = nick
     char *nick = g_match_info_fetch(nfo, 1);
-    handle_mynick(cc, nick);
+    nmdc_mynick(cc, nick);
     if(ui_conn)
       ui_conn_listchange(cc->iter, UICONN_MOD);
     g_free(nick);
@@ -500,7 +573,18 @@ static void handle_cmd(struct net *n, char *cmd) {
 }
 
 
-// Hub may be unknown when we start listening on incoming connections.
+static void handle_cmd(struct net *n, char *cmd) {
+  struct cc *cc = n->handle;
+
+  // TODO: for incoming connections, detect whether this ADC or NMDC
+  if(cc->adc)
+    adc_handle(cc, cmd);
+  else
+    nmdc_handle(cc, cmd);
+}
+
+
+// Hub may be unknown when this is an incoming connection
 struct cc *cc_create(struct hub *hub) {
   struct cc *cc = g_new0(struct cc, 1);
   cc->net = net_create('|', cc, FALSE, handle_cmd, handle_error);
@@ -516,20 +600,45 @@ struct cc *cc_create(struct hub *hub) {
 static void handle_connect(struct net *n) {
   struct cc *cc = n->handle;
   time(&(cc->last_action));
+  strncpy(cc->remoteaddr, net_remoteaddr(cc->net), 23);
   if(!cc->hub)
     cc_disconnect(cc);
-  else {
-    strncpy(cc->remoteaddr, net_remoteaddr(cc->net), 23);
+  else if(cc->adc) {
+    cc->state = ADC_S_PROTOCOL;
+    net_send(n, "CSUP ADBASE ADTIGR ADBZIP");
+    // TODO: send a "CSTA 000  RF<hub_url>"?
+  } else {
     net_sendf(n, "$MyNick %s", cc->hub->nick_hub);
     net_sendf(n, "$Lock EXTENDEDPROTOCOL/wut? Pk=%s-%s", PACKAGE_NAME, PACKAGE_VERSION);
   }
 }
 
 
-void cc_connect(struct cc *cc, const char *addr) {
+void cc_nmdc_connect(struct cc *cc, const char *addr) {
   g_return_if_fail(!cc->timeout_src);
   strncpy(cc->remoteaddr, addr, 23);
   net_connect(cc->net, addr, 0, handle_connect);
+  g_clear_error(&(cc->err));
+}
+
+
+void cc_adc_connect(struct cc *cc, struct hub_user *u, unsigned short port, char *token) {
+  g_return_if_fail(!cc->timeout_src);
+  g_return_if_fail(cc->hub);
+  g_return_if_fail(u && u->active && u->ip4);
+  cc->adc = TRUE;
+  cc->token = g_strdup(token);
+  cc->nick = g_strdup(u->name);
+  cc->net->eom[0] = '\n';
+  memcpy(cc->cid, u->cid, 24);
+  // build address
+  strncpy(cc->remoteaddr, ip4_unpack(u->ip4), 23);
+  char tmp[10];
+  g_snprintf(tmp, 10, "%d", port);
+  strncat(cc->remoteaddr, ":", 23-strlen(cc->remoteaddr));
+  strncat(cc->remoteaddr, tmp, 23-strlen(cc->remoteaddr));
+  // connect
+  net_connect(cc->net, cc->remoteaddr, 0, handle_connect);
   g_clear_error(&(cc->err));
 }
 
@@ -552,6 +661,8 @@ void cc_disconnect(struct cc *cc) {
   time(&(cc->last_action));
   net_disconnect(cc->net);
   cc->timeout_src = g_timeout_add_seconds(30, handle_timeout, cc);
+  g_free(cc->token);
+  cc->token = NULL;
 }
 
 

@@ -548,6 +548,7 @@ static void ui_userlist_draw(struct ui_tab *tab) {
       strcpy(tmp, "-");
     g_free(tag);
     mvaddstr(bottom+3, 18, tmp);
+    // TODO: CID & IP, when available
   }
 }
 #undef DRAW_COL
@@ -720,7 +721,7 @@ static void ui_conn_draw_row(struct ui_listing *list, GSequenceIter *iter, int r
   }
 
   mvaddch(row, 2,
-    !cc->nick          ? 'C' : // connecting
+    !cc->nick || (cc->adc && cc->state != ADC_S_NORMAL) ? 'C' : // connecting
     cc->timeout_src    ? 'D' : // disconnected
     cc->net->file_left ? 'U' : // uploading
                          'I'); // idle
@@ -795,7 +796,7 @@ static void ui_conn_draw() {
   mvaddstr(bottom+1, 45, cc->hub ? cc->hub->tab->name : "-");
   mvaddstr(bottom+2, 11, cc->remoteaddr);
   mvaddstr(bottom+2, 45,
-    !cc->nick          ? "Connecting" :
+    !cc->nick || (cc->adc && cc->state != ADC_S_NORMAL) ? "Connecting" :
     cc->timeout_src    ? "Disconnected" :
     cc->net->file_left ? "Uploading" : "Idle");
   g_snprintf(tmp, 99, "%d KiB/s (%s)", ratecalc_get(cc->net->rate_out)/1024, str_formatsize(cc->net->rate_out->total));

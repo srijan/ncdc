@@ -32,8 +32,12 @@
 #include <glib/gstdio.h>
 #include <sys/file.h>
 
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 
 #if INTERFACE
+
 
 // Get a string from a glib log level
 #define loglevel_to_str(level) (\
@@ -552,6 +556,31 @@ void base32_decode(const char *from, char *to) {
     }
   }
 }
+
+
+// Handy wrappers to efficiently store an IPv4 address in an integer. This is
+// only used for internal storage, all actual network IO is done using GIO,
+// which works with the stringified versions. For portability and future IPv6
+// support, it'd help to use GInetAddress objects instead, but that's
+// inefficient. (For one thing, a simple pointer already takes twice as much
+// space as a compacted IPv4 address). Even for IPv6 it'll be more efficient to
+// use this strategy of ip6_pack() and ip6_unpack() with two guint64's.
+
+guint32 ip4_pack(const char *str) {
+  struct in_addr n;
+  if(!inet_aton(str, &n))
+    return 0;
+  return n.s_addr; // this is an uint32_t, on linux at least
+}
+
+
+// Returns a static string buffer.
+char *ip4_unpack(guint32 ip) {
+  struct in_addr n;
+  n.s_addr = ip;
+  return inet_ntoa(n);
+}
+
 
 
 

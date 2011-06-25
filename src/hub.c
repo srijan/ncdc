@@ -41,13 +41,14 @@ struct hub_user {
   unsigned char h_op;
   unsigned char slots;
   unsigned int as;         // auto-open slot if upload is below n bytes/s
+  guint32 ip4;
+  int sid;        // for ADC
   char *name;     // UTF-8
   char *name_hub; // hub-encoded (NMDC)
   char *desc;
   char *conn;
   char *mail;
   char *client;
-  int sid;        // for ADC
   char cid[24];   // for ADC
   guint64 sharesize;
   GSequenceIter *iter; // used by ui_userlist_*
@@ -219,6 +220,8 @@ static void user_nmdc_nfo(struct hub *hub, struct hub_user *u, char *str) {
       tmp = t+1;
     }
     L(tmp);
+
+#undef L
   }
 
   // description
@@ -333,6 +336,9 @@ static void user_adc_nfo(struct hub *hub, struct hub_user *u, struct adc_cmd *cm
       break;
     case P('A','S'): // as
       u->slots = strtol(p, NULL, 10);
+      break;
+    case P('I','4'): // IPv4 address
+      u->ip4 = ip4_pack(p);
       break;
     case P('S','U'): // supports
       u->active = !!strstr(p, "TCP4") || !!strstr(p, "TCP6");
@@ -557,11 +563,14 @@ static void adc_handle(struct hub *hub, char *msg) {
   case ADCC_INF:
     // inf from hub
     if(cmd.type == 'I') {
-      // Get hub name. Some hubs (PyAdc) send multiple 'NI's, ignore the first one in that case. :-/
+      // Get hub name. Some hubs (PyAdc) send multiple 'NI's, ignore the first
+      // one in that case. Other hubs don't send 'NI', but only a 'DE'.
       char **left = NULL;
       char *hname = adc_getparam(cmd.argv, "NI", &left);
       if(left)
         hname = adc_getparam(left, "NI", NULL);
+      if(!hname)
+        hname = adc_getparam(cmd.argv, "DE", NULL);
       if(hname) {
         g_free(hub->hubname);
         hub->hubname = g_strdup(hname);
@@ -587,7 +596,10 @@ static void adc_handle(struct hub *hub, char *msg) {
         hub->sharesize += u->sharesize;
         // if we received our own INF, that means the user list is complete.
         if(u->sid == hub->sid) {
-          hub->joincomplete = hub->received_first;
+          // Some broken hubs send our own INF more than once, and not always
+          // at the end. The following will help the detection in that case,
+          // but brakes with good hubs. :-(
+          //hub->joincomplete = hub->received_first;
           hub->received_first = TRUE;
         }
       }
@@ -628,19 +640,48 @@ static void adc_handle(struct hub *hub, char *msg) {
     }
     break;
 
+  case ADCC_CTM:
+    if(cmd.argc < 3 || cmd.type != 'D' || cmd.dest != hub->sid)
+      g_warning("Invalid message from %s: %s", net_remoteaddr(hub->net), msg);
+    // ADC/0.10 is still used in many (slightly outdated) clients :(
+    else if(strcmp(cmd.argv[0], "ADC/1.0") != 0 && strcmp(cmd.argv[0], "ADC/0.10") != 0) {
+      GString *r = adc_generate('D', ADCC_STA, hub->sid, cmd.source);
+      g_string_append(r, " 141 Unknown\\protocol");
+      adc_append(r, "PR", cmd.argv[0]);
+      adc_append(r, "TO", cmd.argv[2]);
+      net_send(hub->net, r->str);
+      g_string_free(r, TRUE);
+    } else {
+      struct hub_user *u = g_hash_table_lookup(hub->sessions, GINT_TO_POINTER(cmd.source));
+      int port = strtol(cmd.argv[1], NULL, 0);
+      if(!u)
+        g_warning("CTM from user who is not on the hub (%s): %s", net_remoteaddr(hub->net), msg);
+      else if(port < 1 || port > 65535)
+        g_warning("Invalid message from %s: %s", net_remoteaddr(hub->net), msg);
+      else if(!u->active || !u->ip4) {
+        g_warning("CTM from user who is not active (%s): %s", net_remoteaddr(hub->net), msg);
+        GString *r = adc_generate('D', ADCC_STA, hub->sid, cmd.source);
+        g_string_append(r, " 140 No\\sIP\\sto\\sconnect\\sto.");
+        net_send(hub->net, r->str);
+        g_string_free(r, TRUE);
+      } else
+        cc_adc_connect(cc_create(hub), u, port, cmd.argv[2]);
+    }
+    break;
+
   case ADCC_MSG:;
-    if(cmd.argc < 1 || (cmd.type != 'B' && cmd.type != 'E'))
+    if(cmd.argc < 1 || (cmd.type != 'B' && cmd.type != 'E' && cmd.type != 'I'))
       g_warning("Invalid message from %s: %s", net_remoteaddr(hub->net), msg);
     else {
       char *pm = adc_getparam(cmd.argv+1, "PM", NULL);
       gboolean me = adc_getparam(cmd.argv+1, "ME", NULL) != NULL;
-      struct hub_user *u = g_hash_table_lookup(hub->sessions, GINT_TO_POINTER(cmd.source));
+      struct hub_user *u = cmd.type != 'I' ? g_hash_table_lookup(hub->sessions, GINT_TO_POINTER(cmd.source)) : NULL;
       if(pm && (cmd.type != 'E' || strlen(pm) != 4 || ADC_DFCC(pm) != cmd.source))
         g_warning("Group chat is not supported yet. (%s: %s)", net_remoteaddr(hub->net), msg);
-      else if(!u)
+      else if(cmd.type != 'I' && !u)
         g_warning("Message from someone not on this hub. (%s: %s)", net_remoteaddr(hub->net), msg);
       else {
-        char *m = g_strdup_printf(me ? "** %s %s" : "<%s> %s", u->name, cmd.argv[0]);
+        char *m = g_strdup_printf(me ? "** %s %s" : "<%s> %s", cmd.type == 'I' ? "hub" : u->name, cmd.argv[0]);
         if(cmd.type == 'E')
           ui_hub_msg(hub->tab, u, m);
         else
@@ -939,7 +980,7 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
     if(strcmp(me, hub->nick_hub) != 0)
       g_warning("Received a $ConnectToMe for someone else (to %s from %s)", me, addr);
     else
-      cc_connect(cc_create(hub), addr);
+      cc_nmdc_connect(cc_create(hub), addr);
     g_free(me);
     g_free(addr);
   }

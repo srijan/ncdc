@@ -169,12 +169,18 @@ int cc_slots_in_use(int *mini) {
 }
 
 
-// check whether we've got a duplicate
-static gboolean cc_get_conn(struct cc *cc) {
+// Check whether we've got a duplicate.
+static gboolean cc_check_dupe(struct cc *cc) {
   GSequenceIter *i = g_sequence_get_begin_iter(cc_list);
   for(; !g_sequence_iter_is_end(i); i=g_sequence_iter_next(i)) {
     struct cc *c = g_sequence_get(i);
-    if(c->nick_raw && c->hub == cc->hub && c->net->conn && cc != c && strcmp(c->nick_raw, cc->nick_raw) == 0)
+    if(cc == c || c->timeout_src || !!c->adc != !!cc->adc)
+      continue;
+    // NMDC (cc->hub and cc->nick_raw must be known)
+    if(!c->adc && c->hub == cc->hub && c->nick_raw && cc->nick_raw && strcmp(c->nick_raw, cc->nick_raw) == 0)
+      return TRUE;
+    // ADC (cc->cid must be known)
+    if(c->adc && memcmp(c->cid, cc->cid, 24) == 0)
       return TRUE;
   }
   return FALSE;
@@ -244,12 +250,17 @@ static void handle_error(struct net *n, int action, GError *err) {
 }
 
 
-// err->type = 0 -> generic error. otherwise -> no slots
+// err->code:
+//  40: Generic protocol error
+//  50: Generic internal error
+//  51: File not available
+//  53: No slots
+// Handles both ADC GET and the NMDC $ADCGET
 static void handle_adcget(struct cc *cc, char *type, char *id, guint64 start, gint64 bytes, GError **err) {
   // tthl
   if(strcmp(type, "tthl") == 0) {
     if(strncmp(id, "TTH/", 4) != 0 || strlen(id) != 4+39 || start != 0 || bytes != -1) {
-      g_set_error_literal(err, 1, 0, "Invalid ADCGET arguments");
+      g_set_error_literal(err, 1, 40, "Invalid arguments");
       return;
     }
     char root[24];
@@ -257,10 +268,10 @@ static void handle_adcget(struct cc *cc, char *type, char *id, guint64 start, gi
     int len;
     char *dat = fl_hashdat_get(root, &len);
     if(!dat)
-      g_set_error_literal(err, 1, 0, "File Not Available");
+      g_set_error_literal(err, 1, 51, "File Not Available");
     else {
       // no need to adc_escape(id) here, since it cannot contain any special characters
-      net_sendf(cc->net, "$ADCSND tthl %s 0 %d", id, len);
+      net_sendf(cc->net, cc->adc ? "CSND tthl %s 0 %d" : "$ADCSND tthl %s 0 %d", id, len);
       net_send_raw(cc->net, dat, len);
       free(dat);
     }
@@ -269,26 +280,26 @@ static void handle_adcget(struct cc *cc, char *type, char *id, guint64 start, gi
 
   // list
   if(strcmp(type, "list") == 0) {
-    if(id[0] != '/' || id[strlen(id)-1] != '/' || start != 0 || bytes != -1 || !g_utf8_validate(id, -1, NULL)) {
-      g_set_error_literal(err, 1, 0, "Invalid ADCGET arguments");
+    if(id[0] != '/' || id[strlen(id)-1] != '/' || start != 0 || bytes != -1) {
+      g_set_error_literal(err, 1, 40, "Invalid arguments");
       return;
     }
     struct fl_list *f = fl_local_list ? fl_list_from_path(fl_local_list, id) : NULL;
     if(!f || f->isfile) {
-      g_set_error_literal(err, 1, 0, "File Not Available");
+      g_set_error_literal(err, 1, 51, "File Not Available");
       return;
     }
     // We don't support recursive lists (yet), as these may be somewhat expensive.
     GString *buf = g_string_new("");
     GError *e = NULL;
     if(!fl_save(f, NULL, buf, 1, &e)) {
-      g_set_error(err, 1, 0, "Creating partial XML list: %s", e->message);
+      g_set_error(err, 1, 50, "Creating partial XML list: %s", e->message);
       g_error_free(e);
       g_string_free(buf, TRUE);
       return;
     }
-    char *eid = adc_escape(id);
-    net_sendf(cc->net, "$ADCSND list %s 0 %d", eid, buf->len);
+    char *eid = adc_escape(id, !cc->adc);
+    net_sendf(cc->net, cc->adc ? "CSND list %s 0 %d" : "$ADCSND list %s 0 %d", eid, buf->len);
     net_send_raw(cc->net, buf->str, buf->len);
     g_free(eid);
     g_string_free(buf, TRUE);
@@ -297,7 +308,7 @@ static void handle_adcget(struct cc *cc, char *type, char *id, guint64 start, gi
 
   // file
   if(strcmp(type, "file") != 0) {
-    g_set_error_literal(err, 1, 0, "Unsupported ADCGET type");
+    g_set_error_literal(err, 40, 0, "Unsupported ADCGET type");
     return;
   }
 
@@ -313,8 +324,8 @@ static void handle_adcget(struct cc *cc, char *type, char *id, guint64 start, gi
     path = g_strdup(fl_local_list_file);
     vpath = g_strdup("files.xml.bz2");
     needslot = FALSE;
-  // / (path in the nameless root - must be UTF-8)
-  } else if(id[0] == '/' && fl_local_list && g_utf8_validate(id, -1, NULL)) {
+  // / (path in the nameless root)
+  } else if(id[0] == '/' && fl_local_list) {
     f = fl_list_from_path(fl_local_list, id);
   // TTH/
   } else if(strncmp(id, "TTH/", 4) == 0 && strlen(id) == 4+39) {
@@ -334,7 +345,10 @@ static void handle_adcget(struct cc *cc, char *type, char *id, guint64 start, gi
   // validate
   struct stat st;
   if(!path || stat(path, &st) < 0 || !S_ISREG(st.st_mode) || start > st.st_size) {
-    g_set_error_literal(err, 1, 0, "File Not Available");
+    if(start > st.st_size)
+      g_set_error_literal(err, 1, 52, "File Part Not Available");
+    else
+      g_set_error_literal(err, 1, 51, "File Not Available");
     g_free(path);
     g_free(vpath);
     return;
@@ -351,13 +365,13 @@ static void handle_adcget(struct cc *cc, char *type, char *id, guint64 start, gi
     cc->last_length = bytes;
     cc->last_offset = start;
     cc->last_size = st.st_size;
-    char *tmp = adc_escape(id);
-    net_sendf(cc->net, "$ADCSND %s %s %"G_GUINT64_FORMAT" %"G_GINT64_FORMAT, type, tmp, start, bytes);
+    char *tmp = adc_escape(id, !cc->adc);
+    net_sendf(cc->net, cc->adc ? "CSND file %s %"G_GUINT64_FORMAT" %"G_GINT64_FORMAT : "$ADCSND file %s %"G_GUINT64_FORMAT" %"G_GINT64_FORMAT, tmp, start, bytes);
     net_sendfile(cc->net, path, start, bytes);
     g_free(tmp);
     g_free(path);
   } else {
-    g_set_error_literal(err, 1, 1, "No Slots Available");
+    g_set_error_literal(err, 1, 53, "No Slots Available");
     g_free(vpath);
   }
 }
@@ -416,15 +430,27 @@ static void adc_handle(struct cc *cc, char *msg) {
       } else if(strlen(id) != 39 || (!cc->active && memcmp(cid, cc->cid, 24) != 0)) {
         g_warning("Incorrect CID. (%s): %s", net_remoteaddr(cc->net), msg);
         cc_disconnect(cc);
-      } else {
+      } else if(cc->active) {
         // TODO: if cc->active, figure out hub, validate token and get nick
-        memcpy(cc->cid, cid, 24);
       }
     }
     break;
 
   case ADCC_GET:
-    // TODO
+    if(cc->state == ADC_S_NORMAL && cmd.argc >= 4) {
+      guint64 start = g_ascii_strtoull(cmd.argv[2], NULL, 0);
+      gint64 len = g_ascii_strtoll(cmd.argv[3], NULL, 0);
+      GError *err = NULL;
+      handle_adcget(cc, cmd.argv[0], cmd.argv[1], start, len, &err);
+      if(err) {
+        GString *r = adc_generate('C', ADCC_STA, 0, 0);
+        g_string_append_printf(r, " 1%02d", err->code);
+        adc_append(r, NULL, err->message);
+        net_send(cc->net, r->str);
+        g_error_free(err);
+        g_string_free(r, TRUE);
+      }
+    }
     break;
 
   default:
@@ -432,6 +458,30 @@ static void adc_handle(struct cc *cc, char *msg) {
   }
 
   g_strfreev(cmd.argv);
+}
+
+
+// To be called when we know with which user and on which hub this connection is.
+static void handle_id(struct cc *cc, struct hub_user *u) {
+  cc->nick = g_strdup(u->name);
+  cc->isop = u->isop;
+  if(cc->adc)
+    memcpy(cc->cid, u->cid, 24);
+
+  // Don't allow multiple connections from the same user.
+  // Note: This is usually determined after receiving $Direction (in NMDC),
+  // since it is possible to have two connections with a single user: One for
+  // Upload and one for Download. But since we only support uploading, checking
+  // it here is enough.
+  if(cc_check_dupe(cc)) {
+    g_set_error_literal(&(cc->err), 1, 0, "too many open connections with this user");
+    cc_disconnect(cc);
+    return;
+  }
+
+  // TODO: ADC should use CIDs here...
+  if(!cc->adc)
+    cc->slot_granted = g_hash_table_lookup(cc->hub->grants, cc->nick_raw) ? TRUE : FALSE;
 }
 
 
@@ -458,21 +508,7 @@ static void nmdc_mynick(struct cc *cc, const char *nick) {
     return;
   }
 
-  cc->nick = g_strdup(u->name);
-  cc->isop = u->isop;
-
-  // Don't allow multiple connections from the same user.
-  // Note: This is usually determined after receiving $Direction, since it is
-  // possible to have two connections with a single user: One for Upload and
-  // one for Download. But since we only support uploading, checking it here is
-  // enough.
-  if(cc_get_conn(cc)) {
-    g_set_error_literal(&(cc->err), 1, 0, "too many open connections with this user");
-    cc_disconnect(cc);
-    return;
-  }
-
-  cc->slot_granted = g_hash_table_lookup(cc->hub->grants, cc->nick_raw) ? TRUE : FALSE;
+  handle_id(cc, u);
 
   if(cc->active) {
     net_sendf(cc->net, "$MyNick %s", cc->hub->nick_hub);
@@ -495,7 +531,7 @@ static void nmdc_handle(struct cc *cc, char *cmd) {
   CMDREGEX(mynick, "MyNick ([^ $]+)");
   CMDREGEX(lock, "Lock ([^ $]+) Pk=[^ $]+");
   CMDREGEX(supports, "Supports (.+)");
-  CMDREGEX(adcget, "ADCGET ([^ $]+) ([^ ]+) ([0-9]+) (-?[0-9]+)");
+  CMDREGEX(adcget, "ADCGET ([^ ]+) (.+) ([0-9]+) (-?[0-9]+)");
 
   // $MyNick
   if(g_regex_match(mynick, cmd, 0, &nfo)) { // 1 = nick
@@ -547,16 +583,16 @@ static void nmdc_handle(struct cc *cc, char *cmd) {
     char *bytes = g_match_info_fetch(nfo, 4);
     guint64 st = g_ascii_strtoull(start, NULL, 10);
     gint64 by = g_ascii_strtoll(bytes, NULL, 10);
-    char *un_id = adc_unescape(id);
+    char *un_id = adc_unescape(id, TRUE);
     if(!cc->nick) {
       g_set_error_literal(&(cc->err), 1, 0, "Received $ADCGET before $MyNick");
       g_warning("Received $ADCGET before $MyNick, disconnecting client.");
       cc_disconnect(cc);
-    } else if(un_id) {
+    } else if(un_id && g_utf8_validate(un_id, -1, NULL)) {
       GError *err = NULL;
       handle_adcget(cc, type, un_id, st, by, &err);
       if(err) {
-        if(!err->code)
+        if(err->code != 53)
           net_sendf(cc->net, "$Error %s", err->message);
         else
           net_send(cc->net, "$MaxedOut");
@@ -628,15 +664,15 @@ void cc_adc_connect(struct cc *cc, struct hub_user *u, unsigned short port, char
   g_return_if_fail(u && u->active && u->ip4);
   cc->adc = TRUE;
   cc->token = g_strdup(token);
-  cc->nick = g_strdup(u->name);
   cc->net->eom[0] = '\n';
-  memcpy(cc->cid, u->cid, 24);
   // build address
   strncpy(cc->remoteaddr, ip4_unpack(u->ip4), 23);
   char tmp[10];
   g_snprintf(tmp, 10, "%d", port);
   strncat(cc->remoteaddr, ":", 23-strlen(cc->remoteaddr));
   strncat(cc->remoteaddr, tmp, 23-strlen(cc->remoteaddr));
+  // check / update user info
+  handle_id(cc, u);
   // connect
   net_connect(cc->net, cc->remoteaddr, 0, handle_connect);
   g_clear_error(&(cc->err));

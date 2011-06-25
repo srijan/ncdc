@@ -344,7 +344,7 @@ static gboolean handle_timer(gpointer dat) {
   // not keepalive? give a timeout after 30 seconds of inactivity
   else if(!n->keepalive && n->timeout_last < t-30) {
     GError *err = NULL;
-    g_set_error_literal(&err, 1, G_IO_ERROR_TIMED_OUT, "No activity for a too long time period.");
+    g_set_error_literal(&err, 1, G_IO_ERROR_TIMED_OUT, "Idle timeout.");
     n->cb_err(n, NETERR_RECV, err); // actually not _RECV, but whatever
     g_error_free(err);
     return FALSE;

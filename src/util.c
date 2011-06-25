@@ -736,13 +736,13 @@ char *nmdc_lock2key(char *lock) {
 
 
 // ADC parameter unescaping
-char *adc_unescape(const char *str) {
+char *adc_unescape(const char *str, gboolean nmdc) {
   char *dest = g_new(char, strlen(str)+1);
   char *tmp = dest;
   while(*str) {
     if(*str == '\\') {
       str++;
-      if(*str == 's')
+      if(*str == 's' || (nmdc && *str == ' '))
         *tmp = ' ';
       else if(*str == 'n')
         *tmp = '\n';
@@ -763,11 +763,11 @@ char *adc_unescape(const char *str) {
 
 
 // ADC parameter escaping
-char *adc_escape(const char *str) {
+char *adc_escape(const char *str, gboolean nmdc) {
   GString *dest = g_string_sized_new(strlen(str)+50);
   while(*str) {
     switch(*str) {
-    case ' ':  g_string_append(dest, "\\s"); break;
+    case ' ':  g_string_append(dest, nmdc ? "\\ " : "\\s"); break;
     case '\n': g_string_append(dest, "\\n"); break;
     case '\\': g_string_append(dest, "\\\\"); break;
     default: g_string_append_c(dest, *str); break;
@@ -909,7 +909,7 @@ void adc_parse(const char *str, struct adc_cmd *c, GError **err) {
     char **a = g_new0(char *, c->argc+1);
     int i;
     for(i=0; i<c->argc; i++) {
-      a[i] = adc_unescape(s[i]);
+      a[i] = adc_unescape(s[i], FALSE);
       if(!a[i]) {
         g_set_error_literal(err, 1, 0, "Invalid escape in argument.");
         break;
@@ -966,7 +966,7 @@ void adc_append(GString *c, const char *name, const char *arg) {
   g_string_append_c(c, ' ');
   if(name)
     g_string_append(c, name);
-  char *enc = adc_escape(arg);
+  char *enc = adc_escape(arg, FALSE);
   g_string_append(c, enc);
   g_free(enc);
 }

@@ -36,11 +36,13 @@ struct hub_user {
   gboolean isop : 1;
   gboolean isjoined : 1; // managed by ui_hub_userchange()
   gboolean active : 1;
+  gboolean hasudp4 : 1;
   unsigned char h_norm;
   unsigned char h_reg;
   unsigned char h_op;
   unsigned char slots;
-  unsigned int as;         // auto-open slot if upload is below n bytes/s
+  unsigned short udp4;
+  unsigned int as;       // auto-open slot if upload is below n bytes/s
   guint32 ip4;
   int sid;        // for ADC
   char *name;     // UTF-8
@@ -340,8 +342,12 @@ static void user_adc_nfo(struct hub *hub, struct hub_user *u, struct adc_cmd *cm
     case P('I','4'): // IPv4 address
       u->ip4 = ip4_pack(p);
       break;
+    case P('U','4'): // UDP4 port
+      u->udp4 = strtol(p, NULL, 10);
+      break;
     case P('S','U'): // supports
       u->active = !!strstr(p, "TCP4") || !!strstr(p, "TCP6");
+      u->hasudp4 = !!strstr(p, "UDP4");
       break;
     case P('C','T'): // client type (only used to figure out u->isop)
       u->isop = strtol(p, NULL, 10) >= 4;
@@ -569,6 +575,10 @@ static void adc_sch(struct hub *hub, struct adc_cmd *cmd) {
   if(tr && strlen(tr) != 39)
     return;
 
+  struct hub_user *u = g_hash_table_lookup(hub->sessions, GINT_TO_POINTER(cmd->source));
+  if(!u)
+    return;
+
   // create search struct
   struct fl_search s = {};
   s.sizem = eq ? 0 : le ? -1 : ge ? 1 : -2;
@@ -579,7 +589,7 @@ static void adc_sch(struct hub *hub, struct adc_cmd *cmd) {
   s.ext = adc_getparams(cmd->argv, "EX");
 
   int i = 0;
-  int max = 5; // TODO: 10 for UDP responses
+  int max = u->hasudp4 ? 10 : 5;
   struct fl_list *res[max];
 
   // TTH lookup
@@ -606,11 +616,19 @@ static void adc_sch(struct hub *hub, struct adc_cmd *cmd) {
   if(slots_free < 0)
     slots_free = 0;
   char tth[40] = {};
+  char *cid = NULL;
+  char *dest = NULL;
+  if(u->hasudp4) {
+    cid = g_key_file_get_string(conf_file, "global", "cid", NULL);
+    dest = g_strdup_printf("%s:%d", ip4_unpack(u->ip4), u->udp4);
+  }
 
   // reply
   while(--i>=0) {
-    // TODO: UDP replies if possible
-    GString *r = adc_generate('D', ADCC_RES, hub->sid, cmd->source);
+    // create reply
+    GString *r = u->hasudp4 ? adc_generate('U', ADCC_RES, 0, 0) : adc_generate('D', ADCC_RES, hub->sid, cmd->source);
+    if(u->hasudp4)
+      g_string_append_printf(r, " %s", cid);
     if(to)
       adc_append(r, "TO", to);
     g_string_append_printf(r, " SL%d SI%"G_GUINT64_FORMAT, slots_free, res[i]->size);
@@ -622,9 +640,18 @@ static void adc_sch(struct hub *hub, struct adc_cmd *cmd) {
       g_string_append_printf(r, " TR%s", tth);
     } else
       g_string_append_c(r, '/'); // make sure a directory path ends with a slash
-    net_send(hub->net, r->str);
+
+    // send
+    if(u->hasudp4) {
+      g_string_append_c(r, '\n');
+      net_udp_send(dest, r->str);
+    } else
+      net_send(hub->net, r->str);
     g_string_free(r, TRUE);
   }
+
+  g_free(dest);
+  g_free(cid);
 
 adc_search_cleanup:
   g_free(s.and);
@@ -835,7 +862,7 @@ static void adc_handle(struct hub *hub, char *msg) {
   case ADCC_SCH:
     if(cmd.type != 'B' && cmd.type != 'D' && cmd.type != 'E' && cmd.type != 'F')
       g_warning("Invalid message from %s: %s", net_remoteaddr(hub->net), msg);
-    else
+    else if(cmd.source != hub->sid)
       adc_sch(hub, &cmd);
     break;
 

@@ -576,6 +576,11 @@ void net_udp_send_raw(const char *dest, const char *msg, int len) {
 }
 
 
+void net_udp_send(const char *dest, const char *msg) {
+  net_udp_send_raw(dest, msg, strlen(msg));
+}
+
+
 void net_udp_sendf(const char *dest, const char *fmt, ...) {
   va_list va;
   va_start(va, fmt);

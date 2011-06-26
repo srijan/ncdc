@@ -450,7 +450,7 @@ void hub_send_nfo(struct hub *hub) {
     }
     if(f || !eq(ip4)) {
       g_string_append_printf(cmd, " I4%s", ip4_unpack(ip4)); // ip4 = 0 == 0.0.0.0, which is exactly what we want
-      g_string_append(cmd, ip4 ? " SUTCP4" : "SU");
+      g_string_append(cmd, ip4 ? " SUTCP4" : " SU");
     }
     if(f || !eq(share))
       g_string_append_printf(cmd, " SS%"G_GUINT64_FORMAT, share);
@@ -545,7 +545,11 @@ static void adc_handle(struct hub *hub, char *msg) {
   if(!msg[0])
     return;
 
-  adc_parse(msg, &cmd, &err);
+  int feats[2] = {};
+  if(cc_listen)
+    feats[0] = ADC_DFCC("TCP4");
+
+  adc_parse(msg, &cmd, feats, &err);
   if(err) {
     g_warning("ADC parse error from %s: %s. --> %s", net_remoteaddr(hub->net), err->message, msg);
     g_error_free(err);

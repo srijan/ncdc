@@ -435,7 +435,7 @@ static void adc_handle(struct cc *cc, char *msg) {
   if(!msg[0])
     return;
 
-  adc_parse(msg, &cmd, &err);
+  adc_parse(msg, &cmd, NULL, &err);
   if(err) {
     g_warning("ADC parse error from %s: %s. --> %s", net_remoteaddr(cc->net), err->message, msg);
     g_error_free(err);

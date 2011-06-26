@@ -837,7 +837,15 @@ struct adc_cmd {
 #endif
 
 
-void adc_parse(const char *str, struct adc_cmd *c, GError **err) {
+static gboolean int_in_array(const int *arr, int needle) {
+  for(; arr&&*arr; arr--)
+    if(*arr == needle)
+      return TRUE;
+  return FALSE;
+}
+
+
+void adc_parse(const char *str, struct adc_cmd *c, int *feats, GError **err) {
   if(!g_utf8_validate(str, -1, NULL)) {
     g_set_error_literal(err, 1, 0, "Invalid encoding.");
     return;
@@ -892,12 +900,27 @@ void adc_parse(const char *str, struct adc_cmd *c, GError **err) {
     off += off[4] ? 5 : 4;
   }
 
-  // type = F, next argument must be the feature list (which we'll simply ignore)
+  // type = F, next argument must be the feature list. We'll match this with
+  // the 'feats' list (space separated list of FOURCCs, to make things easier)
+  // to make sure it's correct. Some hubs broadcast F messages without actually
+  // checking the listed features. :-/
   if(c->type == 'F') {
     int l = index(off, ' ') ? index(off, ' ')-off : strlen(off);
     if((l % 5) != 0) {
       g_set_error_literal(err, 1, 0, "Message too short");
       return;
+    }
+    int i;
+    for(i=0; i<l/5; i++) {
+      int f = ADC_DFCC(off+i*5+1);
+      if(off[i*5] == '+' && !int_in_array(feats, f)) {
+        g_set_error_literal(err, 1, 0, "Feature broadcast for a feature we don't have.");
+        return;
+      }
+      if(off[i*5] == '-' && int_in_array(feats, f)) {
+        g_set_error_literal(err, 1, 0, "Feature broadcast excluding a feature we have.");
+        return;
+      }
     }
     off += off[l] ? l+1 : l;
   }

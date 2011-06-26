@@ -393,6 +393,9 @@ void hub_grant(struct hub *hub, struct hub_user *u) {
 #define eq(a) (a == hub->nfo_##a)
 
 void hub_send_nfo(struct hub *hub) {
+  if(!hub->net->conn)
+    return;
+
   // get info, to be compared with hub->nfo_
   char *desc, *conn, *mail;
   unsigned char slots, h_norm, h_reg, h_op;
@@ -750,9 +753,11 @@ static void nmdc_search(struct hub *hub, char *from, int size_m, guint64 size, i
   };
   int max = from[0] == 'H' ? 5 : 10;
   struct fl_list *res[max];
-  int filedir = type == 1 ? 3 : type == 8 ? 2 : 1;
-  char **ext = exts[type-1];
-  char **inc = NULL;
+  struct fl_search s = {};
+  s.filedir = type == 1 ? 3 : type == 8 ? 2 : 1;
+  s.ext = exts[type-1];
+  s.size = size;
+  s.sizem = size_m;
   int i = 0;
 
   // TTH lookup (YAY! this is fast!)
@@ -767,7 +772,7 @@ static void nmdc_search(struct hub *hub, char *from, int size_m, guint64 size, i
     // it still has to match the other requirements...
     for(; i<max && l; l=l->next) {
       struct fl_list *c = l->data;
-      if(fl_list_search_matches(c, size_m, size, filedir, ext, inc))
+      if(fl_search_match_full(c, &s))
         res[i++] = c;
     }
 
@@ -778,10 +783,10 @@ static void nmdc_search(struct hub *hub, char *from, int size_m, guint64 size, i
       if(*tmp == '$')
         *tmp = ' ';
     tmp = nmdc_unescape_and_decode(hub, query);
-    inc = g_strsplit(tmp, " ", 0);
+    s.and = g_strsplit(tmp, " ", 0);
     g_free(tmp);
-    i = fl_list_search(fl_local_list, size_m, size, filedir, ext, inc, res, max);
-    g_strfreev(inc);
+    i = fl_search_rec(fl_local_list, &s, res, max);
+    g_strfreev(s.and);
   }
 
   // reply
@@ -1049,7 +1054,7 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
     char *size = g_match_info_fetch(nfo, 4);
     char *type = g_match_info_fetch(nfo, 5);
     char *query = g_match_info_fetch(nfo, 6);
-    nmdc_search(hub, from, sizerestrict[0] == 'F' ? 0 : ismax[0] == 'T' ? -1 : 1, g_ascii_strtoull(size, NULL, 10), type[0]-'0', query);
+    nmdc_search(hub, from, sizerestrict[0] == 'F' ? -2 : ismax[0] == 'T' ? -1 : 1, g_ascii_strtoull(size, NULL, 10), type[0]-'0', query);
     g_free(from);
     g_free(sizerestrict);
     g_free(ismax);

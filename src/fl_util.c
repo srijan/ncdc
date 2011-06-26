@@ -230,56 +230,115 @@ void fl_list_suggest(struct fl_list *root, char *opath, char **sug) {
 }
 
 
-gboolean fl_list_search_match_name(struct fl_list *fl, char **ext, char **inc) {
-  for(; inc&&*inc; inc++)
-    if(G_LIKELY(!str_casestr(fl->name, *inc)))
+
+
+// searching
+
+#if INTERFACE
+
+struct fl_search {
+  char sizem;   // -2 any, -1 <=, 0 ==, 1 >=
+  char filedir; // 1 = file, 2 = dir, 3 = any
+  guint64 size;
+  char **ext;   // extension list
+  char **and;   // keywords that must all be present
+  char **not;   // keywords that may not be present
+};
+
+
+#define fl_search_match(fl, s) (\
+     ((((s)->filedir & 2) && !(fl)->isfile) || (((s)->filedir & 1) && (fl)->isfile && (fl)->hastth))\
+  && ((s)->sizem == -2 || (!(s)->sizem && (fl)->size == (s)->size)\
+      || ((s)->sizem < 0 && (fl)->size <= (s)->size) || ((s)->sizem > 0 && (fl)->size > (s)->size))\
+  && fl_search_match_name(fl, s))
+
+
+#endif
+
+
+// Only matches against fl->name itself, not the path to it (AND keywords
+// matched in the path are assumed to be removed already)
+gboolean fl_search_match_name(struct fl_list *fl, struct fl_search *s) {
+  char **tmp;
+
+  for(tmp=s->and; tmp&&*tmp; tmp++)
+    if(G_LIKELY(!str_casestr(fl->name, *tmp)))
       return FALSE;
-  if(!ext || !*ext)
+
+  for(tmp=s->not; tmp&&*tmp; tmp++)
+    if(str_casestr(fl->name, *tmp))
+      return FALSE;
+
+  tmp = s->ext;
+  if(!tmp || !*tmp)
     return TRUE;
+
   char *l = rindex(fl->name, '.');
   if(G_UNLIKELY(!l || !l[1]))
     return FALSE;
   l++;
-  for(; *ext; ext++)
-    if(G_UNLIKELY(g_ascii_strcasecmp(l, *ext) == 0))
+  for(; *tmp; tmp++)
+    if(G_UNLIKELY(g_ascii_strcasecmp(l, *tmp) == 0))
       return TRUE;
   return FALSE;
 }
 
 
-#if INTERFACE
-
-#define fl_list_search_matches(fl, size_m, s, filedir, ext, inc) \
-  (((((filedir) & 2) && !(fl)->isfile) || (((filedir) & 1) && (fl)->isfile && (fl)->hastth))\
-    && (!(size_m) || ((size_m) < 0 && (fl)->size < (s)) || ((size_m) > 0 && (fl)->size > (s))) && fl_list_search_match_name(fl, ext, inc))
-
-#endif
-
-
 // Recursive depth-first search through the list, used for replying to non-TTH
-// $Search requests. Not exactly fast, but what did you expect? :-(
-int fl_list_search(struct fl_list *parent, int size_m, guint64 size, int filedir, char **ext, char **inc, struct fl_list **res, int max) {
+// $Search and SCH requests. Not exactly fast, but what did you expect? :-(
+int fl_search_rec(struct fl_list *parent, struct fl_search *s, struct fl_list **res, int max) {
   if(!parent || !parent->sub)
     return 0;
   GSequenceIter *iter;
-  // weed out stuff from inc if it's already matched in parent (I'm assuming
+  // weed out stuff from 'and' if it's already matched in parent (I'm assuming
   // that stuff matching the parent of parent has already been removed)
-  char *ninc[g_strv_length(inc)];
+  char **o = s->and;
+  char *nand[g_strv_length(o)];
   int i = 0;
-  for(; *inc; inc++)
-    if(G_LIKELY(!parent->name || !str_casestr(parent->name, *inc)))
-      ninc[i++] = *inc;
-  ninc[i] = NULL;
+  for(; *o; o++)
+    if(G_LIKELY(!parent->name || !str_casestr(parent->name, *o)))
+      nand[i++] = *o;
+  nand[i] = NULL;
+  o = s->and;
+  s->and = nand;
   // loop through the directory
   i = 0;
   for(iter=g_sequence_get_begin_iter(parent->sub); i<max && !g_sequence_iter_is_end(iter); iter=g_sequence_iter_next(iter)) {
     struct fl_list *n = g_sequence_get(iter);
-    if(fl_list_search_matches(n, size_m, size, filedir, ext, ninc))
+    if(fl_search_match(n, s))
       res[i++] = n;
     if(!n->isfile && i < max)
-      i += fl_list_search(n, size_m, size, filedir, ext, ninc, res+i, max-i);
+      i += fl_search_rec(n, s, res+i, max-i);
   }
+  s->and = o;
   return i;
+}
+
+
+// Similar to fl_search_match(), but also matches the name of the parents.
+gboolean fl_search_match_full(struct fl_list *fl, struct fl_search *s) {
+  // weed out stuff from 'and' if it's already matched in any of its parents.
+  char **oand = s->and;
+  int len = g_strv_length(s->and);
+  char *nand[len];
+  struct fl_list *p = fl->parent;
+  int i;
+  memcpy(nand, s->and, len*sizeof(char *));
+  for(; p && p->name; p=p->parent)
+    for(i=0; i<len; i++)
+      if(G_UNLIKELY(nand[i] && str_casestr(p->name, nand[i])))
+        nand[i] = NULL;
+  char *and[len];
+  int j=0;
+  for(i=0; i<len; i++)
+    if(nand[i])
+      and[j++] = nand[i];
+  and[j] = NULL;
+  s->and = and;
+  // and now match
+  gboolean r = fl_search_match(fl, s);
+  s->and = oand;
+  return r;
 }
 
 

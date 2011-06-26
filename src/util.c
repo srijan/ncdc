@@ -962,6 +962,29 @@ char *adc_getparam(char **a, char *name, char ***left) {
 }
 
 
+// Get all parameters with the given name. Return value should be g_free()'d,
+// NOT g_strfreev()'ed.
+char **adc_getparams(char **a, char *name) {
+  int n = 10;
+  char **res = g_new(char *, n);
+  int i = 0;
+  while(a && *a) {
+    if(**a && **a == name[0] && (*a)[1] == name[1])
+      res[i++] = *a+2;
+    if(i >= n) {
+      n += 10;
+      res = g_realloc(res, n*sizeof(char *));
+    }
+    a++;
+  }
+  res[i] = NULL;
+  if(res[0])
+    return res;
+  g_free(res);
+  return NULL;
+}
+
+
 GString *adc_generate(char type, int cmd, int source, int dest) {
   GString *c = g_string_sized_new(100);
   g_string_append_c(c, type);

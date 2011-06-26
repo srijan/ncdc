@@ -538,6 +538,101 @@ void hub_msg(struct hub *hub, struct hub_user *user, const char *str) {
 }
 
 
+static void adc_sch(struct hub *hub, struct adc_cmd *cmd) {
+  char *an = adc_getparam(cmd->argv, "AN", NULL); // and
+  char *no = adc_getparam(cmd->argv, "NO", NULL); // not
+  char *ex = adc_getparam(cmd->argv, "EX", NULL); // ext
+  char *le = adc_getparam(cmd->argv, "LE", NULL); // less-than
+  char *ge = adc_getparam(cmd->argv, "GE", NULL); // greater-than
+  char *eq = adc_getparam(cmd->argv, "EQ", NULL); // equal
+  char *to = adc_getparam(cmd->argv, "TO", NULL); // token
+  char *ty = adc_getparam(cmd->argv, "TY", NULL); // type (1=file, 2=dir)
+  char *tr = adc_getparam(cmd->argv, "TR", NULL); // TTH root
+  char *td = adc_getparam(cmd->argv, "TD", NULL); // tree depth
+
+  // no strong enough filters specified? ignore
+  if(!an && !no && !ex && !le && !ge && !eq && !tr)
+    return;
+
+  // le, ge and eq are mutually exclusive (actually, they aren't when they're all equal, but it's still silly)
+  if((eq?1:0) + (le?1:0) + (ge?1:0) > 1)
+    return;
+
+  // Actually matching the tree depth is rather resouce-intensive, since we
+  // don't store it in struct fl_list. Instead, just assume tth_keep_level for
+  // everything. This may be wrong, but if it is, it's most likely to be a
+  // pessimistic estimate, which happens in the case TTH data is converted from
+  // a DC++ client to ncdc.
+  if(td && strtoll(td, NULL, 10) > tth_keep_level)
+    return;
+
+  if(tr && strlen(tr) != 39)
+    return;
+
+  // create search struct
+  struct fl_search s = {};
+  s.sizem = eq ? 0 : le ? -1 : ge ? 1 : -2;
+  s.size = s.sizem == -2 ? 0 : g_ascii_strtoull(eq ? eq : le ? le : ge, NULL, 10);
+  s.filedir = !ty ? 3 : ty[0] == '1' ? 1 : 2;
+  s.and = adc_getparams(cmd->argv, "AN");
+  s.not = adc_getparams(cmd->argv, "NO");
+  s.ext = adc_getparams(cmd->argv, "EX");
+
+  int i = 0;
+  int max = 5; // TODO: 10 for UDP responses
+  struct fl_list *res[max];
+
+  // TTH lookup
+  if(tr) {
+    char root[24];
+    base32_decode(tr, root);
+    GSList *l = fl_local_from_tth(root);
+    // it still has to match the other requirements...
+    for(; i<max && l; l=l->next) {
+      struct fl_list *c = l->data;
+      if(fl_search_match_full(c, &s))
+        res[i++] = c;
+    }
+
+  // Advanced lookup (Noo! This is slooow!)
+  } else
+    i = fl_search_rec(fl_local_list, &s, res, max);
+
+  if(!i)
+    goto adc_search_cleanup;
+
+  int slots = conf_slots();
+  int slots_free = slots - cc_slots_in_use(NULL);
+  if(slots_free < 0)
+    slots_free = 0;
+  char tth[40] = {};
+
+  // reply
+  while(--i>=0) {
+    // TODO: UDP replies if possible
+    GString *r = adc_generate('D', ADCC_RES, hub->sid, cmd->source);
+    if(to)
+      adc_append(r, "TO", to);
+    g_string_append_printf(r, " SL%d SI%"G_GUINT64_FORMAT, slots_free, res[i]->size);
+    char *path = fl_list_path(res[i]);
+    adc_append(r, "FN", path);
+    g_free(path);
+    if(res[i]->isfile) {
+      base32_encode(res[i]->tth, tth);
+      g_string_append_printf(r, " TR%s", tth);
+    } else
+      g_string_append_c(r, '/'); // make sure a directory path ends with a slash
+    net_send(hub->net, r->str);
+    g_string_free(r, TRUE);
+  }
+
+adc_search_cleanup:
+  g_free(s.and);
+  g_free(s.not);
+  g_free(s.ext);
+}
+
+
 static void adc_handle(struct hub *hub, char *msg) {
   struct adc_cmd cmd;
   GError *err = NULL;
@@ -737,6 +832,13 @@ static void adc_handle(struct hub *hub, char *msg) {
     }
     break;
 
+  case ADCC_SCH:
+    if(cmd.type != 'B' && cmd.type != 'D' && cmd.type != 'E' && cmd.type != 'F')
+      g_warning("Invalid message from %s: %s", net_remoteaddr(hub->net), msg);
+    else
+      adc_sch(hub, &cmd);
+    break;
+
   default:
     g_message("Unknown command from %s: %s", net_remoteaddr(hub->net), msg);
   }
@@ -805,7 +907,7 @@ static void nmdc_search(struct hub *hub, char *from, int size_m, guint64 size, i
   char tth[44] = "TTH:";
   tth[43] = 0;
 
-  for(i--; i>=0; i--) {
+  while(--i>=0) {
     char *fl = fl_list_path(res[i]);
     // Windows style path delimiters... why!?
     char *tmp = fl;

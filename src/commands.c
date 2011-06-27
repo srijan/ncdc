@@ -467,6 +467,7 @@ static void c_set(char *args) {
   if((sep = strchr(args, ' '))) {
     *sep = 0;
     val = sep+1;
+    g_strstrip(val);
   }
 
   // get group and key
@@ -474,7 +475,7 @@ static void c_set(char *args) {
     return;
 
   // get
-  if(!val) {
+  if(!val || !val[0]) {
     if(checkalt && !g_key_file_has_key(conf_file, group, key, NULL))
       group = "global";
     s->get(group, key);
@@ -1057,6 +1058,14 @@ static void c_kick(char *args) {
 }
 
 
+static void c_nick(char *args) {
+  // not the most elegant solution, but certainly the most simple.
+  char *c = g_strdup_printf("nick %s", args);
+  c_set(c);
+  g_free(c);
+}
+
+
 // definition of the command list
 static struct cmd cmds[] = {
   { "clear", c_clear, NULL,
@@ -1119,6 +1128,10 @@ static struct cmd cmds[] = {
     "Send a private message to a user on the currently opened hub.\n"
     "When no message is given, the tab will be opened but no message will be sent."
   },
+  { "nick", c_nick, NULL,
+    "[<nick>]", "Alias for `/set nick'.",
+    ""
+  },
   { "open", c_open, c_open_sug,
     "<name>", "Open a new hub tab.",
     "Opens a new tab to use for a hub. The name is a (short) personal name you use to"
@@ -1131,6 +1144,10 @@ static struct cmd cmds[] = {
     "The /password command can be used to send a password to the hub without saving it to the config file.\n"
     "If you wish to login automatically without having to type /password every time, use '/set password <password>'."
     " Be warned, however, that your password will be saved unencrypted in this case."
+  },
+  { "pm", c_msg, c_msg_sug,
+    "<user> [<message>]", "Alias for /msg",
+    ""
   },
   { "quit", c_quit, NULL,
     NULL, "Quit ncdc.",

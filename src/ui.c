@@ -619,7 +619,7 @@ static void ui_userlist_key(struct ui_tab *tab, guint64 key) {
     if(!sel)
       ui_m(NULL, 0, "No user selected.");
     else {
-      hub_grant(tab->hub, sel);
+      cc_grant(sel);
       ui_m(NULL, 0, "Slot granted.");
     }
     break;

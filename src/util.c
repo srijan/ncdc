@@ -104,23 +104,6 @@ GKeyFile *conf_file;
 #endif
 
 
-guint64 rand_64() {
-  // g_rand_new() uses four bytes from /dev/urandom when it's available. Doing
-  // that twice (i.e. reading 8 bytes) should generate enough randomness for a
-  // unique ID. In the case that it uses the current time as fallback, avoid
-  // using the same number twice by calling g_rand_set_seed() on the second
-  // one.
-  GRand *r = g_rand_new();
-  guint32 r1 = g_rand_int(r);
-  g_rand_free(r);
-  r = g_rand_new();
-  g_rand_set_seed(r, g_rand_int(r));
-  guint32 r2 = g_rand_int(r);
-  g_rand_free(r);
-  return (((guint64)r1)<<32) + r2;
-}
-
-
 static void generate_pid() {
   guint64 r = rand_64();
 
@@ -459,6 +442,30 @@ void str_arg2_split(char *str, char **first, char **second) {
     while(**second == ' ')
       (*second)++;
   }
+}
+
+
+guint64 rand_64() {
+  // g_rand_new() uses four bytes from /dev/urandom when it's available. Doing
+  // that twice (i.e. reading 8 bytes) should generate enough randomness for a
+  // unique ID. In the case that it uses the current time as fallback, avoid
+  // using the same number twice by calling g_rand_set_seed() on the second
+  // one.
+  GRand *r = g_rand_new();
+  guint32 r1 = g_rand_int(r);
+  g_rand_free(r);
+  r = g_rand_new();
+  g_rand_set_seed(r, g_rand_int(r));
+  guint32 r2 = g_rand_int(r);
+  g_rand_free(r);
+  return (((guint64)r1)<<32) + r2;
+}
+
+
+// Equality functions for tiger and TTH hashes. Suitable for use in
+// GHashTables.
+gboolean tiger_hash_equal(gconstpointer a, gconstpointer b) {
+  return memcmp(a, b, 24) == 0;
 }
 
 

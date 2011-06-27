@@ -871,11 +871,6 @@ static gboolean fl_init_list(struct fl_list *fl) {
 }
 
 
-static gboolean fl_init_hash_equal(gconstpointer a, gconstpointer b) {
-  return memcmp(a, b, 24) == 0;
-}
-
-
 static gboolean fl_init_autorefresh(gpointer dat) {
   int r = conf_autorefresh();
   time_t t = time(NULL);
@@ -899,7 +894,7 @@ void fl_init() {
   fl_hash_queue = g_hash_table_new(g_direct_hash, g_direct_equal);
   // Even though the keys are the tth roots, we can just use g_int_hash. The
   // first four bytes provide enough unique data anyway.
-  fl_hash_index = g_hash_table_new(g_int_hash, fl_init_hash_equal);
+  fl_hash_index = g_hash_table_new(g_int_hash, tiger_hash_equal);
   ratecalc_init(&fl_hash_rate);
 
   // flush unsaved data to disk every 60 seconds

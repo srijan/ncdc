@@ -30,6 +30,20 @@
 #include <sys/stat.h>
 
 
+// List (well, table) of users who are granted a slot. Key = CID (g_strdup'ed),
+// value = (void *)1. cc_init_global() is responsible for initializing it.
+GHashTable *cc_granted = NULL;
+
+
+void cc_grant(struct hub_user *u) {
+  if(!g_hash_table_lookup(cc_granted, u->cid))
+    g_hash_table_insert(cc_granted, g_strdup(u->cid), (void *)1);
+  // TODO: open a connection to the user?
+}
+
+
+
+
 // List of expected incoming connections.
 // This is list managed by the functions/macros below, in addition to
 // cc_init_global(), cc_remove_hub() and cc_get_hub().
@@ -129,6 +143,7 @@ struct cc {
     cc_expected = g_queue_new();\
     g_timeout_add_seconds_full(G_PRIORITY_LOW, 120, cc_expect_check, NULL, NULL);\
     cc_list = g_sequence_new(NULL);\
+    cc_granted = g_hash_table_new_full(g_int_hash, tiger_hash_equal, g_free, NULL);\
   } while(0)
 
 #endif
@@ -422,9 +437,7 @@ static void handle_id(struct cc *cc, struct hub_user *u) {
     return;
   }
 
-  // TODO: ADC should use CIDs here...
-  if(!cc->adc)
-    cc->slot_granted = g_hash_table_lookup(cc->hub->grants, cc->nick_raw) ? TRUE : FALSE;
+  cc->slot_granted = g_hash_table_lookup(cc_granted, u->cid) ? TRUE : FALSE;
 }
 
 

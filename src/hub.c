@@ -75,10 +75,6 @@ struct hub {
   // user list, key = username (in hub encoding for NMDC), value = struct hub_user *
   GHashTable *users;
   GHashTable *sessions; // user list, with sid as index (ADC only)
-  // list of users who have been granted a slot. key = username (in hub
-  // encoding), value = (void *)1. A user will stay in this table for as long
-  // as the hub tab is open, I guess that's good enough.
-  GHashTable *grants;
   int sharecount;
   guint64 sharesize;
   // what we and the hub support
@@ -414,13 +410,6 @@ void hub_password(struct hub *hub, char *pass) {
 void hub_kick(struct hub *hub, struct hub_user *u) {
   g_return_if_fail(hub->nick_valid && u);
   net_sendf(hub->net, "$Kick %s", u->name_hub);
-}
-
-
-void hub_grant(struct hub *hub, struct hub_user *u) {
-  if(!g_hash_table_lookup(hub->grants, u->name_hub))
-    g_hash_table_insert(hub->grants, g_strdup(u->name_hub), (void *)1);
-  // TODO: open a connection to the user?
 }
 
 
@@ -1320,7 +1309,6 @@ struct hub *hub_create(struct ui_tab *tab) {
   hub->net = net_create('|', hub, TRUE, handle_cmd, handle_error);
   hub->tab = tab;
   hub->users = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, user_free);
-  hub->grants = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
   hub->sessions = g_hash_table_new(g_direct_hash, g_direct_equal);
   hub->nfo_timer = g_timeout_add_seconds(5*60, check_nfo, hub);
   return hub;
@@ -1402,7 +1390,6 @@ void hub_free(struct hub *hub) {
   g_free(hub->gpa_salt);
   g_hash_table_unref(hub->users);
   g_hash_table_unref(hub->sessions);
-  g_hash_table_unref(hub->grants);
   g_source_remove(hub->nfo_timer);
   g_free(hub);
 }

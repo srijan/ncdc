@@ -1022,7 +1022,7 @@ static void c_grant(char *args) {
   if(!u)
     ui_m(NULL, 0, "No user found with that name.");
   else {
-    hub_grant(tab->hub, u);
+    cc_grant(u);
     ui_m(NULL, 0, "Slot granted.");
   }
 }

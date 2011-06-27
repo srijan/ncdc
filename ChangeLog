@@ -1,4 +1,16 @@
-0.2 - ?
+0.2 - 2011-06-27
+	- ADC support
+	- Added slot granting and /grant command
+	- Added /kick (for NMDC hubs)
+	- Added /pm and /nick aliasses
+	- Added support for passworded login
+	- Added /me command (mostly useful for ADC hubs)
+	- Added /whois command
+	- Added 'share_hidden' option (default: false)
+	- Improved minislots support
+	- Added 'minislots' and 'minislot_size' options
+	- Slightly improved user list and connection list
+	- /set displays default values for unset options
 
 0.1 - 2011-06-20
 	Initial version

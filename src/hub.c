@@ -369,7 +369,7 @@ static void user_adc_nfo(struct hub *hub, struct hub_user *u, struct adc_cmd *cm
       u->hasudp4 = !!strstr(p, "UDP4");
       break;
     case P('C','T'): // client type (only used to figure out u->isop)
-      u->isop = strtol(p, NULL, 10) >= 4;
+      u->isop = (strtol(p, NULL, 10) & (4 | 8 | 16 | 32)) > 0;
       break;
     }
   }

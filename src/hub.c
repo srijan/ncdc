@@ -876,13 +876,13 @@ static void adc_handle(struct hub *hub, char *msg) {
     break;
 
   case ADCC_MSG:;
-    if(cmd.argc < 1 || (cmd.type != 'B' && cmd.type != 'E' && cmd.type != 'I'))
+    if(cmd.argc < 1 || (cmd.type != 'B' && cmd.type != 'E' && cmd.type != 'D' && cmd.type != 'I'))
       g_warning("Invalid message from %s: %s", net_remoteaddr(hub->net), msg);
     else {
       char *pm = adc_getparam(cmd.argv+1, "PM", NULL);
       gboolean me = adc_getparam(cmd.argv+1, "ME", NULL) != NULL;
       struct hub_user *u = cmd.type != 'I' ? g_hash_table_lookup(hub->sessions, GINT_TO_POINTER(cmd.source)) : NULL;
-      struct hub_user *d = cmd.type != 'I' && cmd.source == hub->sid
+      struct hub_user *d = (cmd.type == 'E' || cmd.type == 'D') && cmd.source == hub->sid
         ? g_hash_table_lookup(hub->sessions, GINT_TO_POINTER(cmd.dest)) : NULL;
       if(pm && (cmd.type != 'E' || strlen(pm) != 4 || ADC_DFCC(pm) != cmd.source))
         g_warning("Group chat is not supported yet. (%s: %s)", net_remoteaddr(hub->net), msg);
@@ -890,7 +890,7 @@ static void adc_handle(struct hub *hub, char *msg) {
         g_warning("Message from someone not on this hub. (%s: %s)", net_remoteaddr(hub->net), msg);
       else {
         char *m = g_strdup_printf(me ? "** %s %s" : "<%s> %s", cmd.type == 'I' ? "hub" : u->name, cmd.argv[0]);
-        if(cmd.type == 'E')
+        if(cmd.type == 'E' || cmd.type == 'D')
           ui_hub_msg(hub->tab, cmd.source == hub->sid ? d : u, m);
         else
           ui_m(hub->tab, UIM_CHAT|UIP_MED, m);

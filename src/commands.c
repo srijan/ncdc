@@ -1050,6 +1050,8 @@ static void c_kick(char *args) {
     ui_m(NULL, 0, "Not connected or logged in yet.");
   else if(!args[0])
     ui_m(NULL, 0, "No user specified.");
+  else if(tab->hub->adc)
+    ui_m(NULL, 0, "This command only works on NMDC hubs.");
   else {
     struct hub_user *u = hub_user_get(tab->hub, args);
     if(!u)

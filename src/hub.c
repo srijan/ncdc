@@ -419,7 +419,7 @@ void hub_password(struct hub *hub, char *pass) {
 
 
 void hub_kick(struct hub *hub, struct hub_user *u) {
-  g_return_if_fail(hub->nick_valid && u);
+  g_return_if_fail(!hub->adc && hub->nick_valid && u);
   net_sendf(hub->net, "$Kick %s", u->name_hub);
 }
 

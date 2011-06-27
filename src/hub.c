@@ -381,7 +381,7 @@ static void user_adc_nfo(struct hub *hub, struct hub_user *u, struct adc_cmd *cm
 
 
 void hub_password(struct hub *hub, char *pass) {
-  g_return_if_fail(hub->adc ? !hub->nick_valid : hub->state == ADC_S_VERIFY);
+  g_return_if_fail(hub->adc ? hub->state == ADC_S_VERIFY : !hub->nick_valid);
 
   char *rpass = !pass ? g_key_file_get_string(conf_file, hub->tab->name, "password", NULL) : g_strdup(pass);
   if(!rpass) {

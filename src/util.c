@@ -544,18 +544,21 @@ void base32_encode(const char *from, char *to) {
 }
 
 
-// from[39] (ascii) -> to[24] (binary)
+// from[n] (ascii) -> to[floor(n*5/8)] (binary)
+// from must be zero-terminated.
 void base32_decode(const char *from, char *to) {
-  int i, bits = 0, idx = 0, value = 0;
-  for(i=0; i<39; i++) {
-    value = (value << 5) | (from[i] <= '9' ? (26+(from[i]-'2')) : from[i]-'A');
+  int bits = 0, idx = 0, value = 0;
+  while(*from) {
+    value = (value << 5) | (*from <= '9' ? (26+(*from-'2')) : *from-'A');
     bits += 5;
     while(bits > 8) {
       to[idx++] = (value >> (bits-8)) & 0xFF;
       bits -= 8;
     }
+    from++;
   }
 }
+
 
 
 // Handy wrappers to efficiently store an IPv4 address in an integer. This is
@@ -838,7 +841,7 @@ struct adc_cmd {
 
 
 static gboolean int_in_array(const int *arr, int needle) {
-  for(; arr&&*arr; arr--)
+  for(; arr&&*arr; arr++)
     if(*arr == needle)
       return TRUE;
   return FALSE;

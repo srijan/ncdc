@@ -87,6 +87,9 @@ struct hub {
   guint nfo_timer;
   // reconnect timer (30 sec.)
   guint reconnect_timer;
+  // ADC login info
+  char *gpa_salt;
+  int gpa_salt_len;
   // last info we sent to the hub
   char *nfo_desc, *nfo_conn, *nfo_mail;
   unsigned char nfo_slots, nfo_h_norm, nfo_h_reg, nfo_h_op;
@@ -368,13 +371,25 @@ static void user_adc_nfo(struct hub *hub, struct hub_user *u, struct adc_cmd *cm
 
 
 void hub_password(struct hub *hub, char *pass) {
-  g_return_if_fail(!hub->nick_valid);
+  g_return_if_fail(hub->adc ? !hub->nick_valid : hub->state == ADC_S_VERIFY);
+
   char *rpass = !pass ? g_key_file_get_string(conf_file, hub->tab->name, "password", NULL) : g_strdup(pass);
-  if(!rpass)
+  if(!rpass) {
     ui_m(hub->tab, UIP_HIGH,
       "\nPassword required. Type '/password <your password>' to log in without saving your password."
       "\nOr use '/set password <your password>' to log in and save your password in the config file (unencrypted!).\n");
-  else {
+  } else if(hub->adc) {
+    char enc[40] = {};
+    char res[24];
+    struct tiger_ctx t;
+    tiger_init(&t);
+    tiger_update(&t, rpass, strlen(rpass));
+    tiger_update(&t, hub->gpa_salt, hub->gpa_salt_len);
+    tiger_final(&t, res);
+    base32_encode(res, enc);
+    net_sendf(hub->net, "HPAS %s", enc);
+    hub->isreg = TRUE;
+  } else {
     net_sendf(hub->net, "$MyPass %s", rpass); // Password is sent raw, not encoded. Don't think encoding really matters here.
     hub->isreg = TRUE;
   }
@@ -710,11 +725,6 @@ static void adc_handle(struct hub *hub, char *msg) {
         g_free(hub->hubname);
         hub->hubname = g_strdup(hname);
       }
-      // set state
-      if(hub->state == ADC_S_IDENTIFY || hub->state == ADC_S_VERIFY) {
-        hub->state = ADC_S_NORMAL;
-        hub->nick_valid = TRUE;
-      }
     } else if(cmd.type == 'B') {
       char *nick = adc_getparam(cmd.argv, "NI", NULL);
       struct hub_user *u = g_hash_table_lookup(hub->sessions, GINT_TO_POINTER(cmd.source));
@@ -729,8 +739,11 @@ static void adc_handle(struct hub *hub, char *msg) {
           hub->sharesize -= u->sharesize;
         user_adc_nfo(hub, u, &cmd);
         hub->sharesize += u->sharesize;
-        // if we received our own INF, that means the user list is complete.
+        // if we received our own INF, that means the user list is complete and
+        // we are properly logged in.
         if(u->sid == hub->sid) {
+          hub->state = ADC_S_NORMAL;
+          hub->nick_valid = TRUE;
           // Some broken hubs send our own INF more than once, and not always
           // at the end. The following will help the detection in that case,
           // but brakes with good hubs. :-(
@@ -864,6 +877,20 @@ static void adc_handle(struct hub *hub, char *msg) {
       g_warning("Invalid message from %s: %s", net_remoteaddr(hub->net), msg);
     else if(cmd.source != hub->sid)
       adc_sch(hub, &cmd);
+    break;
+
+  case ADCC_GPA:
+    if(cmd.type != 'I' || cmd.argc < 1 || (hub->state != ADC_S_IDENTIFY && hub->state != ADC_S_VERIFY))
+      g_warning("Invalid message from %s: %s", net_remoteaddr(hub->net), msg);
+    else {
+      g_free(hub->gpa_salt);
+      hub->gpa_salt = NULL;
+      hub->state = ADC_S_VERIFY;
+      hub->gpa_salt_len = (strlen(cmd.argv[0])*5)/8;
+      hub->gpa_salt = g_new(char, hub->gpa_salt_len);
+      base32_decode(cmd.argv[0], hub->gpa_salt);
+      hub_password(hub, NULL);
+    }
     break;
 
   default:
@@ -1358,6 +1385,7 @@ void hub_free(struct hub *hub) {
   g_free(hub->nfo_desc);
   g_free(hub->nfo_conn);
   g_free(hub->nfo_mail);
+  g_free(hub->gpa_salt);
   g_hash_table_unref(hub->users);
   g_hash_table_unref(hub->sessions);
   g_hash_table_unref(hub->grants);

@@ -44,6 +44,7 @@ struct fl_list;
 struct hub;
 struct hub_user;
 struct net;
+struct tiger_ctx;
 struct tth_ctx;
 struct ui_listing;
 struct ui_logwindow;

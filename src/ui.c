@@ -219,6 +219,14 @@ struct ui_tab *ui_hub_create(const char *name) {
   tab->type = UIT_HUB;
   tab->log = ui_logwindow_create(tab->name);
   tab->hub = hub_create(tab);
+  // Every hub tab should have a unique ID. The name of the tab (which is the
+  // group name in the config file) can be made changable in the future, but
+  // internally we'd want a more stable ID for user CID creation on NMDC hubs,
+  // so let's create one.
+  if(!g_key_file_has_key(conf_file, tab->name, "hubid", NULL)) {
+    g_key_file_set_uint64(conf_file, tab->name, "hubid", rand_64());
+    conf_save();
+  }
   // already used this name before? open connection again
   if(g_key_file_has_key(conf_file, tab->name, "hubaddr", NULL))
     hub_connect(tab->hub);

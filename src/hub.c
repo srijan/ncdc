@@ -117,6 +117,20 @@ static struct hub_user *user_add(struct hub *hub, const char *name) {
   else {
     u->name_hub = g_strdup(name);
     u->name = charset_convert(hub, TRUE, name);
+    // For NMDC users, generate some (fictive) CID based on user and hub name.
+    // This gives us a single way to uniquely identify a user for both
+    // protocols.  Of course, this CID is not very stable, it will be
+    // invalidated when a user changes his nick or when the name of this hub is
+    // changed. It is also not global, a user has a different CID on different
+    // hubs. These issues are all related to the NMDC protocol and there are no
+    // reliable workarounds.
+    guint64 r = g_key_file_get_uint64(conf_file, hub->tab->name, "hubid", NULL);
+    char res[24];
+    struct tiger_ctx t;
+    tiger_init(&t);
+    tiger_update(&t, (char *)&r, 8);
+    tiger_update(&t, u->name_hub, strlen(u->name_hub));
+    tiger_final(&t, res);
   }
   g_hash_table_insert(hub->users, hub->adc ? u->name : u->name_hub, u);
   ui_hub_userchange(hub->tab, UIHUB_UC_JOIN, u);

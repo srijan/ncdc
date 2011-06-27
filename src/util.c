@@ -104,12 +104,12 @@ GKeyFile *conf_file;
 #endif
 
 
-
-static void generate_pid() {
+guint64 rand_64() {
   // g_rand_new() uses four bytes from /dev/urandom when it's available. Doing
   // that twice (i.e. reading 8 bytes) should generate enough randomness for a
-  // PID. In the case that it uses the current time as fallback, avoid using
-  // the same number twice by calling g_rand_set_seed() on the second one.
+  // unique ID. In the case that it uses the current time as fallback, avoid
+  // using the same number twice by calling g_rand_set_seed() on the second
+  // one.
   GRand *r = g_rand_new();
   guint32 r1 = g_rand_int(r);
   g_rand_free(r);
@@ -117,13 +117,17 @@ static void generate_pid() {
   g_rand_set_seed(r, g_rand_int(r));
   guint32 r2 = g_rand_int(r);
   g_rand_free(r);
+  return (((guint64)r1)<<32) + r2;
+}
 
-  // now that we have two random integers, hash them to generate our PID
-  static struct tiger_ctx t; // better not allocate this on the stack
+
+static void generate_pid() {
+  guint64 r = rand_64();
+
+  struct tiger_ctx t;
   char pid[24];
   tiger_init(&t);
-  tiger_update(&t, (char *)&r1, 4);
-  tiger_update(&t, (char *)&r2, 4);
+  tiger_update(&t, (char *)&r, 8);
   tiger_final(&t, pid);
 
   // now hash the PID so we have our CID

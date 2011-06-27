@@ -692,10 +692,16 @@ static void handle_connect(struct net *n) {
   else if(cc->adc) {
     cc->state = ADC_S_PROTOCOL;
     net_send(n, "CSUP ADBASE ADTIGR ADBZIP");
-    // TODO: send a "CSTA 000  RF<hub_url>"?
+    // Note that while http://www.adcportal.com/wiki/REF says we should send
+    // the hostname used to connect to the hub, the actual IP is easier to get
+    // in our case. I personally don't see how having a hostname is better than
+    // having an actual IP, but an attacked user who gets incoming connections
+    // from both ncdc and other clients now knows both the DNS *and* the IP of
+    // the hub. :-)
+    net_sendf(n, "CSTA 000 referrer RFadc://%s", net_remoteaddr(cc->hub->net));
   } else {
     net_sendf(n, "$MyNick %s", cc->hub->nick_hub);
-    net_sendf(n, "$Lock EXTENDEDPROTOCOL/wut? Pk=%s-%s", PACKAGE_NAME, PACKAGE_VERSION);
+    net_sendf(n, "$Lock EXTENDEDPROTOCOL/wut? Pk=%s-%s,Ref=%s", PACKAGE_NAME, PACKAGE_VERSION, net_remoteaddr(cc->hub->net));
   }
 }
 

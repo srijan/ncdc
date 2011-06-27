@@ -380,6 +380,17 @@ static void user_adc_nfo(struct hub *hub, struct hub_user *u, struct adc_cmd *cm
 // hub stuff
 
 
+// should be called when something changes that may affect our INF or $MyINFO
+void hub_global_nfochange() {
+  GList *n;
+  for(n=ui_tabs; n; n=n->next) {
+    struct ui_tab *t = n->data;
+    if(t->type == UIT_HUB && t->hub->nick_valid)
+      hub_send_nfo(t->hub);
+  }
+}
+
+
 void hub_password(struct hub *hub, char *pass) {
   g_return_if_fail(hub->adc ? hub->state == ADC_S_VERIFY : !hub->nick_valid);
 

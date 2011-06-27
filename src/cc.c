@@ -794,8 +794,7 @@ guint16  cc_listen_port = 0;
 static int cc_listen_src = 0;
 
 
-// TODO: immediately send $MyINFO on A/P change?
-void cc_listen_stop() {
+static void cc_listen_stop() {
   if(!cc_listen)
     return;
   g_free(cc_listen_ip);
@@ -812,6 +811,7 @@ static gboolean listen_handle(GSocket *sock, GIOCondition cond, gpointer dat) {
   if(!s) {
     if(err->code != G_IO_ERROR_WOULD_BLOCK) {
       ui_mf(ui_main, 0, "Listen error: %s. Switching to passive mode.", err->message);
+      hub_global_nfochange();
       cc_listen_stop();
     }
     g_error_free(err);
@@ -827,8 +827,10 @@ gboolean cc_listen_start() {
   GError *err = NULL;
 
   cc_listen_stop();
-  if(!g_key_file_get_boolean(conf_file, "global", "active", NULL))
+  if(!g_key_file_get_boolean(conf_file, "global", "active", NULL)) {
+    hub_global_nfochange();
     return FALSE;
+  }
 
   // can be 0, in which case it'll be randomly assigned
   int port = g_key_file_get_integer(conf_file, "global", "active_port", NULL);
@@ -871,6 +873,7 @@ gboolean cc_listen_start() {
   g_object_unref(addr);
 
   ui_mf(ui_main, 0, "Listening on port %d (%s).", cc_listen_port, cc_listen_ip);
+  hub_global_nfochange();
   return TRUE;
 }
 

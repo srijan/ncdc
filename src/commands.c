@@ -137,18 +137,7 @@ static void set_userinfo(char *group, char *key, char *val) {
     g_key_file_set_string(conf_file, group, key, val);
     get_string(group, key);
   }
-  // hub-specific setting, so only one hub to check
-  if(group[0] == '#')
-    hub_send_nfo(tab->hub);
-  // global setting, check affected hubs
-  else {
-    GList *n;
-    for(n=ui_tabs; n; n=n->next) {
-      struct ui_tab *t = n->data;
-      if(t->type == UIT_HUB && !g_key_file_has_key(conf_file, t->name, key, NULL))
-        hub_send_nfo(t->hub);
-    }
-  }
+  hub_global_nfochange();
 }
 
 
@@ -304,6 +293,7 @@ static void set_slots(char *group, char *key, char *val) {
     else {
       g_key_file_set_integer(conf_file, group, key, v);
       get_slots(group, key);
+      hub_global_nfochange();
     }
   }
 }

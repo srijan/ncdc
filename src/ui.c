@@ -224,7 +224,13 @@ struct ui_tab *ui_hub_create(const char *name) {
   // internally we'd want a more stable ID for user CID creation on NMDC hubs,
   // so let's create one.
   if(!g_key_file_has_key(conf_file, tab->name, "hubid", NULL)) {
+#if GLIB_CHECK_VERSION(2, 26, 0)
     g_key_file_set_uint64(conf_file, tab->name, "hubid", rand_64());
+#else
+    char *tmp = g_strdup_printf("%"G_GUINT64_FORMAT, rand_64());
+    g_key_file_set_string(conf_file, tab->name, "hubid", tmp);
+    g_free(tmp);
+#endif
     conf_save();
   }
   // already used this name before? open connection again

@@ -120,7 +120,13 @@ static struct hub_user *user_add(struct hub *hub, const char *name) {
     // changed. It is also not global, a user has a different CID on different
     // hubs. These issues are all related to the NMDC protocol and there are no
     // reliable workarounds.
+#if GLIB_CHECK_VERSION(2, 26, 0)
     guint64 r = g_key_file_get_uint64(conf_file, hub->tab->name, "hubid", NULL);
+#else
+    char *tmp = g_key_file_get_string(conf_file, hub->tab->name, "hubid", NULL);
+    guint64 r = g_ascii_strtoull(tmp, NULL, 10);
+    g_free(tmp);
+#endif
     char res[24];
     struct tiger_ctx t;
     tiger_init(&t);

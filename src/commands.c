@@ -555,7 +555,8 @@ static void c_quit(char *args) {
 }
 
 
-static void c_say(char *args) {
+// handle /say and /me
+static void sayme(char *args, gboolean me) {
   if(tab->type != UIT_HUB && tab->type != UIT_MSG)
     ui_m(NULL, 0, "This command can only be used on hub and message tabs.");
   else if(!tab->hub->nick_valid)
@@ -563,11 +564,21 @@ static void c_say(char *args) {
   else if(!args[0])
     ui_m(NULL, 0, "Message empty.");
   else if(tab->type == UIT_HUB)
-    hub_say(tab->hub, args);
+    hub_say(tab->hub, args, me);
   else if(!tab->msg_user)
     ui_m(NULL, 0, "User is not online.");
   else
-    hub_msg(tab->hub, tab->msg_user, args);
+    hub_msg(tab->hub, tab->msg_user, args, me);
+}
+
+
+static void c_say(char *args) {
+  sayme(args, FALSE);
+}
+
+
+static void c_me(char *args) {
+  sayme(args, TRUE);
 }
 
 
@@ -597,7 +608,7 @@ static void c_msg(char *args) {
         ui_tab_cur = g_list_find(ui_tabs, t);
       // if we need to send something, do so
       if(sep && *sep)
-        hub_msg(tab->hub, t->msg_user, sep);
+        hub_msg(tab->hub, t->msg_user, sep, FALSE);
     }
   }
 }
@@ -944,6 +955,7 @@ static void nick_sug(char *args, char **sug, gboolean append) {
 }
 
 
+// also used for c_me
 static void c_say_sug(char *args, char **sug) {
   nick_sug(args, sug, TRUE);
 }
@@ -1122,6 +1134,13 @@ static struct cmd cmds[] = {
   { "kick", c_kick, c_msg_sug,
     "<user>", "Kick a user from the hub.",
     "You need to be an OP to be able to use this command."
+  },
+  { "me", c_me, c_say_sug,
+    "<message>", "Chat in third person.",
+    "This allows you to talk in third person. Most clients will display your message as something like:\n"
+    "  * Nick is doing something\n\n"
+    "Note that this command only works correctly on ADC hubs. The NMDC protocol"
+    " does not have this feature, and your message will be sent as-is, including the /me."
   },
   { "msg", c_msg, c_msg_sug,
     "<user> [<message>]", "Send a private message.",

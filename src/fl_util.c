@@ -293,7 +293,7 @@ int fl_search_rec(struct fl_list *parent, struct fl_search *s, struct fl_list **
   // weed out stuff from 'and' if it's already matched in parent (I'm assuming
   // that stuff matching the parent of parent has already been removed)
   char **o = s->and;
-  char *nand[g_strv_length(o)];
+  char *nand[o ? g_strv_length(o) : 0];
   int i = 0;
   for(; *o; o++)
     if(G_LIKELY(!parent->name || !str_casestr(parent->name, *o)))
@@ -319,7 +319,7 @@ int fl_search_rec(struct fl_list *parent, struct fl_search *s, struct fl_list **
 gboolean fl_search_match_full(struct fl_list *fl, struct fl_search *s) {
   // weed out stuff from 'and' if it's already matched in any of its parents.
   char **oand = s->and;
-  int len = g_strv_length(s->and);
+  int len = s->and ? g_strv_length(s->and) : 0;
   char *nand[len];
   struct fl_list *p = fl->parent;
   int i;

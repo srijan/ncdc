@@ -1109,12 +1109,13 @@ static struct cmd cmds[] = {
   { "grant", c_grant, c_msg_sug,
     "[<user>]", "Grant someone a slot.",
     "Granting a slot to someone allows the user to download from you even if you have no free slots.\n\n"
-    "The slot will be granted for as long as the hub tab stays open. If you"
-    " close or re-open the hub tab or if you restart ncdc, the user will have to"
-    " wait for a regular slot. Unless, of course, you /grant a slot again.\n\n"
-    "Also note that a granted slot is specific to a single hub. If the user is"
-    " also on other hubs, he/she will not be granted a slot on those hubs."
-    " (This is a limitation in the NMDC protocol)."
+    "The slot will be granted for as long as ncdc stays open. If you restart"
+    " ncdc, the user will have to wait for a regular slot. Unless, of course, you"
+    " /grant a slot again.\n\n"
+    "Also note that in the case of NMDC, a granted slot is specific to a single"
+    " hub. If the user is" " also on other hubs, he/she will not be granted a"
+    " slot on those hubs. This is a limitation in the NMDC protocol, and has been"
+    " fixed in ADC."
   },
   { "help", c_help, c_help_sug,
     "[<command>]", "Request information on commands.",

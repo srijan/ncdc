@@ -732,12 +732,9 @@ static void c_disconnect(char *args) {
     ui_m(NULL, 0, "This command does not accept any arguments.");
   else if(tab->type != UIT_HUB)
     ui_m(NULL, 0, "This command can only be used on hub tabs.");
-  else if(!tab->hub->net->conn && !tab->hub->reconnect_timer)
+  else if(!tab->hub->net->conn && !tab->hub->reconnect_timer && !tab->hub->net->connecting)
     ui_m(NULL, 0, "Not connected.");
-  else if(tab->hub->reconnect_timer) {
-    g_source_remove(tab->hub->reconnect_timer);
-    tab->hub->reconnect_timer = 0;
-  } else
+  else
     hub_disconnect(tab->hub, FALSE);
 }
 
@@ -748,7 +745,7 @@ static void c_reconnect(char *args) {
   else if(tab->type != UIT_HUB)
     ui_m(NULL, 0, "This command can only be used on hub tabs.");
   else {
-    if(tab->hub->net->conn)
+    if(tab->hub->net->conn || tab->hub->net->connecting || tab->hub->reconnect_timer)
       hub_disconnect(tab->hub, FALSE);
     c_connect(""); // also checks for the existence of "hubaddr"
   }

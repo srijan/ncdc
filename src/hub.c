@@ -1381,6 +1381,10 @@ void hub_connect(struct hub *hub) {
 
 
 void hub_disconnect(struct hub *hub, gboolean recon) {
+  if(hub->reconnect_timer) {
+    g_source_remove(hub->reconnect_timer);
+    hub->reconnect_timer = 0;
+  }
   net_disconnect(hub->net);
   g_hash_table_remove_all(hub->sessions);
   g_hash_table_remove_all(hub->users);

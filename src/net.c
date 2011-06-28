@@ -128,14 +128,15 @@ struct net {
     g_cancellable_cancel((n)->cancel);\
     g_object_unref((n)->cancel);\
     (n)->cancel = g_cancellable_new();\
+    (n)->connecting = FALSE;\
   } while(0)
 
 
 // does this function block?
 #define net_disconnect(n) do {\
+    net_cancel(n);\
     if((n)->conn) {\
       g_debug("%s- Disconnected.", net_remoteaddr(n));\
-      net_cancel(n);\
       g_object_unref((n)->conn);\
       (n)->conn = NULL;\
       if((n)->setsock) {\
@@ -380,17 +381,19 @@ static void handle_setconn(struct net *n, GSocketConnection *conn) {
 
 
 static void handle_connect(GObject *src, GAsyncResult *res, gpointer dat) {
-  struct net *n = dat;
-  n->connecting = FALSE;
+  struct net *n = dat; // make sure to not dereference this when _finish() returns G_IO_ERROR_CANCELLED
 
   GError *err = NULL;
   GSocketConnection *conn = g_socket_client_connect_to_host_finish(G_SOCKET_CLIENT(src), res, &err);
 
   if(!conn) {
-    if(err->code != G_IO_ERROR_CANCELLED)
+    if(err->code != G_IO_ERROR_CANCELLED) {
       n->cb_err(n, NETERR_CONN, err);
+      n->connecting = TRUE;
+    }
     g_error_free(err);
   } else {
+    n->connecting = TRUE;
     handle_setconn(n, conn);
     n->cb_con(n);
   }

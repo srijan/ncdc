@@ -765,6 +765,8 @@ static void c_close(char *args) {
     ui_msg_close(tab);
   else if(tab->type == UIT_CONN)
     ui_conn_close();
+  else if(tab->type == UIT_FL)
+    ui_fl_close(tab);
 }
 
 
@@ -1067,10 +1069,37 @@ static void c_nick(char *args) {
 }
 
 
+static void c_browse(char *args) {
+  if(args[0])
+    ui_m(NULL, 0, "This command does not accept any arguments.");
+  else if(!fl_local_list)
+    ui_m(NULL, 0, "Nothing shared.");
+  else {
+    GList *n;
+    for(n=ui_tabs; n; n=n->next)
+      if(((struct ui_tab *)n->data)->type == UIT_FL)
+        break;
+    if(n)
+      ui_tab_cur = n;
+    else {
+      // Make a copy, as the file browser can't really handle dynamic changes to
+      // the file list (yet?).
+      ui_tab_open(ui_fl_create(fl_list_copy(fl_local_list)));
+    }
+  }
+}
+
+
 // definition of the command list
 static struct cmd cmds[] = {
+  { "browse", c_browse, NULL,
+    NULL, "Browse own file list.",
+    "This opens a new tab where you can browse your own file list.\n"
+    "Note that changes to your list are not immediately visible in the browser."
+    " You need to re-open the tab to get the latest version of your list."
+  },
   { "clear", c_clear, NULL,
-    NULL, "Clear the display",
+    NULL, "Clear the display.",
     "Clears the log displayed on the screen. Does not affect the log files in any way.\n"
     "Ctrl+l is a shortcut for this command."
   },

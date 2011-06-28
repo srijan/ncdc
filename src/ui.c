@@ -42,6 +42,7 @@
 #define UIT_USERLIST 2
 #define UIT_MSG      3
 #define UIT_CONN     4
+#define UIT_FL       5
 
 struct ui_tab {
   int type; // UIT_ type
@@ -65,6 +66,8 @@ struct ui_tab {
   gboolean user_hide_tag;
   gboolean user_hide_mail;
   gboolean user_hide_conn;
+  // FL
+  struct fl_list *fl_list;
 };
 
 #endif
@@ -856,6 +859,152 @@ static void ui_conn_key(guint64 key) {
 
 
 
+
+// File list browser (UIT_FL)
+
+// TODO: Current implementation only works for our own (local) file list,
+// extend to make it work for others as well.
+
+// File list is passed to this tab, and will be freed upon closing.
+struct ui_tab *ui_fl_create(struct fl_list *fl) {
+  struct ui_tab *tab = g_new0(struct ui_tab, 1);
+  tab->type = UIT_FL;
+  tab->name = "/own";
+  tab->fl_list = fl;
+  tab->list = fl && fl->sub ? ui_listing_create(fl->sub) : NULL;
+  return tab;
+}
+
+
+void ui_fl_close(struct ui_tab *tab) {
+  ui_listing_free(tab->list);
+  ui_tab_remove(tab);
+  struct fl_list *p = tab->fl_list;
+  while(p && p->parent)
+    p = p->parent;
+  if(p)
+    fl_list_free(p);
+  g_free(tab);
+}
+
+
+static char *ui_fl_title(struct ui_tab *tab) {
+  return g_strdup_printf("Browsing own file list.");
+}
+
+
+static void ui_fl_draw_row(struct ui_listing *list, GSequenceIter *iter, int row, void *dat) {
+  struct fl_list *fl = g_sequence_get(iter);
+
+  if(iter == list->sel) {
+    attron(A_BOLD);
+    mvaddch(row, 0, '>');
+    attroff(A_BOLD);
+  }
+
+  mvaddch(row, 2,
+    fl->isfile && !fl->hastth ? 'H' :
+    !fl->isfile && (fl->incomplete || fl->hastth != g_sequence_iter_get_position(g_sequence_get_end_iter(fl->sub))) ? 'I' : ' ');
+
+  mvaddstr(row, 4, str_formatsize(fl->size));
+  if(!fl->isfile)
+    mvaddch(row, 17, '/');
+  mvaddnstr(row, 18, fl->name, str_offset_from_columns(fl->name, wincols-19));
+}
+
+
+static void ui_fl_draw(struct ui_tab *tab) {
+  char tmp[100];
+
+  // first line
+  mvhline(1, 0, ACS_HLINE, wincols);
+  mvaddch(1, 3, ' ');
+  char *path = tab->fl_list ? fl_list_path(tab->fl_list) : g_strdup("/");
+  int c = str_columns(path) - wincols + 8;
+  mvaddstr(1, 4, path+str_offset_from_columns(path, MAX(0, c)));
+  g_free(path);
+  addch(' ');
+
+  // rows
+  int pos = -1;
+  if(tab->fl_list && tab->fl_list->sub && g_sequence_iter_get_position(g_sequence_get_end_iter(tab->fl_list->sub)))
+    pos = ui_listing_draw(tab->list, 2, winrows-4, ui_fl_draw_row, NULL);
+  else
+    mvaddstr(3, 2, "Directory empty.");
+
+  // footer
+  struct fl_list *sel = pos >= 0 && !g_sequence_iter_is_end(tab->list->sel) ? g_sequence_get(tab->list->sel) : NULL;
+  attron(A_REVERSE);
+  mvhline(winrows-3, 0, ' ', wincols);
+  if(pos >= 0) {
+    g_snprintf(tmp, 99, "%6d items   %s%c  %3d%%",
+      g_sequence_iter_get_position(g_sequence_get_end_iter(tab->fl_list->sub)),
+      str_formatsize(tab->fl_list->size), tab->fl_list->incomplete ? '+' : ' ', pos);
+    mvaddstr(winrows-3, wincols-34, tmp);
+  }
+  if(sel && sel->isfile) {
+    if(!sel->hastth)
+      mvaddstr(winrows-3, 0, "Not hashed yet, this file is not visible to others.");
+    else {
+      base32_encode(sel->tth, tmp);
+      tmp[39] = 0;
+      mvaddstr(winrows-3, 0, tmp);
+      g_snprintf(tmp, 99, "(%s bytes)", str_fullsize(sel->size));
+      mvaddstr(winrows-3, 40, tmp);
+    }
+  }
+  if(sel && !sel->isfile) {
+    int num = sel->sub ? g_sequence_iter_get_position(g_sequence_get_end_iter(sel->sub)) : 0;
+    if(!num)
+      mvaddstr(winrows-3, 0, " Selected directory is empty.");
+    else {
+      g_snprintf(tmp, 99, " %d items, %s bytes", num, str_fullsize(sel->size));
+      mvaddstr(winrows-3, 0, tmp);
+    }
+  }
+  attroff(A_REVERSE);
+}
+
+
+static void ui_fl_key(struct ui_tab *tab, guint64 key) {
+  if(tab->list && ui_listing_key(tab->list, key, winrows/2))
+    return;
+
+  struct fl_list *sel = !tab->list || g_sequence_iter_is_end(tab->list->sel) ? NULL : g_sequence_get(tab->list->sel);
+
+  switch(key) {
+  case INPT_CTRL('j'):      // newline
+  case INPT_KEY(KEY_RIGHT): // right
+  case INPT_CHAR('l'):      // l          open selected directory
+    if(sel && !sel->isfile && sel->sub) {
+      tab->fl_list = sel;
+      ui_listing_free(tab->list);
+      tab->list = ui_listing_create(sel->sub);
+    }
+    break;
+
+  case INPT_CTRL('h'):     // backspace
+  case INPT_KEY(KEY_LEFT): // left
+  case INPT_CHAR('h'):     // h          open parent directory
+    if(tab->fl_list && tab->fl_list->parent) {
+      // open parent dir
+      struct fl_list *o = tab->fl_list;
+      tab->fl_list = o->parent;
+      ui_listing_free(tab->list);
+      tab->list = ui_listing_create(tab->fl_list->sub);
+      // select the dir where we came from
+      tab->list->sel = g_sequence_iter_prev(g_sequence_search(tab->fl_list->sub, o, fl_list_cmp, NULL));
+      if(g_sequence_iter_is_end(tab->list->sel) || g_sequence_get(tab->list->sel) != o)
+        tab->list->sel = g_sequence_get_begin_iter(tab->fl_list->sub);
+    }
+    break;
+  }
+}
+
+
+
+
+
 // Generic message displaying thing.
 
 #if INTERFACE
@@ -1218,7 +1367,8 @@ void ui_draw() {
     curtab->type == UIT_HUB      ? ui_hub_title(curtab) :
     curtab->type == UIT_USERLIST ? ui_userlist_title(curtab) :
     curtab->type == UIT_MSG      ? ui_msg_title(curtab) :
-    curtab->type == UIT_CONN     ? ui_conn_title() : g_strdup("");
+    curtab->type == UIT_CONN     ? ui_conn_title() :
+    curtab->type == UIT_FL       ? ui_fl_title(curtab) : g_strdup("");
   attron(A_REVERSE);
   mvhline(0, 0, ' ', wincols);
   mvaddstr(0, 0, title);
@@ -1244,6 +1394,7 @@ void ui_draw() {
   case UIT_USERLIST: ui_userlist_draw(curtab);  break;
   case UIT_MSG:      ui_msg_draw(curtab);  break;
   case UIT_CONN:     ui_conn_draw(); break;
+  case UIT_FL:       ui_fl_draw(curtab); break;
   }
 
   refresh();
@@ -1301,6 +1452,10 @@ void ui_input(guint64 key) {
     cmd_handle("/refresh");
     break;
 
+  case INPT_ALT('o'): // alt+o (alias for /browse)
+    cmd_handle("/browse");
+    break;
+
   case INPT_ALT('n'): // alt+n (alias for /connections)
     cmd_handle("/connections");
     break;
@@ -1319,6 +1474,7 @@ void ui_input(guint64 key) {
       case UIT_USERLIST: ui_userlist_key(curtab, key); break;
       case UIT_MSG:      ui_msg_key(curtab, key); break;
       case UIT_CONN:     ui_conn_key(key); break;
+      case UIT_FL:       ui_fl_key(curtab, key); break;
       }
     }
     // TODO: some user feedback on invalid key

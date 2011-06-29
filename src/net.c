@@ -389,11 +389,11 @@ static void handle_connect(GObject *src, GAsyncResult *res, gpointer dat) {
   if(!conn) {
     if(err->code != G_IO_ERROR_CANCELLED) {
       n->cb_err(n, NETERR_CONN, err);
-      n->connecting = TRUE;
+      n->connecting = FALSE;
     }
     g_error_free(err);
   } else {
-    n->connecting = TRUE;
+    n->connecting = FALSE;
     handle_setconn(n, conn);
     n->cb_con(n);
   }

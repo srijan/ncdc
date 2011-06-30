@@ -430,6 +430,40 @@ void hub_kick(struct hub *hub, struct hub_user *u) {
 }
 
 
+// Initiate a C-C connection with a user
+void hub_opencc(struct hub *hub, struct hub_user *u) {
+  char token[20];
+  if(hub->adc)
+    g_snprintf(token, 19, "%"G_GUINT32_FORMAT, g_random_int());
+
+  // we're active, send CTM
+  if(cc_listen) {
+    if(hub->adc) {
+      // Note: Not all clients accept "ADC/1.0" as protocol, but want
+      // "ADC/0.10" instead. Need to figure out a workaround for that.
+      GString *c = adc_generate('D', ADCC_CTM, hub->sid, u->sid);
+      g_string_append_printf(c, "ADC/1.0 %d %s", cc_listen_port, token);
+      net_send(hub->net, c->str);
+      g_string_free(c, TRUE);
+    } else
+      net_sendf(hub->net, "$ConnectToMe %s %s:%d", u->name_hub, cc_listen_ip, cc_listen_port);
+
+  // we're passive, send RCM
+  } else {
+    if(hub->adc) {
+      // Note about protocol field also applies here.
+      GString *c = adc_generate('D', ADCC_RCM, hub->sid, u->sid);
+      g_string_append_printf(c, "ADC/1.0 %s", token);
+      net_send(hub->net, c->str);
+      g_string_free(c, TRUE);
+    } else
+      net_sendf(hub->net, "$RevConnectToMe %s %s", hub->nick_hub, u->name_hub);
+  }
+
+  cc_expect_add(hub, u, hub->adc ? token : NULL, TRUE);
+}
+
+
 #define streq(a) ((!a && !hub->nfo_##a) || (a && hub->nfo_##a && strcmp(a, hub->nfo_##a) == 0))
 #define eq(a) (a == hub->nfo_##a)
 
@@ -870,7 +904,7 @@ static void adc_handle(struct hub *hub, char *msg) {
         adc_append(r, NULL, cmd.argv[1]);
         net_send(hub->net, r->str);
         g_string_free(r, TRUE);
-        cc_expect_adc_add(hub, u->cid, cmd.argv[1], cmd.source);
+        cc_expect_add(hub, u, cmd.argv[1], FALSE);
       }
     }
     break;
@@ -1221,11 +1255,14 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
   if(g_regex_match(revconnecttome, cmd, 0, &nfo)) { // 1 = other, 2 = me
     char *other = g_match_info_fetch(nfo, 1);
     char *me = g_match_info_fetch(nfo, 2);
+    struct hub_user *u = g_hash_table_lookup(hub->users, other);
     if(strcmp(me, hub->nick_hub) != 0)
       g_warning("Received a $RevConnectToMe for someone else (to %s from %s)", me, other);
+    else if(!u)
+      g_message("Received a $RevConnectToMe from someone not on the hub.");
     else if(cc_listen) {
       net_sendf(hub->net, "$ConnectToMe %s %s:%d", other, cc_listen_ip, cc_listen_port);
-      cc_expect_nmdc_add(hub, other);
+      cc_expect_add(hub, u, NULL, FALSE);
     } else
       g_message("Received a $RevConnectToMe, but we're not active.");
     g_free(me);

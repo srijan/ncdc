@@ -38,75 +38,114 @@ GHashTable *cc_granted = NULL;
 void cc_grant(struct hub_user *u) {
   if(!g_hash_table_lookup(cc_granted, u->cid))
     g_hash_table_insert(cc_granted, g_strdup(u->cid), (void *)1);
-  // TODO: open a connection to the user?
 }
 
 
 
 
-// List of expected incoming connections.
-// This is list managed by the functions/macros below, in addition to
-// cc_init_global(), cc_remove_hub() and cc_get_hub().
 
-#if INTERFACE
+
+// List of expected incoming or outgoing connections.  This is list managed by
+// the functions below, in addition to cc_init_global() and cc_remove_hub(),
 
 struct cc_expect {
   struct hub *hub;
-  gboolean adc;
   char *nick;   // NMDC, hub encoding
-  char cid[24]; // ADC
+  char cid[24];
   char *token;  // ADC
   int sid;      // ADC (prevents a user-by-CID lookup table, but does not allow a user to reconnect the hub while connecting here)
+  gboolean adc : 1;
+  gboolean dl : 1;  // if we were the one starting the connection (i.e. we want to download)
   time_t added;
+  int timeout_src;
 };
 
-#define cc_expect_nmdc_add(h, n) do {\
-    struct cc_expect *e = g_slice_new0(struct cc_expect);\
-    e->hub = h;\
-    e->nick = g_strdup(n);\
-    time(&(e->added));\
-    g_queue_push_tail(cc_expected, e);\
-  } while(0)
 
-#define cc_expect_adc_add(h, c, t, s) do {\
-    struct cc_expect *e = g_slice_new0(struct cc_expect);\
-    e->adc = TRUE;\
-    e->hub = h;\
-    memcpy(e->cid, c, 24);\
-    e->token = g_strdup(t);\
-    e->sid = s;\
-    time(&(e->added));\
-    g_queue_push_tail(cc_expected, e);\
-  } while(0)
-
-#endif
-
-GQueue *cc_expected;
+static GQueue *cc_expected;
 
 
-#define cc_expect_rm(e) do {\
-    g_free(e->token);\
-    g_free(e->nick);\
-    g_slice_free(struct cc_expect, e);\
-    g_queue_delete_link(cc_expected, n);\
-  } while(0)
-
-
-gboolean cc_expect_check(gpointer data) {
-  time_t t = time(NULL)-300; // keep them in the list for 5 min.
-  GList *p, *n;
-  for(n=cc_expected->head; n;) {
-    p = n->next;
-    struct cc_expect *e = n->data;
-    if(e->added < t) {
-      g_message("Expected connection from %s on %s, but received none.", e->nick, e->hub->tab->name);
-      cc_expect_rm(e);
-    } else
-      break;
-    n = p;
+static void cc_expect_rm(GList *n, struct cc *success) {
+  struct cc_expect *e = n->data;
+  if(success && e->dl) {
+    success->dl = TRUE;
+    dl_queue_cc(e->cid, success);
   }
-  return TRUE;
+  if(e->dl)
+    dl_queue_expect(e->cid, NULL);
+  g_source_remove(e->timeout_src);
+  g_free(e->token);
+  g_free(e->nick);
+  g_slice_free(struct cc_expect, e);
+  g_queue_delete_link(cc_expected, n);
 }
+
+
+static gboolean cc_expect_timeout(gpointer data) {
+  GList *n = data;
+  struct cc_expect *e = n->data;
+  g_message("Expected connection from %s on %s, but received none.", e->nick, e->hub->tab->name);
+  cc_expect_rm(n, NULL);
+  return FALSE;
+}
+
+
+void cc_expect_add(struct hub *hub, struct hub_user *u, char *t, gboolean dl) {
+  struct cc_expect *e = g_slice_new0(struct cc_expect);
+  e->adc = hub->adc;
+  e->hub = hub;
+  e->dl = dl;
+  memcpy(e->cid, u->cid, 24);
+  if(e->adc)
+    e->sid = u->sid;
+  else
+    e->nick = g_strdup(u->name_hub);
+  if(t)
+    e->token = g_strdup(t);
+  if(e->dl)
+    dl_queue_expect(e->cid, e);
+  time(&(e->added));
+  g_queue_push_tail(cc_expected, e);
+  e->timeout_src = g_timeout_add_seconds_full(G_PRIORITY_LOW, 60, cc_expect_timeout, cc_expected->tail, NULL);
+}
+
+
+// Checks the expects list for the current connection, sets *sid, cc->dl and
+// cc->hub and removes it from the expects list. cc->cid and cc->token must be
+// known.
+static gboolean cc_expect_adc_rm(struct cc *cc, int *sid) {
+  GList *n;
+  for(n=cc_expected->head; n; n=n->next) {
+    struct cc_expect *e = n->data;
+    if(e->adc && memcmp(cc->cid, e->cid, 24) == 0 && strcmp(cc->token, e->token) == 0) {
+      if(sid)
+        *sid = e->sid;
+      cc->hub = e->hub;
+      cc_expect_rm(n, cc);
+      return TRUE;
+    }
+  }
+  return FALSE;
+}
+
+
+// Same as above, but for NMDC. Sets cc->dl and cc->hub. cc->nick_raw must be
+// known, and for passive connections cc->hub must also be known.
+static gboolean cc_expect_nmdc_rm(struct cc *cc) {
+  GList *n;
+  for(n=cc_expected->head; n; n=n->next) {
+    struct cc_expect *e = n->data;
+    if(cc->hub && cc->hub != e->hub)
+      continue;
+    if(!e->adc && strcmp(e->nick, cc->nick_raw) == 0) {
+      cc->hub = e->hub;
+      cc_expect_rm(n, cc);
+      return TRUE;
+    }
+  }
+  return FALSE;
+}
+
+
 
 
 
@@ -125,8 +164,10 @@ struct cc {
   gboolean isop : 1;
   gboolean slot_mini : 1;
   gboolean slot_granted : 1;
+  gboolean dl : 1;
+  int dir;        // (NMDC) our direction. -1 = Upload, otherwise: Download $dir
   int state;      // (ADC)
-  char cid[24];   // (ADC);
+  char cid[24];   // (ADC)
   int timeout_src;
   time_t last_action;
   char remoteaddr[24]; // xxx.xxx.xxx.xxx:ppppp
@@ -139,17 +180,17 @@ struct cc {
   GSequenceIter *iter;
 };
 
-#define cc_init_global() do {\
-    cc_expected = g_queue_new();\
-    g_timeout_add_seconds_full(G_PRIORITY_LOW, 120, cc_expect_check, NULL, NULL);\
-    cc_list = g_sequence_new(NULL);\
-    cc_granted = g_hash_table_new_full(g_int_hash, tiger_hash_equal, g_free, NULL);\
-  } while(0)
-
 #endif
 
 // opened connections - ui_conn is responsible for the ordering
 GSequence *cc_list;
+
+
+void cc_init_global() {
+  cc_expected = g_queue_new();
+  cc_list = g_sequence_new(NULL);
+  cc_granted = g_hash_table_new_full(g_int_hash, tiger_hash_equal, g_free, NULL);
+}
 
 
 // When a hub tab is closed (not just disconnected), make sure all hub fields
@@ -174,7 +215,7 @@ void cc_remove_hub(struct hub *hub) {
     p = n->next;
     struct cc_expect *e = n->data;
     if(e->hub == hub)
-      cc_expect_rm(e);
+      cc_expect_rm(n, NULL);
     n = p;
   }
 }
@@ -202,8 +243,8 @@ int cc_slots_in_use(int *mini) {
 }
 
 
-// Check whether we've got a duplicate.
-static gboolean cc_check_dupe(struct cc *cc) {
+// Returns the cc object of a connection with the same user, if there is one.
+static struct cc *cc_check_dupe(struct cc *cc) {
   GSequenceIter *i = g_sequence_get_begin_iter(cc_list);
   for(; !g_sequence_iter_is_end(i); i=g_sequence_iter_next(i)) {
     struct cc *c = g_sequence_get(i);
@@ -211,45 +252,10 @@ static gboolean cc_check_dupe(struct cc *cc) {
       continue;
     // NMDC (cc->hub and cc->nick_raw must be known)
     if(!c->adc && c->hub == cc->hub && c->nick_raw && cc->nick_raw && strcmp(c->nick_raw, cc->nick_raw) == 0)
-      return TRUE;
+      return c;
     // ADC (cc->cid must be known)
     if(c->adc && memcmp(c->cid, cc->cid, 24) == 0)
-      return TRUE;
-  }
-  return FALSE;
-}
-
-
-// Figure out from which hub a connection came
-static struct hub *cc_get_hub(struct cc *cc, int *sid) {
-  GList *n;
-  for(n=cc_expected->head; n; n=n->next) {
-    struct cc_expect *e = n->data;
-    // NMDC (cc->nick_raw must be known)
-    if(!cc->adc && !e->adc && strcmp(e->nick, cc->nick_raw) == 0) {
-      struct hub *hub = e->hub;
-      cc_expect_rm(e);
-      return hub;
-    }
-    // ADC (cc->cid and cc->token must be known)
-    if(cc->adc && e->adc && memcmp(cc->cid, e->cid, 24) == 0 && strcmp(cc->token, e->token) == 0) {
-      struct hub *hub = e->hub;
-      *sid = e->sid;
-      cc_expect_rm(e);
-      return hub;
-    }
-  }
-
-  if(cc->adc)
-    return NULL;
-
-  // This is a fallback for NMDC, and quite an ugly one at that.
-  for(n=ui_tabs; n; n=n->next) {
-    struct ui_tab *t = n->data;
-    if(t->type == UIT_HUB && g_hash_table_lookup(t->hub->users, cc->nick_raw)) {
-      g_warning("Unexpected incoming connection from %s", cc->nick_raw);
-      return t->hub;
-    }
+      return c;
   }
   return NULL;
 }
@@ -426,15 +432,16 @@ static void handle_id(struct cc *cc, struct hub_user *u) {
   if(cc->adc)
     memcpy(cc->cid, u->cid, 24);
 
-  // Don't allow multiple connections from the same user.
-  // Note: This is usually determined after receiving $Direction (in NMDC),
-  // since it is possible to have two connections with a single user: One for
-  // Upload and one for Download. But since we only support uploading, checking
-  // it here is enough.
-  if(cc_check_dupe(cc)) {
-    g_set_error_literal(&(cc->err), 1, 0, "too many open connections with this user");
-    cc_disconnect(cc);
-    return;
+  // Don't allow multiple connections with the same user for the same purpose
+  // (up/down).  For NMDC, the purpose of this connection is determined when we
+  // receive a $Direction, so it's only checked here for ADC.
+  if(cc->adc) {
+    struct cc *dup = cc_check_dupe(cc);
+    if(dup && !!cc->dl == !!dup->dl) {
+      g_set_error_literal(&(cc->err), 1, 0, "too many open connections with this user");
+      cc_disconnect(cc);
+      return;
+    }
   }
 
   cc->slot_granted = g_hash_table_lookup(cc_granted, u->cid) ? TRUE : FALSE;
@@ -499,7 +506,7 @@ static void adc_handle(struct cc *cc, char *msg) {
         int sid;
         cc->token = g_strdup(token);
         memcpy(cc->cid, cid, 24);
-        cc->hub = cc_get_hub(cc, &sid);
+        cc_expect_adc_rm(cc, &sid);
         struct hub_user *u = cc->hub ? g_hash_table_lookup(cc->hub->sessions, GINT_TO_POINTER(sid)) : NULL;
         if(!u) {
           g_warning("Unexpected ADC connection. (%s): %s", net_remoteaddr(cc->net), msg);
@@ -507,6 +514,8 @@ static void adc_handle(struct cc *cc, char *msg) {
         } else
           handle_id(cc, u);
       }
+      if(cc->dl)
+        cc_disconnect(cc); // TODO: actually initiate a download
     }
     break;
 
@@ -540,11 +549,26 @@ static void nmdc_mynick(struct cc *cc, const char *nick) {
     g_warning("Received a $MyNick from %s when we have already received one.", cc->nick);
     return;
   }
-
   cc->nick_raw = g_strdup(nick);
 
-  if(!cc->hub)
-    cc->hub = cc_get_hub(cc, NULL);
+  // check the expects list
+  cc_expect_nmdc_rm(cc);
+
+  // Normally the above function should figure out from which hub this
+  // connection came. This is a fallback in the case it didn't (i.e. it's an
+  // unexpected connection)
+  if(!cc->hub) {
+    GList *n;
+    for(n=ui_tabs; n; n=n->next) {
+      struct ui_tab *t = n->data;
+      if(t->type == UIT_HUB && g_hash_table_lookup(t->hub->users, cc->nick_raw)) {
+        g_warning("Unexpected incoming connection from %s", cc->nick_raw);
+        cc->hub = t->hub;
+      }
+    }
+  }
+
+  // still not found? disconnect
   if(!cc->hub) {
     g_warning("Received incoming connection from %s (%s), who is on none of the connected hubs.", nick, net_remoteaddr(cc->net));
     cc_disconnect(cc);
@@ -567,6 +591,49 @@ static void nmdc_mynick(struct cc *cc, const char *nick) {
 }
 
 
+static void nmdc_direction(struct cc *cc, gboolean down, int num) {
+  gboolean old_dl = cc->dl;
+
+  // if they want to download and we don't, then it's simple.
+  if(down && !cc->dl)
+    ;
+  // if we want to download and they don't, then it's just as simple.
+  else if(cc->dl && !down)
+    ;
+  // if neither of us wants to download... then what the heck are we doing?
+  else if(!down && !cc->dl) {
+    g_warning("Connection with %s (%s) while none of us wants to download.", cc->nick, net_remoteaddr(cc->net));
+    g_set_error_literal(&(cc->err), 1, 0, "None wants to download.");
+    cc_disconnect(cc);
+    return;
+  // if we both want to download and the numbers are equal... then fuck it!
+  } else if(cc->dir == num) {
+    g_warning("$Direction numbers with %s (%s) are equal!?", cc->nick, net_remoteaddr(cc->net));
+    g_set_error_literal(&(cc->err), 1, 0, "$Direction numbers are equal.");
+    cc_disconnect(cc);
+    return;
+  // if we both want to download and the numbers aren't equal, then check the numbers
+  } else
+    cc->dl = cc->dir > num;
+
+  // Now that this connection has a purpose, make sure it's the only connection with that purpose.
+  struct cc *dup = cc_check_dupe(cc);
+  if(dup && !!cc->dl == !!dup->dl) {
+    g_set_error_literal(&(cc->err), 1, 0, "too many open connections with this user");
+    cc_disconnect(cc);
+    return;
+  }
+
+  // If we wanted to download, but didn't get the chance to do so, notify the dl manager.
+  if(old_dl && !cc->dl)
+    dl_queue_cc(cc->cid, NULL);
+
+  // if we can download, do so!
+  if(cc->dl)
+    cc_disconnect(cc); // TODO: actually initiate download
+}
+
+
 static void nmdc_handle(struct cc *cc, char *cmd) {
   GMatchInfo *nfo;
 
@@ -581,6 +648,7 @@ static void nmdc_handle(struct cc *cc, char *cmd) {
   CMDREGEX(mynick, "MyNick ([^ $]+)");
   CMDREGEX(lock, "Lock ([^ $]+) Pk=[^ $]+");
   CMDREGEX(supports, "Supports (.+)");
+  CMDREGEX(direction, "Direction (Download|Upload) ([0-9]+)");
   CMDREGEX(adcget, "ADCGET ([^ ]+) (.+) ([0-9]+) (-?[0-9]+)");
 
   // $MyNick
@@ -604,7 +672,8 @@ static void nmdc_handle(struct cc *cc, char *cmd) {
     } else {
       net_send(cc->net, "$Supports MiniSlots XmlBZList ADCGet TTHL TTHF");
       char *key = nmdc_lock2key(lock);
-      net_send(cc->net, "$Direction Upload 0"); // we don't support downloading yet.
+      cc->dir = cc->dl ? g_random_int_range(0, 65535) : -1;
+      net_sendf(cc->net, "$Direction %s %d", cc->dl ? "Download" : "Upload", cc->dl ? cc->dir : 0);
       net_sendf(cc->net, "$Key %s", key);
       g_free(key);
       g_free(lock);
@@ -622,6 +691,16 @@ static void nmdc_handle(struct cc *cc, char *cmd) {
       cc_disconnect(cc);
     }
     g_free(list);
+  }
+  g_match_info_free(nfo);
+
+  // $Direction
+  if(g_regex_match(direction, cmd, 0, &nfo)) { // 1 = dir, 2 = num
+    char *dir = g_match_info_fetch(nfo, 1);
+    char *num = g_match_info_fetch(nfo, 2);
+    nmdc_direction(cc, strcmp(dir, "Download") == 0, strtol(num, NULL, 10));
+    g_free(dir);
+    g_free(num);
   }
   g_match_info_free(nfo);
 
@@ -727,6 +806,8 @@ void cc_adc_connect(struct cc *cc, struct hub_user *u, unsigned short port, char
   g_snprintf(tmp, 10, "%d", port);
   strncat(cc->remoteaddr, ":", 23-strlen(cc->remoteaddr));
   strncat(cc->remoteaddr, tmp, 23-strlen(cc->remoteaddr));
+  // check whether this was as a reply to a RCM from us
+  cc_expect_adc_rm(cc, NULL);
   // check / update user info
   handle_id(cc, u);
   // connect
@@ -777,6 +858,8 @@ void cc_free(struct cc *cc) {
     g_source_remove(cc->timeout_src);
   if(ui_conn)
     ui_conn_listchange(cc->iter, UICONN_DEL);
+  if(cc->dl)
+    dl_queue_cc(cc->cid, NULL);
   g_sequence_remove(cc->iter);
   net_unref(cc->net);
   g_error_free(cc->err);

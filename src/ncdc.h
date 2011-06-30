@@ -40,6 +40,8 @@
 // forward declaration for data types
 // (some of these remain incomplete, others are defined in interfaces)
 struct cc;
+struct cc_expect;
+struct dl;
 struct fl_list;
 struct hub;
 struct hub_user;
@@ -55,6 +57,7 @@ struct ui_textinput;
 // include the auto-generated header files
 #include "cc.h"
 #include "commands.h"
+#include "dl.h"
 #include "fl_local.h"
 #include "fl_util.h"
 #include "hub.h"

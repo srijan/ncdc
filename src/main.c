@@ -273,6 +273,7 @@ int main(int argc, char **argv) {
   conf_init();
   cc_init_global();
   net_init_global();
+  dl_init_global();
 
   // setup logging
   char *errlog = g_build_filename(conf_dir, "stderr.log", NULL);

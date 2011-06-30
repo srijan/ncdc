@@ -45,6 +45,7 @@ struct hub_user {
   unsigned int as;       // auto-open slot if upload is below n bytes/s
   guint32 ip4;
   int sid;        // for ADC
+  struct hub *hub;
   char *name;     // UTF-8
   char *name_hub; // hub-encoded (NMDC)
   char *desc;
@@ -96,21 +97,32 @@ struct hub {
   gboolean joincomplete;
 };
 
+
+#define hub_init_global() hub_usercids = g_hash_table_new(g_int_hash, tiger_hash_equal)
+
 #endif
 
+
+// Global hash table of all users, with CID being the index and a GSList of
+// hub_user structs as value.
+GHashTable *hub_usercids = NULL;
 
 
 
 // struct hub_user related functions
 
-static struct hub_user *user_add(struct hub *hub, const char *name) {
+
+// cid is required for ADC. expected to be base32-encoded.
+static struct hub_user *user_add(struct hub *hub, const char *name, const char *cid) {
   struct hub_user *u = g_hash_table_lookup(hub->users, name);
   if(u)
     return u;
   u = g_slice_new0(struct hub_user);
-  if(hub->adc)
+  u->hub = hub;
+  if(hub->adc) {
     u->name = g_strdup(name);
-  else {
+    base32_decode(cid, u->cid);
+  } else {
     u->name_hub = g_strdup(name);
     u->name = charset_convert(hub, TRUE, name);
     // For NMDC users, generate some (fictive) CID based on user and hub name.
@@ -127,14 +139,22 @@ static struct hub_user *user_add(struct hub *hub, const char *name) {
     guint64 r = g_ascii_strtoull(tmp, NULL, 10);
     g_free(tmp);
 #endif
-    char res[24];
     struct tiger_ctx t;
     tiger_init(&t);
     tiger_update(&t, (char *)&r, 8);
     tiger_update(&t, u->name_hub, strlen(u->name_hub));
-    tiger_final(&t, res);
+    tiger_final(&t, u->cid);
   }
   g_hash_table_insert(hub->users, hub->adc ? u->name : u->name_hub, u);
+  // insert in hub_usercids
+  GSList *l = g_hash_table_lookup(hub_usercids, u->cid);
+  if(l) {
+    g_assert(l == g_slist_insert(l, u, 1));
+  } else {
+    l = g_slist_prepend(l, u);
+    g_hash_table_insert(hub_usercids, u->cid, l);
+  }
+  // notify the UI
   ui_hub_userchange(hub->tab, UIHUB_UC_JOIN, u);
   return u;
 }
@@ -142,6 +162,17 @@ static struct hub_user *user_add(struct hub *hub, const char *name) {
 
 static void user_free(gpointer dat) {
   struct hub_user *u = dat;
+  // remove from hub_usercids
+  GSList *l = g_hash_table_lookup(hub_usercids, u->cid);
+  l = g_slist_remove(l, u);
+  if(!l)
+    g_hash_table_remove(hub_usercids, u->cid);
+  else
+    g_hash_table_replace(hub_usercids, ((struct hub_user *)l->data)->cid, l);
+  // remove from hub->sessions
+  if(u->hub->adc && u->sid)
+    g_hash_table_remove(u->hub->sessions, GINT_TO_POINTER(u->sid));
+  // free
   g_free(u->name_hub);
   g_free(u->name);
   g_free(u->desc);
@@ -333,12 +364,6 @@ static void user_adc_nfo(struct hub *hub, struct hub_user *u, struct adc_cmd *cm
     case P('E','M'): // mail
       g_free(u->mail);
       u->mail = p[0] ? g_strdup(p) : NULL;
-      break;
-    case P('I','D'): // CID
-      // Note that the ADC spec allows hashes of varying length. I'm limiting
-      // myself to 39 here since that is more memory-efficient.
-      if(strlen(p) == 39)
-        base32_decode(p, u->cid);
       break;
     case P('S','S'): // share size
       u->sharesize = g_ascii_strtoull(p, NULL, 10);
@@ -785,10 +810,15 @@ static void adc_handle(struct hub *hub, char *msg) {
         hub->hubname = g_strdup(hname);
       }
     } else if(cmd.type == 'B') {
-      char *nick = adc_getparam(cmd.argv, "NI", NULL);
       struct hub_user *u = g_hash_table_lookup(hub->sessions, GINT_TO_POINTER(cmd.source));
-      if(!u && nick)
-        u = user_add(hub, nick);
+      if(!u) {
+        char *nick = adc_getparam(cmd.argv, "NI", NULL);
+        char *cid = adc_getparam(cmd.argv, "ID", NULL);
+        // Note that the ADC spec allows hashes of varying length. I'm limiting
+        // myself to 39 here since that is more memory-efficient.
+        if(nick && cid && strlen(cid) == 39)
+          u = user_add(hub, nick, cid);
+      }
       if(!u)
         g_warning("INF for user who is not on the hub (%s): %s", net_remoteaddr(hub->net), msg);
       else {
@@ -1111,7 +1141,7 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
         hub->nick_valid = TRUE;
       }
     } else {
-      struct hub_user *u = user_add(hub, nick);
+      struct hub_user *u = user_add(hub, nick, NULL);
       if(!u->hasinfo && !hub->supports_nogetinfo)
         net_sendf(hub->net, "$GetINFO %s", nick);
     }
@@ -1143,7 +1173,7 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
     g_free(str);
     char **cur;
     for(cur=list; *cur&&**cur; cur++) {
-      struct hub_user *u = user_add(hub, *cur);
+      struct hub_user *u = user_add(hub, *cur, NULL);
       if(!u->hasinfo && !hub->supports_nogetinfo)
         net_sendf(hub->net, "$GetINFO %s %s", *cur, hub->nick_hub);
     }
@@ -1164,7 +1194,7 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
     // inefficient and not all that important at this point.
     hub->isop = FALSE;
     for(cur=list; *cur&&**cur; cur++) {
-      struct hub_user *u = user_add(hub, *cur);
+      struct hub_user *u = user_add(hub, *cur, NULL);
       if(!u->isop) {
         u->isop = TRUE;
         ui_hub_userchange(hub->tab, UIHUB_UC_NFO, u);
@@ -1182,7 +1212,7 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
   if(g_regex_match(myinfo, cmd, 0, &nfo)) { // 1 = nick, 2 = info string
     char *nick = g_match_info_fetch(nfo, 1);
     char *str = g_match_info_fetch(nfo, 2);
-    struct hub_user *u = user_add(hub, nick);
+    struct hub_user *u = user_add(hub, nick, NULL);
     if(!u->hasinfo)
       hub->sharecount++;
     else

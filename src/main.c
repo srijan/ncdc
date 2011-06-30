@@ -271,6 +271,7 @@ int main(int argc, char **argv) {
   g_thread_init(NULL);
   g_type_init();
   conf_init();
+  hub_init_global();
   cc_init_global();
   net_init_global();
   dl_init_global();

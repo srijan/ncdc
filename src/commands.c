@@ -593,7 +593,7 @@ static void c_msg(char *args) {
       struct ui_tab *t = ui_hub_getmsg(tab, u);
       if(!t) {
         t = ui_msg_create(tab->hub, u);
-        ui_tab_open(t);
+        ui_tab_open(t, TRUE);
       } else
         ui_tab_cur = g_list_find(ui_tabs, t);
       // if we need to send something, do so
@@ -655,7 +655,7 @@ static void c_open(char *args) {
         break;
     }
     if(!n)
-      ui_tab_open(ui_hub_create(args));
+      ui_tab_open(ui_hub_create(args), TRUE);
     else if(n != ui_tab_cur)
       ui_tab_cur = n;
     else
@@ -971,7 +971,7 @@ static void c_connections(char *args) {
     if(ui_conn)
       ui_tab_cur = g_list_find(ui_tabs, ui_conn);
     else
-      ui_tab_open(ui_conn_create());
+      ui_tab_open(ui_conn_create(), TRUE);
   }
 }
 
@@ -1082,9 +1082,7 @@ static void c_browse(char *args) {
     if(n)
       ui_tab_cur = n;
     else {
-      // Make a copy, as the file browser can't really handle dynamic changes to
-      // the file list (yet?).
-      ui_tab_open(ui_fl_create(fl_list_copy(fl_local_list)));
+      ui_tab_open(ui_fl_create(NULL, FALSE), TRUE);
     }
   } else {
     struct hub_user *u = hub_user_get(tab->hub, args);

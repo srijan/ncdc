@@ -163,9 +163,14 @@ void dl_received(struct dl *dl, guint64 bytes) {
   // removed, and that will continue the download)
   if(dl->have < dl->size)
     return;
-  // Now we have a completed download. Rename and free.
+  // Now we have a completed download. Rename it to the final destination.
   g_return_if_fail(close(dl->incfd) == 0);
   g_return_if_fail(rename(dl->inc, dl->dest) == 0);
+  // open the file list
+  struct ui_tab *t = ui_fl_create(dl->hash, TRUE);
+  if(t)
+    ui_tab_open(t, FALSE);
+  // and free
   g_free(dl->inc);
   g_free(dl->dest);
   g_hash_table_remove(queue, dl->hash);

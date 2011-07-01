@@ -51,6 +51,7 @@ struct ui_tab {
   struct ui_logwindow *log;    // MAIN, HUB, MSG
   struct hub *hub;             // HUB, USERLIST, MSG
   struct ui_listing *list;     // USERLIST, CONN
+  char cid[24];                // FL (TODO: MSG)
   // HUB
   struct ui_tab *userlist_tab;
   gboolean hub_joincomplete;
@@ -68,6 +69,7 @@ struct ui_tab {
   gboolean user_hide_conn;
   // FL
   struct fl_list *fl_list;
+  char *fl_uname;
 };
 
 #endif
@@ -361,9 +363,7 @@ void ui_hub_msg(struct ui_tab *tab, struct hub_user *user, const char *msg) {
   struct ui_tab *t = ui_hub_getmsg(tab, user);
   if(!t) {
     t = ui_msg_create(tab->hub, user);
-    GList *old = ui_tab_cur;
-    ui_tab_open(t);
-    ui_tab_cur = old;
+    ui_tab_open(t, FALSE);
   }
   ui_msg_msg(t, msg);
 }
@@ -374,7 +374,7 @@ void ui_hub_userlist_open(struct ui_tab *tab) {
     ui_tab_cur = g_list_find(ui_tabs, tab->userlist_tab);
   else {
     tab->userlist_tab = ui_userlist_create(tab->hub);
-    ui_tab_open(tab->userlist_tab);
+    ui_tab_open(tab->userlist_tab, TRUE);
   }
 }
 
@@ -619,7 +619,7 @@ static void ui_userlist_key(struct ui_tab *tab, guint64 key) {
       struct ui_tab *t = ui_hub_getmsg(tab, sel);
       if(!t) {
         t = ui_msg_create(tab->hub, sel);
-        ui_tab_open(t);
+        ui_tab_open(t, TRUE);
       } else
         ui_tab_cur = g_list_find(ui_tabs, t);
     }
@@ -866,15 +866,49 @@ static void ui_conn_key(guint64 key) {
 
 // File list browser (UIT_FL)
 
-// TODO: Current implementation only works for our own (local) file list,
-// extend to make it work for others as well.
-
 // File list is passed to this tab, and will be freed upon closing.
-struct ui_tab *ui_fl_create(struct fl_list *fl) {
+struct ui_tab *ui_fl_create(char *cid, gboolean report_to_main) {
+  // get file list
+  struct fl_list *fl = NULL;
+  if(!cid)
+    fl = fl_local_list ? fl_list_copy(fl_local_list) : NULL;
+  else {
+    char tmp[60] = {};
+    base32_encode(cid, tmp);
+    strcat(tmp, ".xml.bz2");
+    char *fn = g_build_filename(conf_dir, "fl", tmp, NULL);
+    GError *err = NULL;
+    fl = fl_load(fn, &err);
+    g_free(fn);
+    if(err) {
+      ui_mf(report_to_main ? ui_main : NULL, 0, "Error loading %s: %s", tmp, err->message);
+      g_error_free(err);
+      return NULL;
+    }
+  }
+
+  // get user
+  GSList *l = cid ? g_hash_table_lookup(hub_usercids, cid) : NULL;
+  struct hub_user *u = l ? l->data : NULL;
+
+  // create tab
   struct ui_tab *tab = g_new0(struct ui_tab, 1);
   tab->type = UIT_FL;
-  tab->name = "/own";
+  tab->prio = UIP_MED;
+  if(!cid)
+    tab->name = g_strdup("/own");
+  else if(u)
+    tab->name = g_strdup_printf("/%s", u->name);
+  else {
+    char tmp[40];
+    base32_encode(cid, tmp);
+    tmp[9] = 0;
+    tab->name = g_strdup_printf("/%s", tmp);
+  }
   tab->fl_list = fl;
+  tab->fl_uname = u ? g_strdup(u->name) : NULL;
+  if(cid)
+    memcpy(tab->cid, cid, 24);
   tab->list = fl && fl->sub ? ui_listing_create(fl->sub) : NULL;
   return tab;
 }
@@ -888,12 +922,19 @@ void ui_fl_close(struct ui_tab *tab) {
     p = p->parent;
   if(p)
     fl_list_free(p);
+  g_free(tab->name);
+  g_free(tab->fl_uname);
   g_free(tab);
 }
 
 
 static char *ui_fl_title(struct ui_tab *tab) {
-  return g_strdup_printf("Browsing own file list.");
+  char tmp[40] = {};
+  base32_encode(tab->cid, tmp);
+  return !tab->cid[0] && !tab->cid[1] && !tab->cid[2] && !tab->cid[3]
+    ? g_strdup_printf("Browsing own file list.")
+    : tab->fl_uname ? g_strdup_printf("Browsing file list of %s (%s)", tab->fl_uname, tmp)
+    : g_strdup_printf("Browsing file list of %s (user offline)", tmp);
 }
 
 
@@ -1167,9 +1208,10 @@ int ui_colours_num = G_N_ELEMENTS(ui_colours);
 
 struct ui_textinput *ui_global_textinput;
 
-void ui_tab_open(struct ui_tab *tab) {
+void ui_tab_open(struct ui_tab *tab, gboolean sel) {
   ui_tabs = g_list_append(ui_tabs, tab);
-  ui_tab_cur = g_list_last(ui_tabs);
+  if(sel)
+    ui_tab_cur = g_list_last(ui_tabs);
 }
 
 
@@ -1187,7 +1229,7 @@ void ui_init() {
   ui_global_textinput = ui_textinput_create(TRUE, cmd_suggest);
 
   // first tab = main tab
-  ui_tab_open(ui_main_create());
+  ui_tab_open(ui_main_create(), TRUE);
 
   // init curses
   initscr();

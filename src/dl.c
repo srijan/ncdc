@@ -78,6 +78,7 @@ static void dl_queue_start(struct dl *dl) {
   struct hub_user *u = g_slist_nth_data(l, g_random_int_range(0, g_slist_length(l)));
   g_assert(u);
   // now try to open a C-C connection
+  // TODO: re-use an existing download connection if we have one open
   hub_opencc(u->hub, u);
 }
 

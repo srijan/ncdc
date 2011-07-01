@@ -739,8 +739,9 @@ static void ui_conn_draw_row(struct ui_listing *list, GSequenceIter *iter, int r
 
   mvaddch(row, 2,
     !cc->nick || (cc->adc && cc->state != ADC_S_NORMAL) ? 'C' : // connecting
-    cc->timeout_src    ? 'D' : // disconnected
+    cc->timeout_src    ? '-' : // disconnected
     cc->net->file_left ? 'U' : // uploading
+    cc->net->recv_left ? 'D' : // downloading
                          'I'); // idle
 
   if(cc->nick)
@@ -756,7 +757,7 @@ static void ui_conn_draw_row(struct ui_listing *list, GSequenceIter *iter, int r
   if(cc->timeout_src)
     strcpy(tmp, "     -");
   else
-    g_snprintf(tmp, 99, "%6d", ratecalc_get(cc->net->rate_out)/1024);
+    g_snprintf(tmp, 99, "%6d", ratecalc_get(cc->dl ? cc->net->rate_in : cc->net->rate_out)/1024);
   mvaddstr(row, 46, tmp);
 
   // TODO: progress bar or something?
@@ -815,7 +816,8 @@ static void ui_conn_draw() {
   mvaddstr(bottom+2, 45,
     !cc->nick || (cc->adc && cc->state != ADC_S_NORMAL) ? "Connecting" :
     cc->timeout_src    ? "Disconnected" :
-    cc->net->file_left ? "Uploading" : "Idle");
+    cc->net->file_left ? "Uploading" :
+    cc->net->recv_left ? "Downloading" : "Idle");
   g_snprintf(tmp, 99, "%d KiB/s (%s)", ratecalc_get(cc->net->rate_out)/1024, str_formatsize(cc->net->rate_out->total));
   mvaddstr(bottom+3, 11, tmp);
   g_snprintf(tmp, 99, "%d KiB/s (%s)", ratecalc_get(cc->net->rate_in)/1024, str_formatsize(cc->net->rate_in->total));

@@ -313,7 +313,8 @@ static void handle_adcsnd(struct cc *cc, guint64 start, guint64 bytes) {
   g_return_if_fail(cc->dlf);
   g_return_if_fail(cc->dlf->have == start);
   if(!cc->dlf->size)
-    cc->dlf->size = bytes;
+    cc->last_size = cc->dlf->size = bytes;
+  cc->last_length = bytes;
   net_recvfile(cc->net, cc->dlf->incfd, bytes, handle_recvfile);
 }
 
@@ -324,6 +325,10 @@ static void handle_download(struct cc *cc) {
     net_sendf(cc->net, "CGET file files.xml.bz2 %"G_GUINT64_FORMAT" -1", cc->dlf->have);
   else
     net_sendf(cc->net, "$ADCGET file files.xml.bz2 %"G_GUINT64_FORMAT" -1", cc->dlf->have);
+  g_free(cc->last_file);
+  cc->last_file = g_strdup("files.xml.bz2");
+  cc->last_offset = cc->dlf->have;
+  cc->last_size = cc->dlf->size;
 }
 
 

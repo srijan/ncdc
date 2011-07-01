@@ -180,3 +180,14 @@ void dl_init_global() {
   queue = g_hash_table_new(g_int_hash, tiger_hash_equal);
 }
 
+
+void dl_close_global() {
+  // Delete incomplete files. They won't be completed anyway, since we don't
+  // have a persistent download queue at the moment.
+  GHashTableIter iter;
+  struct dl *dl;
+  g_hash_table_iter_init(&iter, queue);
+  while(g_hash_table_iter_next(&iter, NULL, (gpointer *)&dl))
+    unlink(dl->inc);
+}
+

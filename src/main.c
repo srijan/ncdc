@@ -327,6 +327,7 @@ int main(int argc, char **argv) {
   fflush(stdout);
   ui_cmdhist_close();
   fl_close();
+  dl_close_global();
   printf(" Done!\n");
 
   return 0;

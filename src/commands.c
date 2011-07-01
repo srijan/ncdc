@@ -950,7 +950,7 @@ static void c_say_sug(char *args, char **sug) {
 }
 
 
-// also used for c_whois, c_grant and c_kick
+// also used for c_whois, c_grant, c_kick and c_browse
 static void c_msg_sug(char *args, char **sug) {
   nick_sug(args, sug, FALSE);
 }
@@ -1070,11 +1070,11 @@ static void c_nick(char *args) {
 
 
 static void c_browse(char *args) {
-  if(args[0])
-    ui_m(NULL, 0, "This command does not accept any arguments.");
-  else if(!fl_local_list)
+  if(args[0] && tab->type != UIT_HUB && tab->type != UIT_MSG)
+    ui_m(NULL, 0, "This command can only be used on hub and message tabs.");
+  else if(!args[0] && !fl_local_list)
     ui_m(NULL, 0, "Nothing shared.");
-  else {
+  else if(!args[0]) {
     GList *n;
     for(n=ui_tabs; n; n=n->next)
       if(((struct ui_tab *)n->data)->type == UIT_FL)
@@ -1086,17 +1086,26 @@ static void c_browse(char *args) {
       // the file list (yet?).
       ui_tab_open(ui_fl_create(fl_list_copy(fl_local_list)));
     }
+  } else {
+    struct hub_user *u = hub_user_get(tab->hub, args);
+    if(!u)
+      ui_m(NULL, 0, "No user found with that name.");
+    else {
+      dl_queue_addlist(u);
+      ui_mf(NULL, 0, "File list of %s added to the download queue.", u->name);
+    }
   }
 }
 
 
 // definition of the command list
 static struct cmd cmds[] = {
-  { "browse", c_browse, NULL,
-    NULL, "Browse own file list.",
-    "This opens a new tab where you can browse your own file list.\n"
+  { "browse", c_browse, c_msg_sug,
+    "[<user>]", "Browse own file list.",
+    "Without arguments, this opens a new tab where you can browse your own file list.\n"
     "Note that changes to your list are not immediately visible in the browser."
-    " You need to re-open the tab to get the latest version of your list."
+    " You need to re-open the tab to get the latest version of your list.\n\n"
+    "With arguments, the user list of the specified user will be downloaded and the browse tab will open once it's complete."
   },
   { "clear", c_clear, NULL,
     NULL, "Clear the display.",

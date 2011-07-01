@@ -83,7 +83,9 @@ static void cc_expect_rm(GList *n, struct cc *success) {
 static gboolean cc_expect_timeout(gpointer data) {
   GList *n = data;
   struct cc_expect *e = n->data;
-  g_message("Expected connection from %s on %s, but received none.", e->nick, e->hub->tab->name);
+  char tmp[40] = {};
+  base32_encode(e->cid, tmp);
+  g_message("Expected connection from %s (%s) on %s, but received none.", e->nick, tmp, e->hub->tab->name);
   cc_expect_rm(n, NULL);
   return FALSE;
 }
@@ -429,8 +431,7 @@ static void handle_adcget(struct cc *cc, char *type, char *id, guint64 start, gi
 static void handle_id(struct cc *cc, struct hub_user *u) {
   cc->nick = g_strdup(u->name);
   cc->isop = u->isop;
-  if(cc->adc)
-    memcpy(cc->cid, u->cid, 24);
+  memcpy(cc->cid, u->cid, 24);
 
   // Don't allow multiple connections with the same user for the same purpose
   // (up/down).  For NMDC, the purpose of this connection is determined when we
@@ -806,10 +807,10 @@ void cc_adc_connect(struct cc *cc, struct hub_user *u, unsigned short port, char
   g_snprintf(tmp, 10, "%d", port);
   strncat(cc->remoteaddr, ":", 23-strlen(cc->remoteaddr));
   strncat(cc->remoteaddr, tmp, 23-strlen(cc->remoteaddr));
-  // check whether this was as a reply to a RCM from us
-  cc_expect_adc_rm(cc, NULL);
   // check / update user info
   handle_id(cc, u);
+  // check whether this was as a reply to a RCM from us
+  cc_expect_adc_rm(cc, NULL);
   // connect
   net_connect(cc->net, cc->remoteaddr, 0, handle_connect);
   g_clear_error(&(cc->err));
@@ -845,7 +846,7 @@ void cc_disconnect(struct cc *cc) {
   g_return_if_fail(!cc->timeout_src);
   time(&(cc->last_action));
   net_disconnect(cc->net);
-  cc->timeout_src = g_timeout_add_seconds(30, handle_timeout, cc);
+  cc->timeout_src = g_timeout_add_seconds(60, handle_timeout, cc);
   g_free(cc->token);
   cc->token = NULL;
 }
@@ -862,7 +863,8 @@ void cc_free(struct cc *cc) {
     dl_queue_cc(cc->cid, NULL);
   g_sequence_remove(cc->iter);
   net_unref(cc->net);
-  g_error_free(cc->err);
+  if(cc->err)
+    g_error_free(cc->err);
   g_free(cc->nick_raw);
   g_free(cc->nick);
   g_free(cc->last_file);

@@ -58,24 +58,36 @@ static struct dl *dl_queue_user(char *cid) {
 }
 
 
-// Check whether we have something new to do for a particular user.
-gboolean dl_queue_needaction(char *cid) {
-  struct dl *dl = dl_queue_user(cid);
-  return dl && !dl->expect && !dl->cc;
+static void dl_queue_start(struct dl *dl) {
+  g_return_if_fail(dl && !(dl->cc || dl->expect));
+  // get user/hub
+  GSList *l = g_hash_table_lookup(hub_usercids, dl->hash);
+  if(!l)
+    return;
+  // if the user is on multiple hubs, get a random one (makes sure that if one
+  // doesn't work, we at least have a chance on an other hub)
+  struct hub_user *u = g_slist_nth_data(l, g_random_int_range(0, g_slist_length(l)));
+  g_assert(u);
+  // now try to open a C-C connection
+  hub_opencc(u->hub, u);
 }
 
 
 // set/unset the expect field. When expect goes from NULL to some value, it is
 // expected that the connection is being established. When it goes from some
 // value to NULL, it is expected that either the connection has been
-// established (and dl_queue_cc() is called), or the connection timed out (in
-// which case we should try again).
+// established (and dl_queue_cc() is called), the connection timed out (in
+// which case we should try again), or the hub connection has been removed (in
+// which case we should look for other hubs and try again).
+// Note that in the case of a timeout (which is currently set to 60 seconds),
+// we immediately try to connect again. Some hubs might not like this
+// "aggressive" behaviour...
 void dl_queue_expect(char *cid, struct cc_expect *e) {
   struct dl *dl = dl_queue_user(cid);
   g_return_if_fail(dl);
   dl->expect = e;
   if(!e && !dl->cc)
-    ; // TODO: re-initiate the connection
+    dl_queue_start(dl);
 }
 
 
@@ -89,7 +101,16 @@ void dl_queue_cc(char *cid, struct cc *cc) {
   g_return_if_fail(dl);
   dl->cc = cc;
   if(!cc && !dl->expect)
-    ; // TODO: re-initiate the connection
+    dl_queue_start(dl);
+}
+
+
+// To be called when a user joins a hub. Checks whether we have something to
+// get from that user.
+void dl_queue_useronline(char *cid) {
+  struct dl *dl = dl_queue_user(cid);
+  if(dl && !dl->expect && !dl->cc)
+    dl_queue_start(dl);
 }
 
 
@@ -102,7 +123,7 @@ void dl_queue_addlist(struct hub_user *u) {
   dl->islist = TRUE;
   memcpy(dl->hash, u->cid, 24);
   g_hash_table_insert(queue, dl->hash, dl);
-  // TODO: initiate connection
+  dl_queue_start(dl);
 }
 
 

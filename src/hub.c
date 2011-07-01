@@ -156,6 +156,8 @@ static struct hub_user *user_add(struct hub *hub, const char *name, const char *
   }
   // notify the UI
   ui_hub_userchange(hub->tab, UIHUB_UC_JOIN, u);
+  // notify the dl manager
+  dl_queue_useronline(u->cid);
   return u;
 }
 
@@ -464,10 +466,8 @@ void hub_opencc(struct hub *hub, struct hub_user *u) {
   // we're active, send CTM
   if(cc_listen) {
     if(hub->adc) {
-      // Note: Not all clients accept "ADC/1.0" as protocol, but want
-      // "ADC/0.10" instead. Need to figure out a workaround for that.
       GString *c = adc_generate('D', ADCC_CTM, hub->sid, u->sid);
-      g_string_append_printf(c, "ADC/1.0 %d %s", cc_listen_port, token);
+      g_string_append_printf(c, " ADC/1.0 %d %s", cc_listen_port, token);
       net_send(hub->net, c->str);
       g_string_free(c, TRUE);
     } else
@@ -476,9 +476,8 @@ void hub_opencc(struct hub *hub, struct hub_user *u) {
   // we're passive, send RCM
   } else {
     if(hub->adc) {
-      // Note about protocol field also applies here.
       GString *c = adc_generate('D', ADCC_RCM, hub->sid, u->sid);
-      g_string_append_printf(c, "ADC/1.0 %s", token);
+      g_string_append_printf(c, " ADC/1.0 %s", token);
       net_send(hub->net, c->str);
       g_string_free(c, TRUE);
     } else
@@ -1476,8 +1475,12 @@ void hub_disconnect(struct hub *hub, gboolean recon) {
 
 
 void hub_free(struct hub *hub) {
-  cc_remove_hub(hub);
+  // Make sure to disconnect before calling cc_remove_hub(). dl_queue_expect(),
+  // called from cc_remove_hub() will look in the global userlist for
+  // alternative hubs. Users of this hub must not be present in the list,
+  // otherwise things will go wrong.
   hub_disconnect(hub, FALSE);
+  cc_remove_hub(hub);
   net_unref(hub->net);
   g_free(hub->nfo_desc);
   g_free(hub->nfo_conn);

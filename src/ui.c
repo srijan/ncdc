@@ -848,6 +848,8 @@ static void ui_conn_key(guint64 key) {
       ui_m(NULL, 0, "Nothing selected.");
     else if(!cc->net->conn)
       ui_m(NULL, 0, "Not connected.");
+    else if(cc->dl)
+      ui_m(NULL, 0, "Can't disconnect a download. Perhaps you wanted to remove the file from the queue?");
     else
       cc_disconnect(cc);
     break;

@@ -173,6 +173,7 @@ struct cc {
   int timeout_src;
   time_t last_action;
   char remoteaddr[24]; // xxx.xxx.xxx.xxx:ppppp
+  struct dl *dlf;
   char *token;    // (ADC)
   char *last_file;
   guint64 last_size;
@@ -297,6 +298,32 @@ static void handle_error(struct net *n, int action, GError *err) {
   if(!cc->err) // ignore network errors if there already was a protocol error
     g_propagate_error(&(cc->err), g_error_copy(err));
   cc_disconnect(n->handle);
+}
+
+
+static void handle_recvfile(struct net *n, guint64 read) {
+  struct cc *cc = n->handle;
+  dl_received(cc->dlf, read);
+  // TODO: if this wasn't called because of an error, check for more stuff to
+  // download from this user.
+}
+
+
+static void handle_adcsnd(struct cc *cc, guint64 start, guint64 bytes) {
+  g_return_if_fail(cc->dlf);
+  g_return_if_fail(cc->dlf->have == start);
+  if(!cc->dlf->size)
+    cc->dlf->size = bytes;
+  net_recvfile(cc->net, cc->dlf->incfd, bytes, handle_recvfile);
+}
+
+
+static void handle_download(struct cc *cc) {
+  cc->dlf = dl_queue_user(cc->cid);
+  if(cc->adc)
+    net_sendf(cc->net, "CGET file files.xml.bz2 %"G_GUINT64_FORMAT" -1", cc->dlf->have);
+  else
+    net_sendf(cc->net, "$ADCGET file files.xml.bz2 %"G_GUINT64_FORMAT" -1", cc->dlf->have);
 }
 
 
@@ -516,7 +543,7 @@ static void adc_handle(struct cc *cc, char *msg) {
           handle_id(cc, u);
       }
       if(cc->dl)
-        cc_disconnect(cc); // TODO: actually initiate a download
+        handle_download(cc);
     }
     break;
 
@@ -535,6 +562,11 @@ static void adc_handle(struct cc *cc, char *msg) {
         g_string_free(r, TRUE);
       }
     }
+    break;
+
+  case ADCC_SND:
+    if(cc->state == ADC_S_NORMAL && cmd.argc >= 4)
+      handle_adcsnd(cc, g_ascii_strtoull(cmd.argv[2], NULL, 0), g_ascii_strtoull(cmd.argv[3], NULL, 0));
     break;
 
   default:
@@ -631,7 +663,7 @@ static void nmdc_direction(struct cc *cc, gboolean down, int num) {
 
   // if we can download, do so!
   if(cc->dl)
-    cc_disconnect(cc); // TODO: actually initiate download
+    handle_download(cc);
 }
 
 
@@ -651,6 +683,7 @@ static void nmdc_handle(struct cc *cc, char *cmd) {
   CMDREGEX(supports, "Supports (.+)");
   CMDREGEX(direction, "Direction (Download|Upload) ([0-9]+)");
   CMDREGEX(adcget, "ADCGET ([^ ]+) (.+) ([0-9]+) (-?[0-9]+)");
+  CMDREGEX(adcsnd, "ADCSND file files.xml.bz2 ([0-9]+) (-?[0-9]+)");
 
   // $MyNick
   if(g_regex_match(mynick, cmd, 0, &nfo)) { // 1 = nick
@@ -732,6 +765,16 @@ static void nmdc_handle(struct cc *cc, char *cmd) {
     g_free(un_id);
     g_free(type);
     g_free(id);
+    g_free(start);
+    g_free(bytes);
+  }
+  g_match_info_free(nfo);
+
+  // $ADCSND
+  if(g_regex_match(adcsnd, cmd, 0, &nfo)) { // 1 = start_pos, 2 = bytes
+    char *start = g_match_info_fetch(nfo, 1);
+    char *bytes = g_match_info_fetch(nfo, 2);
+    handle_adcsnd(cc, g_ascii_strtoull(start, NULL, 10), g_ascii_strtoull(bytes, NULL, 10));
     g_free(start);
     g_free(bytes);
   }

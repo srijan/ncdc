@@ -139,12 +139,18 @@ void conf_init() {
   if(g_access(conf_dir, F_OK | R_OK | X_OK | W_OK) < 0)
     g_error("Directory '%s' does not exist or is not writable.", conf_dir);
 
-  // we should also have a logs/ subdirectory
-  char *logs = g_build_filename(conf_dir, "logs", NULL);
-  g_mkdir(logs, 0777);
-  if(g_access(conf_dir, F_OK | R_OK | X_OK | W_OK) < 0)
-    g_error("Directory '%s' does not exist or is not writable.", logs);
-  g_free(logs);
+  // make sure some subdirectories exist and are writable
+#define cdir(d) do {\
+    char *tmp = g_build_filename(conf_dir, d, NULL);\
+    g_mkdir(tmp, 0777);\
+    if(g_access(conf_dir, F_OK | R_OK | X_OK | W_OK) < 0)\
+      g_error("Directory '%s' does not exist or is not writable.", tmp);\
+    g_free(tmp);\
+  } while(0)
+  cdir("logs");
+  cdir("inc");
+  cdir("fl");
+#undef cdir
 
   // make sure that there is no other ncdc instance working with the same config directory
   char *ver_file = g_build_filename(conf_dir, "version", NULL);

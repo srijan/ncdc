@@ -79,6 +79,11 @@ struct net {
   int file_fd;
   gint64 file_left;
   guint64 file_offset;
+  // receiving a file
+  int recv_fd;
+  guint64 recv_left;
+  guint64 recv_length;
+  void (*recv_cb)(struct net *, guint64); // don't confuse the name with cb_rcv...
   // in/out rates
   struct ratecalc *rate_in;
   struct ratecalc *rate_out;
@@ -176,20 +181,18 @@ struct net {
 
 
 static void consume_input(struct net *n) {
-  char *str = n->in->str;
   char *sep;
-  gssize consumed = 0;
 
-  while(n->conn && (sep = strchr(str, n->eom[0]))) {
-    consumed += 1 + sep - str;
-    *sep = 0;
-    g_debug("%s< %s", net_remoteaddr(n), str);
-    if(str[0])
-      n->cb_rcv(n, str);
-    str = sep+1;
+  // Make sure the command is consumed from the buffer before the callback is
+  // called, otherwise net_recvfile() can't do its job.
+  while(n->conn && (sep = strchr(n->in->str, n->eom[0]))) {
+    char *msg = g_strndup(n->in->str, sep - n->in->str);
+    g_string_erase(n->in, 0, 1 + sep - n->in->str);
+    g_debug("%s< %s", net_remoteaddr(n), msg);
+    if(msg[0])
+      n->cb_rcv(n, msg);
+    g_free(msg);
   }
-  if(consumed)
-    g_string_erase(n->in, 0, consumed);
 }
 
 
@@ -200,26 +203,57 @@ static void consume_input(struct net *n) {
       g_error_free(err);\
       return TRUE;\
     }\
-    if(err) {\
+    if(err || ret == 0) {\
       src = 0;\
+      if(!err)\
+        g_set_error_literal(&err, 1, 0, "Remote disconnected.");\
       n->cb_err(n, action, err);\
       g_error_free(err);\
-      return FALSE;\
-    }\
-    if(ret == 0) {\
-      src = 0;\
-      g_set_error_literal(&err, 1, 0, "Remote disconnected.");\
-      n->cb_err(n, action, err);\
-      g_error_free(err);\
+      if(action == NETERR_RECV && n->recv_cb) {\
+        n->recv_cb(n, n->recv_length);\
+        n->recv_cb = NULL;\
+      }\
       return FALSE;\
     }\
   } while(0)
+
+
+// TODO: do this in a separate thread to avoid blocking on HDD writes.
+// TODO: use splice() on Linux
+static gboolean handle_recvfile(struct net *n) {
+  char buf[10240];
+  GError *err = NULL;
+  gssize read = g_socket_receive(n->sock, buf, MIN(10240, n->recv_left), NULL, &err);
+  handle_ioerr(n, n->in_src, read, err, NETERR_RECV);
+  ratecalc_add(&net_in, read);
+  ratecalc_add(n->rate_in, read);
+
+  int l = read;
+  while(l > 0) {
+    int r = write(n->recv_fd, buf + (read-l), l);
+    g_return_val_if_fail(r >= 0, FALSE);
+    l -= r;
+    n->recv_left -= r;
+    n->recv_length += r;
+  }
+
+  // run callback if we're ready
+  if(n->recv_left <= 0 && n->recv_cb) {
+    n->recv_cb(n, n->recv_length);
+    n->recv_cb = NULL;
+  }
+  return TRUE;
+}
 
 
 static gboolean handle_input(GSocket *sock, GIOCondition cond, gpointer dat) {
   GError *err = NULL;
   struct net *n = dat;
   time(&(n->timeout_last));
+
+  // receive file data
+  if(n->recv_left > 0)
+    return handle_recvfile(n);
 
   // we need to be able to access the net object after calling callbacks that
   // may do an unref().
@@ -509,6 +543,37 @@ void net_sendfile(struct net *n, const char *path, guint64 offset, guint64 lengt
   n->file_offset = offset;
   n->file_left = length;
   send_do(n);
+}
+
+
+// TODO: error reporting?
+// Receives `length' bytes from the socket and writes it to fd. The callback is
+// called when length bytes are read or when a read error occurred - in both
+// cases it indicates how many bytes it actually received. The callback is
+// *not* called when net_disconnect() is called or when there was a write
+// error. It is assumed that we're not writing while receiving a file, and that
+// a _disconnect() is intended to throw away the data anyway.
+void net_recvfile(struct net *n, int fd, guint64 length, void (*cb)(struct net *, guint64)) {
+  n->recv_left = length;
+  n->recv_fd = fd;
+  n->recv_cb = cb;
+  // copy stuff from the buffer to the fd
+  if(n->in->len >= 0) {
+    int w = MIN(n->in->len, length);
+    if(w == length)
+      n->recv_left = n->recv_fd = 0;
+    else {
+      n->recv_left -= w;
+      n->recv_length += w;
+    }
+    int l = w;
+    while(l > 0) {
+      int r = write(fd, n->in->str + (w-l), l);
+      g_return_if_fail(r >= 0);
+      l -= r;
+    }
+    g_string_erase(n->in, 0, w);
+  }
 }
 
 

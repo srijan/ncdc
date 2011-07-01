@@ -26,6 +26,10 @@
 
 #include "ncdc.h"
 #include <string.h>
+#include <errno.h>
+
+#include <sys/stat.h>
+#include <fcntl.h>
 
 
 #if INTERFACE
@@ -33,6 +37,11 @@
 struct dl {
   char hash[24];
   gboolean islist;
+  int incfd;    // file descriptor for <conf_dir>/inc/<hash>
+  guint64 size; // total size of the file
+  guint64 have; // what we have so far
+  char *inc;    // path to the incomplete file
+  char *dest;   // destination path (must be on same filesystem as the incomplete file)
   struct cc_expect *expect;
   struct cc *cc;
 };
@@ -53,7 +62,7 @@ static GHashTable *queue = NULL;
 // In the rest of the code I'm assuming this function to be fast, so we'd still
 // need a CID->download lookup table when supporting file downloads.
 // This should actually return a list of dls...
-static struct dl *dl_queue_user(char *cid) {
+struct dl *dl_queue_user(char *cid) {
   return g_hash_table_lookup(queue, cid);
 }
 
@@ -122,8 +131,44 @@ void dl_queue_addlist(struct hub_user *u) {
   struct dl *dl = g_slice_new0(struct dl);
   dl->islist = TRUE;
   memcpy(dl->hash, u->cid, 24);
+  // figure out dl->dest
+  char tmp[40] = {};
+  base32_encode(u->cid, tmp);
+  char *fn = g_strdup_printf("%s.xml.bz2", tmp);
+  dl->dest = g_build_filename(conf_dir, "fl", fn, NULL);
+  g_free(fn);
+  // open the incomplete file (actually only needed when writing to it... but
+  // keeping it opened for the lifetime of the queue item is easier for now)
+  dl->inc = g_build_filename(conf_dir, "inc", tmp, NULL);
+  dl->incfd = open(dl->inc, O_WRONLY|O_CREAT, 0666);
+  if(dl->incfd < 0) {
+    g_warning("Error opening %s: %s", dl->inc, g_strerror(errno));
+    return;
+  }
+  // insert & start
+  g_debug("dl: Added to queue: %s", dl->dest);
   g_hash_table_insert(queue, dl->hash, dl);
   dl_queue_start(dl);
+}
+
+
+
+// Indicates how many bytes we received from a user before we disconnected.
+void dl_received(struct dl *dl, guint64 bytes) {
+  dl->have += bytes;
+  g_debug("dl: Received %"G_GUINT64_FORMAT" bytes for %s (size = %"G_GUINT64_FORMAT", have = %"G_GUINT64_FORMAT")", bytes, dl->dest, dl->size, dl->have);
+  // If we're not done yet, let it download more in a next try. (dl_queue_cc()
+  // is called automatically after the connection with the user has been
+  // removed, and that will continue the download)
+  if(dl->have < dl->size)
+    return;
+  // Now we have a completed download. Rename and free.
+  g_return_if_fail(close(dl->incfd) == 0);
+  g_return_if_fail(rename(dl->inc, dl->dest) == 0);
+  g_free(dl->inc);
+  g_free(dl->dest);
+  g_hash_table_remove(queue, dl->hash);
+  g_slice_free(struct dl, dl);
 }
 
 

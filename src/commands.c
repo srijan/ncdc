@@ -1071,6 +1071,7 @@ static void c_nick(char *args) {
 static void c_browse(char *args) {
   struct hub_user *u = NULL;
   char cid[24] = {};
+  gboolean force = FALSE;
 
   if(!args[0] && !fl_local_list) {
     ui_m(NULL, 0, "Nothing shared.");
@@ -1079,6 +1080,11 @@ static void c_browse(char *args) {
     if(tab->type != UIT_HUB && tab->type != UIT_MSG) {
       ui_m(NULL, 0, "This command can only be used on hub and message tabs.");
       return;
+    }
+    if(strncmp(args, "-f ", 3) == 0) {
+      force = TRUE;
+      args += 3;
+      g_strstrip(args);
     }
     u = hub_user_get(tab->hub, args);
     if(!u) {
@@ -1103,28 +1109,34 @@ static void c_browse(char *args) {
     return;
   }
 
-  char tmp[60] = {};
-  base32_encode(cid, tmp);
-  strcat(tmp, ".xml.bz2");
-  char *fn = g_build_filename(conf_dir, "fl", tmp, NULL);
-  if(g_file_test(fn, G_FILE_TEST_IS_REGULAR))
+  gboolean e = !force;
+  if(!force) {
+    char tmp[60] = {};
+    base32_encode(cid, tmp);
+    strcat(tmp, ".xml.bz2");
+    char *fn = g_build_filename(conf_dir, "fl", tmp, NULL);
+    e = g_file_test(fn, G_FILE_TEST_IS_REGULAR);
+    g_free(fn);
+  }
+  if(e)
     ui_tab_open(ui_fl_create(cid, FALSE), TRUE);
   else {
     dl_queue_addlist(u);
     ui_mf(NULL, 0, "File list of %s added to the download queue.", u->name);
   }
-  g_free(fn);
 }
 
 
 // definition of the command list
 static struct cmd cmds[] = {
   { "browse", c_browse, c_msg_sug,
-    "[<user>]", "Browse own file list.",
+    "[-f] [<user>]", "Browse own file list.",
     "Without arguments, this opens a new tab where you can browse your own file list.\n"
     "Note that changes to your list are not immediately visible in the browser."
     " You need to re-open the tab to get the latest version of your list.\n\n"
-    "With arguments, the user list of the specified user will be downloaded and the browse tab will open once it's complete."
+    "With arguments, the user list of the specified user will be downloaded (if"
+    " it has not been downloaded already) and the browse tab will open once it's"
+    " complete. The `-f' flag can be used to force the file list to be (re-)downloaded."
   },
   { "clear", c_clear, NULL,
     NULL, "Clear the display.",

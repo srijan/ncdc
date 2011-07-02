@@ -158,11 +158,26 @@ void dl_queue_addlist(struct hub_user *u) {
 void dl_received(struct dl *dl, guint64 bytes) {
   dl->have += bytes;
   g_debug("dl: Received %"G_GUINT64_FORMAT" bytes for %s (size = %"G_GUINT64_FORMAT", have = %"G_GUINT64_FORMAT")", bytes, dl->dest, dl->size, dl->have);
+
+  // For filelists: Don't allow resuming of the download. It could happen that
+  // the client modifies its filelist in between our retries. In that case the
+  // downloaded filelist would end up being corrupted. To avoid that: make sure
+  // lists are downloaded in one go, and throw away any incomplete data.
+  if(dl->have < dl->size) {
+    dl->have = dl->size = 0;
+    g_return_if_fail(close(dl->incfd) == 0);
+    dl->incfd = open(dl->inc, O_WRONLY|O_CREAT|O_TRUNC, 0666);
+    g_return_if_fail(dl->incfd >= 0);
+    return;
+  }
+
+  // For non-filelists:
   // If we're not done yet, let it download more in a next try. (dl_queue_cc()
   // is called automatically after the connection with the user has been
   // removed, and that will continue the download)
-  if(dl->have < dl->size)
-    return;
+  //if(dl->have < dl->size)
+  //  return;
+
   // Now we have a completed download. Rename it to the final destination.
   g_return_if_fail(close(dl->incfd) == 0);
   g_return_if_fail(rename(dl->inc, dl->dest) == 0);

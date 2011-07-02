@@ -1068,31 +1068,52 @@ static void c_nick(char *args) {
   g_free(c);
 }
 
-
 static void c_browse(char *args) {
-  if(args[0] && tab->type != UIT_HUB && tab->type != UIT_MSG)
-    ui_m(NULL, 0, "This command can only be used on hub and message tabs.");
-  else if(!args[0] && !fl_local_list)
+  struct hub_user *u = NULL;
+  char cid[24] = {};
+
+  if(!args[0] && !fl_local_list) {
     ui_m(NULL, 0, "Nothing shared.");
-  else if(!args[0]) {
-    GList *n;
-    for(n=ui_tabs; n; n=n->next)
-      if(((struct ui_tab *)n->data)->type == UIT_FL)
-        break;
-    if(n)
-      ui_tab_cur = n;
-    else {
-      ui_tab_open(ui_fl_create(NULL, FALSE), TRUE);
+    return;
+  } else if(args[0]) {
+    if(tab->type != UIT_HUB && tab->type != UIT_MSG) {
+      ui_m(NULL, 0, "This command can only be used on hub and message tabs.");
+      return;
     }
-  } else {
-    struct hub_user *u = hub_user_get(tab->hub, args);
-    if(!u)
+    u = hub_user_get(tab->hub, args);
+    if(!u) {
       ui_m(NULL, 0, "No user found with that name.");
-    else {
-      dl_queue_addlist(u);
-      ui_mf(NULL, 0, "File list of %s added to the download queue.", u->name);
-    }
+      return;
+    } else
+      memcpy(cid, u->cid, 24);
   }
+
+  GList *n;
+  for(n=ui_tabs; n; n=n->next) {
+    struct ui_tab *t = n->data;
+    if(t->type == UIT_FL && memcmp(t->cid, cid, 24) == 0)
+      break;
+  }
+  if(n) {
+    ui_tab_cur = n;
+    return;
+  }
+  if(!u) {
+    ui_tab_open(ui_fl_create(NULL, FALSE), TRUE);
+    return;
+  }
+
+  char tmp[60] = {};
+  base32_encode(cid, tmp);
+  strcat(tmp, ".xml.bz2");
+  char *fn = g_build_filename(conf_dir, "fl", tmp, NULL);
+  if(g_file_test(fn, G_FILE_TEST_IS_REGULAR))
+    ui_tab_open(ui_fl_create(cid, FALSE), TRUE);
+  else {
+    dl_queue_addlist(u);
+    ui_mf(NULL, 0, "File list of %s added to the download queue.", u->name);
+  }
+  g_free(fn);
 }
 
 

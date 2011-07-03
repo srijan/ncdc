@@ -833,9 +833,18 @@ static void adc_handle(struct hub *hub, char *msg) {
     else {
       int sid = ADC_DFCC(cmd.argv[0]);
       struct hub_user *u = g_hash_table_lookup(hub->sessions, GINT_TO_POINTER(sid));
-      if(sid == hub->sid) // TODO: properly handle TL, RD and do something with MS
-        hub_disconnect(hub, TRUE);
-      else if(u) { // TODO: handle DI, and perhaps do something with MS
+      if(sid == hub->sid) {
+        char *rd = adc_getparam(cmd.argv, "RD", NULL);
+        char *ms = adc_getparam(cmd.argv, "MS", NULL);
+        char *tl = adc_getparam(cmd.argv, "TL", NULL);
+        if(rd) {
+          ui_mf(hub->tab, UIP_HIGH, "\nThe hub is requesting you to move to %s.\nType `/connect %s' to do so.\n", rd, rd);
+          if(ms)
+            ui_mf(hub->tab, 0, "Message: %s", ms);
+        } else if(ms)
+          ui_m(hub->tab, UIP_MED, ms);
+        hub_disconnect(hub, rd || (tl && strcmp(tl, "-1") == 0) ? FALSE : TRUE);
+      } else if(u) { // TODO: handle DI, and perhaps do something with MS
         ui_hub_userchange(hub->tab, UIHUB_UC_QUIT, u);
         hub->sharecount--;
         hub->sharesize -= u->sharesize;

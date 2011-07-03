@@ -861,12 +861,13 @@ static void adc_handle(struct hub *hub, char *msg) {
     else {
       int code = (cmd.argv[0][1]-'0')*10 + (cmd.argv[0][2]-'0');
       if(!code)
-        ui_m(hub->tab, 0, cmd.argv[1]);
-      if(cmd.argv[0][1] == '1')
-        g_message("ADC Error (recoverable): %d %s", code, cmd.argv[1]);
-      if(cmd.argv[0][1] == '2') {
-        g_warning("ADC Error (fatal): %d %s", code, cmd.argv[1]);
-        hub_disconnect(hub, FALSE); // TODO: whether we should reconnect or not depends on the error code
+        ui_mf(hub->tab, UIP_MED, "(status-%02d) %s", code, cmd.argv[1]);
+      if(cmd.argv[0][0] == '1')
+        ui_mf(hub->tab, UIP_MED, "(warning-%02d) %s", code, cmd.argv[1]);
+      if(cmd.argv[0][0] == '2') {
+        ui_mf(hub->tab, UIP_MED, "(error-%02d) %s", code, cmd.argv[1]);
+        if(cmd.type == 'I')
+          hub_disconnect(hub, FALSE); // TODO: whether we should reconnect or not depends on the error code
       }
     }
     break;

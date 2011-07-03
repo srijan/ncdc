@@ -599,11 +599,10 @@ static gboolean udp_handle_out(GSocket *sock, GIOCondition cond, gpointer dat) {
     char *a = g_inet_address_to_string(g_inet_socket_address_get_address(G_INET_SOCKET_ADDRESS(m->dest)));
     g_debug("UDP:%s:%d> %s", a, g_inet_socket_address_get_port(G_INET_SOCKET_ADDRESS(m->dest)), m->msg);
     g_free(a);
-
-    g_free(m->msg);
-    g_object_unref(m->dest);
-    g_slice_free(struct net_udp, m);
   }
+  g_free(m->msg);
+  g_object_unref(m->dest);
+  g_slice_free(struct net_udp, m);
   return net_udp_queue->head ? TRUE : FALSE;
 }
 

@@ -821,7 +821,8 @@ static void adc_handle(struct hub *hub, char *msg) {
           // at the end. The following will help the detection in that case,
           // but brakes with good hubs. :-(
           //hub->joincomplete = hub->received_first;
-          hub->received_first = TRUE;
+          //hub->received_first = TRUE;
+          hub->joincomplete = TRUE;
         }
       }
     }

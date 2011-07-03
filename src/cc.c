@@ -36,8 +36,8 @@ GHashTable *cc_granted = NULL;
 
 
 void cc_grant(struct hub_user *u) {
-  if(!g_hash_table_lookup(cc_granted, u->cid))
-    g_hash_table_insert(cc_granted, g_strdup(u->cid), (void *)1);
+  if(!g_hash_table_lookup(cc_granted, &(u->uid)))
+    g_hash_table_insert(cc_granted, g_memdup(&(u->uid), 8), (void *)1);
 }
 
 
@@ -50,8 +50,9 @@ void cc_grant(struct hub_user *u) {
 
 struct cc_expect {
   struct hub *hub;
-  char *nick;   // NMDC, hub encoding
-  char cid[24];
+  char *nick;   // NMDC, hub encoding. Also set on ADC, but only for debugging purposes
+  guint64 uid;
+  char cid[8];  // ADC
   char *token;  // ADC
   int sid;      // ADC (prevents a user-by-CID lookup table, but does not allow a user to reconnect the hub while connecting here)
   gboolean adc : 1;
@@ -68,10 +69,10 @@ static void cc_expect_rm(GList *n, struct cc *success) {
   struct cc_expect *e = n->data;
   if(success && e->dl) {
     success->dl = TRUE;
-    dl_queue_cc(e->cid, success);
+    dl_queue_cc(e->uid, success);
   }
   if(e->dl)
-    dl_queue_expect(e->cid, NULL);
+    dl_queue_expect(e->uid, NULL);
   g_source_remove(e->timeout_src);
   g_free(e->token);
   g_free(e->nick);
@@ -83,9 +84,7 @@ static void cc_expect_rm(GList *n, struct cc *success) {
 static gboolean cc_expect_timeout(gpointer data) {
   GList *n = data;
   struct cc_expect *e = n->data;
-  char tmp[40] = {};
-  base32_encode(e->cid, tmp);
-  g_message("Expected connection from %s (%s) on %s, but received none.", e->nick, tmp, e->hub->tab->name);
+  g_message("Expected connection from %s on %s, but received none.", e->nick, e->hub->tab->name);
   cc_expect_rm(n, NULL);
   return FALSE;
 }
@@ -96,29 +95,31 @@ void cc_expect_add(struct hub *hub, struct hub_user *u, char *t, gboolean dl) {
   e->adc = hub->adc;
   e->hub = hub;
   e->dl = dl;
-  memcpy(e->cid, u->cid, 24);
-  if(e->adc)
+  e->uid = u->uid;
+  if(e->adc) {
     e->sid = u->sid;
-  else
+    e->nick = g_strdup(u->name);
+    memcpy(e->cid, u->cid, 8);
+  } else
     e->nick = g_strdup(u->name_hub);
   if(t)
     e->token = g_strdup(t);
   if(e->dl)
-    dl_queue_expect(e->cid, e);
+    dl_queue_expect(e->uid, e);
   time(&(e->added));
   g_queue_push_tail(cc_expected, e);
   e->timeout_src = g_timeout_add_seconds_full(G_PRIORITY_LOW, 60, cc_expect_timeout, cc_expected->tail, NULL);
 }
 
 
-// Checks the expects list for the current connection, sets *sid, cc->dl and
-// cc->hub and removes it from the expects list. cc->cid and cc->token must be
-// known.
+// Checks the expects list for the current connection, sets *sid, cc->dl,
+// cc->uid and cc->hub and removes it from the expects list. cc->cid and
+// cc->token must be known.
 static gboolean cc_expect_adc_rm(struct cc *cc, int *sid) {
   GList *n;
   for(n=cc_expected->head; n; n=n->next) {
     struct cc_expect *e = n->data;
-    if(e->adc && memcmp(cc->cid, e->cid, 24) == 0 && strcmp(cc->token, e->token) == 0) {
+    if(e->adc && memcmp(cc->cid, e->cid, 8) == 0 && strcmp(cc->token, e->token) == 0) {
       if(sid)
         *sid = e->sid;
       cc->hub = e->hub;
@@ -130,8 +131,8 @@ static gboolean cc_expect_adc_rm(struct cc *cc, int *sid) {
 }
 
 
-// Same as above, but for NMDC. Sets cc->dl and cc->hub. cc->nick_raw must be
-// known, and for passive connections cc->hub must also be known.
+// Same as above, but for NMDC. Sets cc->dl, cc->uid and cc->hub. cc->nick_raw
+// must be known, and for passive connections cc->hub must also be known.
 static gboolean cc_expect_nmdc_rm(struct cc *cc) {
   GList *n;
   for(n=cc_expected->head; n; n=n->next) {
@@ -140,6 +141,7 @@ static gboolean cc_expect_nmdc_rm(struct cc *cc) {
       continue;
     if(!e->adc && strcmp(e->nick, cc->nick_raw) == 0) {
       cc->hub = e->hub;
+      cc->uid = e->uid;
       cc_expect_rm(n, cc);
       return TRUE;
     }
@@ -169,13 +171,14 @@ struct cc {
   gboolean dl : 1;
   int dir;        // (NMDC) our direction. -1 = Upload, otherwise: Download $dir
   int state;      // (ADC)
-  char cid[24];   // (ADC)
+  char cid[8];    // (ADC)
   int timeout_src;
   time_t last_action;
   char remoteaddr[24]; // xxx.xxx.xxx.xxx:ppppp
   struct dl *dlf;
   char *token;    // (ADC)
   char *last_file;
+  guint64 uid;
   guint64 last_size;
   guint64 last_length;
   guint64 last_offset;
@@ -192,7 +195,7 @@ GSequence *cc_list;
 void cc_init_global() {
   cc_expected = g_queue_new();
   cc_list = g_sequence_new(NULL);
-  cc_granted = g_hash_table_new_full(g_int_hash, tiger_hash_equal, g_free, NULL);
+  cc_granted = g_hash_table_new_full(g_int64_hash, g_int64_equal, g_free, NULL);
 }
 
 
@@ -251,13 +254,7 @@ static struct cc *cc_check_dupe(struct cc *cc) {
   GSequenceIter *i = g_sequence_get_begin_iter(cc_list);
   for(; !g_sequence_iter_is_end(i); i=g_sequence_iter_next(i)) {
     struct cc *c = g_sequence_get(i);
-    if(cc == c || c->timeout_src || !!c->adc != !!cc->adc)
-      continue;
-    // NMDC (cc->hub and cc->nick_raw must be known)
-    if(!c->adc && c->hub == cc->hub && c->nick_raw && cc->nick_raw && strcmp(c->nick_raw, cc->nick_raw) == 0)
-      return c;
-    // ADC (cc->cid must be known)
-    if(c->adc && memcmp(c->cid, cc->cid, 24) == 0)
+    if(cc != c && !c->timeout_src && !!c->adc == !!cc->adc && c->uid == cc->uid)
       return c;
   }
   return NULL;
@@ -320,7 +317,7 @@ static void handle_adcsnd(struct cc *cc, guint64 start, guint64 bytes) {
 
 
 static void handle_download(struct cc *cc) {
-  cc->dlf = dl_queue_user(cc->cid);
+  cc->dlf = dl_queue_user(cc->uid);
   if(cc->adc)
     net_sendf(cc->net, "CGET file files.xml.bz2 %"G_GUINT64_FORMAT" -1", cc->dlf->have);
   else
@@ -463,7 +460,10 @@ static void handle_adcget(struct cc *cc, char *type, char *id, guint64 start, gi
 static void handle_id(struct cc *cc, struct hub_user *u) {
   cc->nick = g_strdup(u->name);
   cc->isop = u->isop;
-  memcpy(cc->cid, u->cid, 24);
+  cc->uid = u->uid;
+
+  if(cc->adc)
+    memcpy(cc->cid, u->cid, 8);
 
   // Don't allow multiple connections with the same user for the same purpose
   // (up/down).  For NMDC, the purpose of this connection is determined when we
@@ -477,7 +477,7 @@ static void handle_id(struct cc *cc, struct hub_user *u) {
     }
   }
 
-  cc->slot_granted = g_hash_table_lookup(cc_granted, u->cid) ? TRUE : FALSE;
+  cc->slot_granted = g_hash_table_lookup(cc_granted, &(u->uid)) ? TRUE : FALSE;
 }
 
 
@@ -532,13 +532,13 @@ static void adc_handle(struct cc *cc, char *msg) {
       if(!id || (cc->active && !token)) {
         g_warning("User did not sent a CID or token. (%s): %s", net_remoteaddr(cc->net), msg);
         cc_disconnect(cc);
-      } else if(strlen(id) != 39 || (!cc->active && memcmp(cid, cc->cid, 24) != 0)) {
+      } else if(strlen(id) != 39 || (!cc->active && memcmp(cid, cc->cid, 8) != 0)) {
         g_warning("Incorrect CID. (%s): %s", net_remoteaddr(cc->net), msg);
         cc_disconnect(cc);
       } else if(cc->active) {
         int sid;
         cc->token = g_strdup(token);
-        memcpy(cc->cid, cid, 24);
+        memcpy(cc->cid, cid, 8);
         cc_expect_adc_rm(cc, &sid);
         struct hub_user *u = cc->hub ? g_hash_table_lookup(cc->hub->sessions, GINT_TO_POINTER(sid)) : NULL;
         if(!u) {
@@ -664,7 +664,7 @@ static void nmdc_direction(struct cc *cc, gboolean down, int num) {
 
   // If we wanted to download, but didn't get the chance to do so, notify the dl manager.
   if(old_dl && !cc->dl)
-    dl_queue_cc(cc->cid, NULL);
+    dl_queue_cc(cc->uid, NULL);
 
   // if we can download, do so!
   if(cc->dl)
@@ -908,7 +908,7 @@ void cc_free(struct cc *cc) {
   if(ui_conn)
     ui_conn_listchange(cc->iter, UICONN_DEL);
   if(cc->dl)
-    dl_queue_cc(cc->cid, NULL);
+    dl_queue_cc(cc->uid, NULL);
   g_sequence_remove(cc->iter);
   net_unref(cc->net);
   if(cc->err)

@@ -1114,7 +1114,7 @@ static void c_nick(char *args) {
 
 static void c_browse(char *args) {
   struct hub_user *u = NULL;
-  char cid[24] = {};
+  guint64 uid = 0;
   gboolean force = FALSE;
 
   if(!args[0] && !fl_local_list) {
@@ -1135,13 +1135,13 @@ static void c_browse(char *args) {
       ui_m(NULL, 0, "No user found with that name.");
       return;
     } else
-      memcpy(cid, u->cid, 24);
+      uid = u->uid;
   }
 
   GList *n;
   for(n=ui_tabs; n; n=n->next) {
     struct ui_tab *t = n->data;
-    if(t->type == UIT_FL && memcmp(t->cid, cid, 24) == 0)
+    if(t->type == UIT_FL && t->uid == uid)
       break;
   }
   if(n) {
@@ -1149,21 +1149,20 @@ static void c_browse(char *args) {
     return;
   }
   if(!u) {
-    ui_tab_open(ui_fl_create(NULL, FALSE), TRUE);
+    ui_tab_open(ui_fl_create(0, FALSE), TRUE);
     return;
   }
 
   gboolean e = !force;
   if(!force) {
-    char tmp[60] = {};
-    base32_encode(cid, tmp);
-    strcat(tmp, ".xml.bz2");
+    char *tmp = g_strdup_printf("%"G_GINT64_MODIFIER"x.xml.bz2", uid);
     char *fn = g_build_filename(conf_dir, "fl", tmp, NULL);
     e = g_file_test(fn, G_FILE_TEST_IS_REGULAR);
     g_free(fn);
+    g_free(tmp);
   }
   if(e)
-    ui_tab_open(ui_fl_create(cid, FALSE), TRUE);
+    ui_tab_open(ui_fl_create(uid, FALSE), TRUE);
   else {
     dl_queue_addlist(u);
     ui_mf(NULL, 0, "File list of %s added to the download queue.", u->name);

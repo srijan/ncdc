@@ -51,7 +51,7 @@ struct ui_tab {
   struct ui_logwindow *log;    // MAIN, HUB, MSG
   struct hub *hub;             // HUB, USERLIST, MSG
   struct ui_listing *list;     // USERLIST, CONN
-  char cid[24];                // FL (TODO: MSG)
+  guint64 uid;                 // FL (TODO: MSG)
   // HUB
   struct ui_tab *userlist_tab;
   gboolean hub_joincomplete;
@@ -223,7 +223,6 @@ struct ui_tab *ui_hub_create(const char *name) {
   tab->name = g_strdup_printf("#%s", name);
   tab->type = UIT_HUB;
   tab->log = ui_logwindow_create(tab->name);
-  tab->hub = hub_create(tab);
   // Every hub tab should have a unique ID. The name of the tab (which is the
   // group name in the config file) can be made changable in the future, but
   // internally we'd want a more stable ID for user CID creation on NMDC hubs,
@@ -232,12 +231,13 @@ struct ui_tab *ui_hub_create(const char *name) {
 #if GLIB_CHECK_VERSION(2, 26, 0)
     g_key_file_set_uint64(conf_file, tab->name, "hubid", rand_64());
 #else
-    char *tmp = g_strdup_printf("%"G_GUINT64_FORMAT, rand_64());
+    char *tmp = g_strdup_printf("%016"G_GINT64_FORMAT, rand_64());
     g_key_file_set_string(conf_file, tab->name, "hubid", tmp);
     g_free(tmp);
 #endif
     conf_save();
   }
+  tab->hub = hub_create(tab);
   // already used this name before? open connection again
   if(g_key_file_has_key(conf_file, tab->name, "hubaddr", NULL))
     hub_connect(tab->hub);
@@ -867,15 +867,13 @@ static void ui_conn_key(guint64 key) {
 // File list browser (UIT_FL)
 
 // File list is passed to this tab, and will be freed upon closing.
-struct ui_tab *ui_fl_create(char *cid, gboolean report_to_main) {
+struct ui_tab *ui_fl_create(guint64 uid, gboolean report_to_main) {
   // get file list
   struct fl_list *fl = NULL;
-  if(!cid)
+  if(!uid)
     fl = fl_local_list ? fl_list_copy(fl_local_list) : NULL;
   else {
-    char tmp[60] = {};
-    base32_encode(cid, tmp);
-    strcat(tmp, ".xml.bz2");
+    char *tmp = g_strdup_printf("%016"G_GINT64_MODIFIER"x.xml.bz2", uid);
     char *fn = g_build_filename(conf_dir, "fl", tmp, NULL);
     GError *err = NULL;
     fl = fl_load(fn, &err);
@@ -883,32 +881,23 @@ struct ui_tab *ui_fl_create(char *cid, gboolean report_to_main) {
     if(err) {
       ui_mf(report_to_main ? ui_main : NULL, 0, "Error loading %s: %s", tmp, err->message);
       g_error_free(err);
+      g_free(tmp);
       return NULL;
     }
+    g_free(tmp);
   }
 
   // get user
-  GSList *l = cid ? g_hash_table_lookup(hub_usercids, cid) : NULL;
-  struct hub_user *u = l ? l->data : NULL;
+  struct hub_user *u = uid ? g_hash_table_lookup(hub_uids, &uid) : NULL;
 
   // create tab
   struct ui_tab *tab = g_new0(struct ui_tab, 1);
   tab->type = UIT_FL;
   tab->prio = UIP_MED;
-  if(!cid)
-    tab->name = g_strdup("/own");
-  else if(u)
-    tab->name = g_strdup_printf("/%s", u->name);
-  else {
-    char tmp[40];
-    base32_encode(cid, tmp);
-    tmp[9] = 0;
-    tab->name = g_strdup_printf("/%s", tmp);
-  }
+  tab->name = !uid ? g_strdup("/own") : u ? g_strdup_printf("/%s", u->name) : g_strdup_printf("/%016"G_GINT64_MODIFIER"x", uid);
   tab->fl_list = fl;
   tab->fl_uname = u ? g_strdup(u->name) : NULL;
-  if(cid)
-    memcpy(tab->cid, cid, 24);
+  tab->uid = uid;
   tab->list = fl && fl->sub ? ui_listing_create(fl->sub) : NULL;
   return tab;
 }
@@ -929,12 +918,9 @@ void ui_fl_close(struct ui_tab *tab) {
 
 
 static char *ui_fl_title(struct ui_tab *tab) {
-  char tmp[40] = {};
-  base32_encode(tab->cid, tmp);
-  return !tab->cid[0] && !tab->cid[1] && !tab->cid[2] && !tab->cid[3]
-    ? g_strdup_printf("Browsing own file list.")
-    : tab->fl_uname ? g_strdup_printf("Browsing file list of %s (%s)", tab->fl_uname, tmp)
-    : g_strdup_printf("Browsing file list of %s (user offline)", tmp);
+  return  !tab->uid ? g_strdup_printf("Browsing own file list.")
+    : tab->fl_uname ? g_strdup_printf("Browsing file list of %s (%016"G_GINT64_MODIFIER"x)", tab->fl_uname, tab->uid)
+    : g_strdup_printf("Browsing file list of %016"G_GINT64_MODIFIER"x (user offline)", tab->uid);
 }
 
 

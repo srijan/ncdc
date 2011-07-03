@@ -35,9 +35,10 @@
 #if INTERFACE
 
 struct dl {
-  char hash[24];
+  char hash[24]; // unused - for non-filelists
   gboolean islist;
-  int incfd;    // file descriptor for <conf_dir>/inc/<hash>
+  guint64 uid;  // user who has this file (should be a list for multi-source downloading)
+  int incfd;    // file descriptor for this file in <conf_dir>/inc/
   guint64 size; // total size of the file
   guint64 have; // what we have so far
   char *inc;    // path to the incomplete file
@@ -53,31 +54,31 @@ struct dl {
 // more than only file lists - since we don't want to lose those from the queue
 // after a restart.
 //
-// Key = TTH (for normal files) or CID (for file lists)
+// Key = TTH (for normal files) or ??? (for file lists)
 // Value = struct dl
-static GHashTable *queue = NULL;
+//
+// This table is not necessary at the moment
+//static GHashTable *queue = NULL;
 
 
-// As we currently only support file list downloads, the CID = key to the queue.
-// In the rest of the code I'm assuming this function to be fast, so we'd still
-// need a CID->download lookup table when supporting file downloads.
+// uid -> dl lookup table. Value should be a GSList or something when we can
+// download more than only file lists.
+static GHashTable *queue_users = NULL;
+
+
 // This should actually return a list of dls...
-struct dl *dl_queue_user(char *cid) {
-  return g_hash_table_lookup(queue, cid);
+struct dl *dl_queue_user(guint64 uid) {
+  return g_hash_table_lookup(queue_users, &uid);
 }
 
 
 static void dl_queue_start(struct dl *dl) {
   g_return_if_fail(dl && !(dl->cc || dl->expect));
   // get user/hub
-  GSList *l = g_hash_table_lookup(hub_usercids, dl->hash);
-  if(!l)
+  struct hub_user *u = g_hash_table_lookup(hub_uids, &(dl->uid));
+  if(!u)
     return;
-  // if the user is on multiple hubs, get a random one (makes sure that if one
-  // doesn't work, we at least have a chance on an other hub)
-  struct hub_user *u = g_slist_nth_data(l, g_random_int_range(0, g_slist_length(l)));
-  g_assert(u);
-  // now try to open a C-C connection
+  // try to open a C-C connection
   // TODO: re-use an existing download connection if we have one open
   hub_opencc(u->hub, u);
 }
@@ -92,8 +93,8 @@ static void dl_queue_start(struct dl *dl) {
 // Note that in the case of a timeout (which is currently set to 60 seconds),
 // we immediately try to connect again. Some hubs might not like this
 // "aggressive" behaviour...
-void dl_queue_expect(char *cid, struct cc_expect *e) {
-  struct dl *dl = dl_queue_user(cid);
+void dl_queue_expect(guint64 uid, struct cc_expect *e) {
+  struct dl *dl = dl_queue_user(uid);
   g_return_if_fail(dl);
   dl->expect = e;
   if(!e && !dl->cc)
@@ -106,8 +107,8 @@ void dl_queue_expect(char *cid, struct cc_expect *e) {
 // it is set, it means we're connected and the download is in progress or is
 // being negotiated. Otherwise, it means we've failed to initiate the download
 // and should try again.
-void dl_queue_cc(char *cid, struct cc *cc) {
-  struct dl *dl = dl_queue_user(cid);
+void dl_queue_cc(guint64 uid, struct cc *cc) {
+  struct dl *dl = dl_queue_user(uid);
   g_return_if_fail(dl);
   dl->cc = cc;
   if(!cc && !dl->expect)
@@ -117,8 +118,8 @@ void dl_queue_cc(char *cid, struct cc *cc) {
 
 // To be called when a user joins a hub. Checks whether we have something to
 // get from that user.
-void dl_queue_useronline(char *cid) {
-  struct dl *dl = dl_queue_user(cid);
+void dl_queue_useronline(guint64 uid) {
+  struct dl *dl = dl_queue_user(uid);
   if(dl && !dl->expect && !dl->cc)
     dl_queue_start(dl);
 }
@@ -128,19 +129,17 @@ void dl_queue_useronline(char *cid) {
 
 // Add the file list of some user to the queue
 void dl_queue_addlist(struct hub_user *u) {
-  g_return_if_fail(u && u->hasinfo && !g_hash_table_lookup(queue, u->cid));
+  g_return_if_fail(u && u->hasinfo && !g_hash_table_lookup(queue_users, &(u->uid)));
   struct dl *dl = g_slice_new0(struct dl);
   dl->islist = TRUE;
-  memcpy(dl->hash, u->cid, 24);
+  dl->uid = u->uid;
   // figure out dl->dest
-  char tmp[40] = {};
-  base32_encode(u->cid, tmp);
-  char *fn = g_strdup_printf("%s.xml.bz2", tmp);
+  char *fn = g_strdup_printf("%016"G_GINT64_MODIFIER"x.xml.bz2", dl->uid);
   dl->dest = g_build_filename(conf_dir, "fl", fn, NULL);
-  g_free(fn);
   // open the incomplete file (actually only needed when writing to it... but
   // keeping it opened for the lifetime of the queue item is easier for now)
-  dl->inc = g_build_filename(conf_dir, "inc", tmp, NULL);
+  dl->inc = g_build_filename(conf_dir, "inc", fn, NULL);
+  g_free(fn);
   dl->incfd = open(dl->inc, O_WRONLY|O_CREAT, 0666);
   if(dl->incfd < 0) {
     g_warning("Error opening %s: %s", dl->inc, g_strerror(errno));
@@ -148,7 +147,7 @@ void dl_queue_addlist(struct hub_user *u) {
   }
   // insert & start
   g_debug("dl: Added to queue: %s", dl->dest);
-  g_hash_table_insert(queue, dl->hash, dl);
+  g_hash_table_insert(queue_users, &(dl->uid), dl);
   dl_queue_start(dl);
 }
 
@@ -182,13 +181,13 @@ void dl_received(struct dl *dl, guint64 bytes) {
   g_return_if_fail(close(dl->incfd) == 0);
   g_return_if_fail(rename(dl->inc, dl->dest) == 0);
   // open the file list
-  struct ui_tab *t = ui_fl_create(dl->hash, TRUE);
+  struct ui_tab *t = ui_fl_create(dl->uid, TRUE);
   if(t)
     ui_tab_open(t, FALSE);
   // and free
   g_free(dl->inc);
   g_free(dl->dest);
-  g_hash_table_remove(queue, dl->hash);
+  g_hash_table_remove(queue_users, &(dl->uid));
   g_slice_free(struct dl, dl);
 }
 
@@ -197,7 +196,7 @@ void dl_received(struct dl *dl, guint64 bytes) {
 
 
 void dl_init_global() {
-  queue = g_hash_table_new(g_int_hash, tiger_hash_equal);
+  queue_users = g_hash_table_new(g_int64_hash, g_int64_equal);
 }
 
 
@@ -206,7 +205,7 @@ void dl_close_global() {
   // have a persistent download queue at the moment.
   GHashTableIter iter;
   struct dl *dl;
-  g_hash_table_iter_init(&iter, queue);
+  g_hash_table_iter_init(&iter, queue_users);
   while(g_hash_table_iter_next(&iter, NULL, (gpointer *)&dl))
     unlink(dl->inc);
 }

@@ -52,7 +52,8 @@ struct hub_user {
   char *conn;
   char *mail;
   char *client;
-  char cid[24];   // for ADC
+  char cid[8];   // for ADC - only the first 8 bytes of the CID, for simple verification purposes
+  guint64 uid;
   guint64 sharesize;
   GSequenceIter *iter; // used by ui_userlist_*
 }
@@ -95,17 +96,18 @@ struct hub {
   // whether we've fetched the complete user list (and their $MyINFO's)
   gboolean received_first; // true if one precondition for joincomplete is satisfied.
   gboolean joincomplete;
+  guint64 id; // "hubid" number
 };
 
 
-#define hub_init_global() hub_usercids = g_hash_table_new(g_int_hash, tiger_hash_equal)
+#define hub_init_global() hub_uids = g_hash_table_new(g_int64_hash, g_int64_equal)
 
 #endif
 
 
-// Global hash table of all users, with CID being the index and a GSList of
-// hub_user structs as value.
-GHashTable *hub_usercids = NULL;
+// Global hash table of all users, with UID being the index and hub_user struct
+// as value.
+GHashTable *hub_uids = NULL;
 
 
 
@@ -117,60 +119,43 @@ static struct hub_user *user_add(struct hub *hub, const char *name, const char *
   struct hub_user *u = g_hash_table_lookup(hub->users, name);
   if(u)
     return u;
+  struct tiger_ctx t;
+  char tmp[24];
+  tiger_init(&t);
+  tiger_update(&t, (char *)&(hub->id), 8);
   u = g_slice_new0(struct hub_user);
   u->hub = hub;
   if(hub->adc) {
     u->name = g_strdup(name);
-    base32_decode(cid, u->cid);
+    base32_decode(cid, tmp);
+    memcpy(u->cid, tmp, 8);
+    tiger_update(&t, tmp, 24);
   } else {
     u->name_hub = g_strdup(name);
     u->name = charset_convert(hub, TRUE, name);
-    // For NMDC users, generate some (fictive) CID based on user and hub name.
-    // This gives us a single way to uniquely identify a user for both
-    // protocols.  Of course, this CID is not very stable, it will be
-    // invalidated when a user changes his nick or when the name of this hub is
-    // changed. It is also not global, a user has a different CID on different
-    // hubs. These issues are all related to the NMDC protocol and there are no
-    // reliable workarounds.
-#if GLIB_CHECK_VERSION(2, 26, 0)
-    guint64 r = g_key_file_get_uint64(conf_file, hub->tab->name, "hubid", NULL);
-#else
-    char *tmp = g_key_file_get_string(conf_file, hub->tab->name, "hubid", NULL);
-    guint64 r = g_ascii_strtoull(tmp, NULL, 10);
-    g_free(tmp);
-#endif
-    struct tiger_ctx t;
-    tiger_init(&t);
-    tiger_update(&t, (char *)&r, 8);
     tiger_update(&t, u->name_hub, strlen(u->name_hub));
-    tiger_final(&t, u->cid);
   }
+  tiger_final(&t, tmp);
+  memcpy(&(u->uid), tmp, 8);
+  // insert in hub->users
   g_hash_table_insert(hub->users, hub->adc ? u->name : u->name_hub, u);
-  // insert in hub_usercids
-  GSList *l = g_hash_table_lookup(hub_usercids, u->cid);
-  if(l) {
-    g_assert(l == g_slist_insert(l, u, 1));
-  } else {
-    l = g_slist_prepend(l, u);
-    g_hash_table_insert(hub_usercids, u->cid, l);
-  }
+  // insert in hub_uids
+  if(g_hash_table_lookup(hub_uids, &(u->uid)))
+    g_critical("Duplicate user or hash collision for %s @ %s", u->name, hub->tab->name);
+  else
+    g_hash_table_insert(hub_uids, &(u->uid), u);
   // notify the UI
   ui_hub_userchange(hub->tab, UIHUB_UC_JOIN, u);
   // notify the dl manager
-  dl_queue_useronline(u->cid);
+  dl_queue_useronline(u->uid);
   return u;
 }
 
 
 static void user_free(gpointer dat) {
   struct hub_user *u = dat;
-  // remove from hub_usercids
-  GSList *l = g_hash_table_lookup(hub_usercids, u->cid);
-  l = g_slist_remove(l, u);
-  if(!l)
-    g_hash_table_remove(hub_usercids, u->cid);
-  else
-    g_hash_table_replace(hub_usercids, ((struct hub_user *)l->data)->cid, l);
+  // remove from hub_uids
+  g_hash_table_remove(hub_uids, &(u->uid));
   // remove from hub->sessions
   if(u->hub->adc && u->sid)
     g_hash_table_remove(u->hub->sessions, GINT_TO_POINTER(u->sid));
@@ -1401,6 +1386,13 @@ struct hub *hub_create(struct ui_tab *tab) {
   hub->users = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, user_free);
   hub->sessions = g_hash_table_new(g_direct_hash, g_direct_equal);
   hub->nfo_timer = g_timeout_add_seconds(5*60, check_nfo, hub);
+#if GLIB_CHECK_VERSION(2, 26, 0)
+  hub->id = g_key_file_get_uint64(conf_file, hub->tab->name, "hubid", NULL);
+#else
+  char *tmp = g_key_file_get_string(conf_file, hub->tab->name, "hubid", NULL);
+  hub->id = g_ascii_strtoull(tmp, NULL, 10);
+  g_free(tmp);
+#endif
   return hub;
 }
 

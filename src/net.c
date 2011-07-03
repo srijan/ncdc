@@ -262,7 +262,7 @@ static gboolean handle_input(GSocket *sock, GIOCondition cond, gpointer dat) {
   // make sure enough space is available in the input buffer (ugly hack, GString has no simple grow function)
   if(n->in->allocated_len - n->in->len < 1024) {
     // don't allow the buffer to grow beyond 1MB
-    if(n->in->allocated_len + 1024 > 1024*1024) {
+    if(n->in->len + 1024 > 1024*1024) {
       n->in_src = 0;
       g_set_error_literal(&err, 1, 0, "Buffer overflow.");
       n->cb_err(n, NETERR_RECV, err);

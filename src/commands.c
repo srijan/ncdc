@@ -57,6 +57,16 @@ struct setting {
 };
 
 
+static gboolean is_valid_hubname(char *name) {
+  char *tmp;
+  int len = 0;
+  for(tmp=name; *tmp; tmp = g_utf8_next_char(tmp))
+    if(++len && !g_unichar_isalnum(g_utf8_get_char(tmp)))
+      break;
+  return !*tmp && len && len <= 25;
+}
+
+
 static void get_string(char *group, char *key) {
   GError *err = NULL;
   char *str = g_key_file_get_string(conf_file, group, key, &err);
@@ -362,6 +372,44 @@ static void set_password(char *group, char *key, char *val) {
 }
 
 
+// a bit pointless, but for consistency's sake
+static void get_hubname(char *group, char *key) {
+  if(group[0] != '#')
+    ui_mf(NULL, 0, "%s.%s is not set.", group, key);
+  else
+    ui_mf(NULL, 0, "%s.%s = %s", group, key, group+1);
+}
+
+
+static void set_hubname(char *group, char *key, char *val) {
+  if(group[0] != '#')
+    ui_mf(NULL, 0, "ERROR: hubname can only be used as hub setting.");
+  else if(!val[0])
+    ui_mf(NULL, 0, "%s.%s may not be unset.", group, key);
+  else {
+    if(val[0] == '#')
+      val++;
+    char *g = g_strdup_printf("#%s", val);
+    if(!is_valid_hubname(val))
+      ui_mf(NULL, 0, "Invalid name.");
+    else if(g_key_file_has_group(conf_file, g))
+      ui_mf(NULL, 0, "Name already used.");
+    else {
+      conf_group_rename(group, g);
+      GList *n;
+      for(n=ui_tabs; n; n=n->next) {
+        struct ui_tab *t = n->data;
+        if(t->type == UIT_HUB && strcmp(t->name, group) == 0) {
+          g_free(t->name);
+          t->name = g_strdup(g);
+        }
+      }
+      get_hubname(g, key);
+    }
+    g_free(g);
+  }
+}
+
 
 // the settings list
 // TODO: help text / documentation?
@@ -375,6 +423,7 @@ static struct setting settings[] = {
   { "description",   NULL,     get_string,        set_userinfo,      NULL             },
   { "email",         NULL,     get_string,        set_userinfo,      NULL             },
   { "encoding",      NULL,     get_encoding,      set_encoding,      set_encoding_sug },
+  { "hubname",       NULL,     get_hubname,       set_hubname,       NULL             }, // makes no sense in "global"
   { "log_debug",     "log",    get_bool_f,        set_bool_f,        set_bool_sug     },
   { "minislots",     "global", get_minislots,     set_minislots,     NULL             },
   { "minislot_size", "global", get_minislot_size, set_minislot_size, NULL             },
@@ -466,7 +515,7 @@ static void c_set(char *args) {
 
   // get
   if(!val || !val[0]) {
-    if(checkalt && !g_key_file_has_key(conf_file, group, key, NULL))
+    if(checkalt && !g_key_file_has_key(conf_file, group, key, NULL) && strcmp(key, "hubname") != 0)
       group = "global";
     s->get(group, key);
 
@@ -493,7 +542,7 @@ static void c_unset(char *args) {
   if(!parsesetting(args, &group, &key, &s, &checkalt))
     return;
 
-  if(checkalt && !g_key_file_has_key(conf_file, group, key, NULL))
+  if(checkalt && !g_key_file_has_key(conf_file, group, key, NULL) && strcmp(key, "hubname") != 0)
     group = "global";
   s->set(group, key, NULL);
   conf_save();
@@ -638,19 +687,14 @@ static void c_open(char *args) {
     ui_m(NULL, 0, "No hub name given.");
     return;
   }
-  char *tmp;
-  int len = 0;
   GList *n;
   if(args[0] == '#')
     args++;
-  for(tmp=args; *tmp; tmp = g_utf8_next_char(tmp))
-    if(++len && !g_unichar_isalnum(g_utf8_get_char(tmp)))
-      break;
-  if(*tmp || !len || len > 25)
+  if(!is_valid_hubname(args))
     ui_m(NULL, 0, "Sorry, tab name may only consist of alphanumeric characters, and must not exceed 25 characters.");
   else {
     for(n=ui_tabs; n; n=n->next) {
-      tmp = ((struct ui_tab *)n->data)->name;
+      char *tmp = ((struct ui_tab *)n->data)->name;
       if(tmp[0] == '#' && strcmp(tmp+1, args) == 0)
         break;
     }

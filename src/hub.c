@@ -817,6 +817,7 @@ static void adc_handle(struct hub *hub, char *msg) {
         if(u->sid == hub->sid) {
           hub->state = ADC_S_NORMAL;
           hub->nick_valid = TRUE;
+          hub->isop = u->isop;
           // Some broken hubs send our own INF more than once, and not always
           // at the end. The following will help the detection in that case,
           // but brakes with good hubs. :-(

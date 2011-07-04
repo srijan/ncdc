@@ -144,6 +144,8 @@ struct net {
       g_debug("%s- Disconnected.", net_remoteaddr(n));\
       g_object_unref((n)->conn);\
       (n)->conn = NULL;\
+      g_string_truncate((n)->in, 0);\
+      g_string_truncate((n)->out, 0);\
       if((n)->setsock) {\
         g_object_unref((n)->sock);\
         (n)->setsock = FALSE;\
@@ -185,8 +187,12 @@ static void consume_input(struct net *n) {
 
   // Make sure the command is consumed from the buffer before the callback is
   // called, otherwise net_recvfile() can't do its job.
-  while(n->conn && (sep = strchr(n->in->str, n->eom[0]))) {
-    char *msg = g_strndup(n->in->str, sep - n->in->str);
+  while(n->conn && (sep = memchr(n->in->str, n->eom[0], n->in->len))) {
+    // The n->in->str+1 is a hack to work around a bug in uHub 0.2.8 (possibly
+    // also other versions), where it would prefix some messages with a 0-byte.
+    char *msg = !n->in->str[0] && sep > n->in->str+1
+      ? g_strndup(n->in->str+1, sep - n->in->str - 1)
+      : g_strndup(n->in->str, sep - n->in->str);
     g_string_erase(n->in, 0, 1 + sep - n->in->str);
     g_debug("%s< %s", net_remoteaddr(n), msg);
     if(msg[0])
@@ -239,8 +245,10 @@ static gboolean handle_recvfile(struct net *n) {
 
   // run callback if we're ready
   if(n->recv_left <= 0 && n->recv_cb) {
+    net_ref(n);
     n->recv_cb(n, n->recv_length);
     n->recv_cb = NULL;
+    net_unref(n);
   }
   return TRUE;
 }

@@ -212,7 +212,8 @@ void conf_save() {
 
 void conf_group_rename(const char *from, const char *to) {
   g_return_if_fail(!g_key_file_has_group(conf_file, to));
-  char **key = g_key_file_get_keys(conf_file, from, NULL, NULL);
+  char **keys = g_key_file_get_keys(conf_file, from, NULL, NULL);
+  char **key = keys;
   for(; key&&*key; key++) {
     char *v = g_key_file_get_value(conf_file, from, *key, NULL);
     g_key_file_set_value(conf_file, to, *key, v);
@@ -222,6 +223,7 @@ void conf_group_rename(const char *from, const char *to) {
       g_key_file_set_comment(conf_file, to, *key, v, NULL);
     g_free(v);
   }
+  g_strfreev(keys);
   char *c = g_key_file_get_comment(conf_file, from, NULL, NULL);
   if(c)
     g_key_file_set_comment(conf_file, to, NULL, c, NULL);

@@ -61,7 +61,7 @@
 
 
 // global vars
-const char *conf_dir;
+const char *conf_dir = NULL;
 GKeyFile *conf_file;
 
 char conf_cid[24];
@@ -132,7 +132,8 @@ static void generate_pid() {
 
 void conf_init() {
   // get location of the configuration directory
-  conf_dir = g_getenv("NCDC_DIR");
+  if(!conf_dir)
+    conf_dir = g_getenv("NCDC_DIR");
   if(!conf_dir)
     conf_dir = g_build_filename(g_get_home_dir(), ".ncdc", NULL);
 

@@ -262,8 +262,37 @@ static void open_autoconnect() {
 }
 
 
+static gboolean print_version(const gchar *name, const gchar *val, gpointer dat, GError **err) {
+  puts(ncdc_version());
+  exit(0);
+}
+
+
+static gboolean auto_open = TRUE;
+
+static GOptionEntry cli_options[] = {
+  { "version", 'v', G_OPTION_FLAG_NO_ARG, G_OPTION_ARG_CALLBACK, print_version,
+      "Print version and compilation information.", NULL },
+  { "session-dir", 'c', G_OPTION_FLAG_OPTIONAL_ARG, G_OPTION_ARG_FILENAME, &conf_dir,
+      "Use a different session directory. Default: `$NCDC_DIR' or `$HOME/.ncdc'.", "<dir>" },
+  { "no-autoconnect", 'n', G_OPTION_FLAG_NO_ARG|G_OPTION_FLAG_REVERSE, G_OPTION_ARG_NONE, &auto_open,
+      "Don't automatically connect to hubs with the `autoconnect' option set.", NULL },
+  { NULL }
+};
+
+
 int main(int argc, char **argv) {
   setlocale(LC_ALL, "");
+
+  // parse commandline options
+  GOptionContext *optx = g_option_context_new("- NCurses Direct Connect");
+  g_option_context_add_main_entries(optx, cli_options, NULL);
+  GError *err = NULL;
+  if(!g_option_context_parse(optx, &argc, &argv, &err)) {
+    puts(err->message);
+    exit(1);
+  }
+  g_option_context_free(optx);
 
   // TODO: check that the current locale is UTF-8. Things aren't going to work otherwise
 
@@ -305,7 +334,8 @@ int main(int argc, char **argv) {
 
   fl_init();
   cc_listen_start();
-  open_autoconnect();
+  if(auto_open)
+    open_autoconnect();
 
   // init and start main loop
   main_loop = g_main_loop_new(NULL, FALSE);

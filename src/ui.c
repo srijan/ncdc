@@ -217,7 +217,7 @@ static void ui_msg_joinquit(struct ui_tab *tab, gboolean join, struct hub_user *
 #endif
 
 
-struct ui_tab *ui_hub_create(const char *name) {
+struct ui_tab *ui_hub_create(const char *name, gboolean conn) {
   struct ui_tab *tab = g_new0(struct ui_tab, 1);
   // NOTE: tab name is also used as configuration group
   tab->name = g_strdup_printf("#%s", name);
@@ -239,7 +239,7 @@ struct ui_tab *ui_hub_create(const char *name) {
   }
   tab->hub = hub_create(tab);
   // already used this name before? open connection again
-  if(g_key_file_has_key(conf_file, tab->name, "hubaddr", NULL))
+  if(conn && g_key_file_has_key(conf_file, tab->name, "hubaddr", NULL))
     hub_connect(tab->hub);
   return tab;
 }

@@ -683,6 +683,12 @@ static void c_help_sug(char *args, char **sug) {
 
 
 static void c_open(char *args) {
+  gboolean conn = TRUE;
+  if(strncmp(args, "-n ", 3) == 0) {
+    conn = FALSE;
+    args += 3;
+    g_strstrip(args);
+  }
   if(!args[0]) {
     ui_m(NULL, 0, "No hub name given.");
     return;
@@ -699,7 +705,7 @@ static void c_open(char *args) {
         break;
     }
     if(!n)
-      ui_tab_open(ui_hub_create(args), TRUE);
+      ui_tab_open(ui_hub_create(args, conn), TRUE);
     else if(n != ui_tab_cur)
       ui_tab_cur = n;
     else
@@ -1254,11 +1260,13 @@ static struct cmd cmds[] = {
     ""
   },
   { "open", c_open, c_open_sug,
-    "<name>", "Open a new hub tab.",
-    "Opens a new tab to use for a hub. The name is a (short) personal name you use to"
-    " identify the hub, and will be used for storing hub-specific configuration.\n\n"
-    "If you have previously connected to a hub from a tab with the same name, /open"
-    " will automatically connect to the same hub again."
+    "[-n] <name>", "Open a new hub tab.",
+    "Opens a new tab to use for a hub. The name is a (short) personal name you"
+    " use to identify the hub, and will be used for storing hub-specific"
+    " configuration.\n\n"
+    "If you have previously connected to a hub from a tab with the same name,"
+    " /open will automatically connect to the same hub again. Use the `-n' flag"
+    " to disable this behaviour."
   },
   { "password", c_password, NULL,
     "<password>", "Send your password to the hub.",

@@ -257,7 +257,7 @@ static void open_autoconnect() {
   // TODO: make sure the tabs are opened in the same order as they were in the last run?
   for(group=groups; *group; group++)
     if(**group == '#' && g_key_file_get_boolean(conf_file, *group, "autoconnect", NULL))
-      ui_tab_open(ui_hub_create(*group+1), FALSE);
+      ui_tab_open(ui_hub_create(*group+1, TRUE), FALSE);
   g_strfreev(groups);
 }
 

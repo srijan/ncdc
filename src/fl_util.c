@@ -723,9 +723,9 @@ gboolean fl_save(struct fl_list *fl, const char *file, GString *buf, int level, 
   CHECKFAIL(xmlTextWriterWriteAttribute(writer, (xmlChar *)"Version", (xmlChar *)"1"));
   CHECKFAIL(xmlTextWriterWriteAttribute(writer, (xmlChar *)"Generator", (xmlChar *)PACKAGE_STRING));
 
-  char *cid = g_key_file_get_string(conf_file, "global", "cid", NULL);
+  char cid[40] = {};
+  base32_encode(conf_cid, cid);
   CHECKFAIL(xmlTextWriterWriteAttribute(writer, (xmlChar *)"CID", (xmlChar *)cid));
-  g_free(cid);
 
   char *path = fl_list_path(fl);
   CHECKFAIL(xmlTextWriterWriteAttribute(writer, (xmlChar *)"Base", (xmlChar *)path));

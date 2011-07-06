@@ -525,11 +525,10 @@ void hub_send_nfo(struct hub *hub) {
     // send non-changing stuff in the IDENTIFY state
     gboolean f = hub->state == ADC_S_IDENTIFY;
     if(f) {
-      char *cid = g_key_file_get_string(conf_file, "global", "cid", NULL);
-      char *pid = g_key_file_get_string(conf_file, "global", "pid", NULL);
+      char cid[40] = {}, pid[40] = {};
+      base32_encode(conf_pid, pid);
+      base32_encode(conf_cid, cid);
       g_string_append_printf(cmd, " ID%s PD%s VEncdc\\s%s", cid, pid, VERSION);
-      g_free(cid);
-      g_free(pid);
       adc_append(cmd, "NI", hub->nick);
     }
     if(f || !eq(ip4)) {
@@ -699,10 +698,10 @@ static void adc_sch(struct hub *hub, struct adc_cmd *cmd) {
   if(slots_free < 0)
     slots_free = 0;
   char tth[40] = {};
-  char *cid = NULL;
+  char cid[40] = {};
   char *dest = NULL;
   if(u->hasudp4) {
-    cid = g_key_file_get_string(conf_file, "global", "cid", NULL);
+    base32_encode(conf_cid, cid);
     dest = g_strdup_printf("%s:%d", ip4_unpack(u->ip4), u->udp4);
   }
 
@@ -734,7 +733,6 @@ static void adc_sch(struct hub *hub, struct adc_cmd *cmd) {
   }
 
   g_free(dest);
-  g_free(cid);
 
 adc_search_cleanup:
   g_free(s.and);

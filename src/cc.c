@@ -511,12 +511,12 @@ static void adc_handle(struct cc *cc, char *msg) {
         net_send(cc->net, "CSUP ADBASE ADTIGR ADBZIP");
 
       GString *r = adc_generate('C', ADCC_INF, 0, 0);
-      char *cid = g_key_file_get_string(conf_file, "global", "cid", NULL);
+      char cid[40] = {};
+      base32_encode(conf_cid, cid);
       adc_append(r, "ID", cid);
       if(!cc->active)
         adc_append(r, "TO", cc->token);
       net_send(cc->net, r->str);
-      g_free(cid);
       g_string_free(r, TRUE);
     }
     break;

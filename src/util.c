@@ -64,6 +64,8 @@
 const char *conf_dir;
 GKeyFile *conf_file;
 
+char conf_cid[24];
+char conf_pid[24];
 
 #if INTERFACE
 
@@ -179,6 +181,7 @@ void conf_init() {
     if(!g_key_file_load_from_file(conf_file, cf, G_KEY_FILE_KEEP_COMMENTS, &err))
       g_error("Could not load '%s': %s", cf, err->message);
   }
+  g_free(cf);
   // always set the initial comment
   g_key_file_set_comment(conf_file, NULL, NULL,
     "This file is automatically managed by ncdc.\n"
@@ -195,7 +198,14 @@ void conf_init() {
   if(!g_key_file_has_key(conf_file, "global", "pid", NULL))
     generate_pid();
   conf_save();
-  g_free(cf);
+
+  // load conf_pid and conf_cid
+  char *tmp = g_key_file_get_string(conf_file, "global", "pid", NULL);
+  base32_decode(tmp, conf_pid);
+  g_free(tmp);
+  tmp = g_key_file_get_string(conf_file, "global", "cid", NULL);
+  base32_decode(tmp, conf_cid);
+  g_free(tmp);
 }
 
 

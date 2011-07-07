@@ -394,7 +394,7 @@ static void handle_adcget(struct cc *cc, char *type, char *id, guint64 start, gi
   // get path (for file uploads)
   // TODO: files.xml? (Required by ADC, but I doubt it's used)
   char *path = NULL;
-  char *vpath;
+  char *vpath = NULL;
   struct fl_list *f = NULL;
   gboolean needslot = TRUE;
 
@@ -422,9 +422,9 @@ static void handle_adcget(struct cc *cc, char *type, char *id, guint64 start, gi
   }
 
   // validate
-  struct stat st;
+  struct stat st = {};
   if(!path || stat(path, &st) < 0 || !S_ISREG(st.st_mode) || start > st.st_size) {
-    if(start > st.st_size)
+    if(st.st_size && start > st.st_size)
       g_set_error_literal(err, 1, 52, "File Part Not Available");
     else
       g_set_error_literal(err, 1, 51, "File Not Available");

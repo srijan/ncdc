@@ -295,7 +295,7 @@ int fl_search_rec(struct fl_list *parent, struct fl_search *s, struct fl_list **
   char **o = s->and;
   char *nand[o ? g_strv_length(o) : 0];
   int i = 0;
-  for(; *o; o++)
+  for(; o&&*o; o++)
     if(G_LIKELY(!parent->name || !str_casestr(parent->name, *o)))
       nand[i++] = *o;
   nand[i] = NULL;

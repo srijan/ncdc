@@ -1422,7 +1422,7 @@ static void handle_connect(struct net *n) {
 void hub_connect(struct hub *hub) {
   char *oaddr = conf_hub_get(string, hub->tab->name, "hubaddr");
   char *addr = oaddr;
-  g_assert(addr);
+  g_return_if_fail(addr);
   // The address should be in the form of "dchub://hostname:port/", but older
   // ncdc versions saved it simply as "hostname:port" or even "hostname", so we
   // need to handle both. No protocol indicator is assumed to be NMDC. No port

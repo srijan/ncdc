@@ -650,7 +650,7 @@ void ui_userlist_userchange(struct ui_tab *tab, int change, struct hub_user *use
     user->iter = g_sequence_insert_sorted(tab->list->list, user, ui_userlist_sort_func, tab);
     ui_listing_inserted(tab->list);
   } else if(change == UIHUB_UC_QUIT) {
-    g_assert(g_sequence_get(user->iter) == (gpointer)user);
+    g_return_if_fail(g_sequence_get(user->iter) == (gpointer)user);
     ui_listing_remove(tab->list, user->iter);
     g_sequence_remove(user->iter);
   } else {

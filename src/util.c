@@ -300,7 +300,7 @@ char *str_convert(const char *to, const char *from, const char *str) {
         outlen--;
       }
     } else
-      g_assert_not_reached();
+      g_warn_if_reached();
   }
   memset(outbuf, 0, 4);
   g_iconv_close(cd);

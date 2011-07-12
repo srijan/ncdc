@@ -175,7 +175,7 @@ static gboolean fl_hashdat_getinfo(const char *tth, struct fl_hashdat_info *nfo)
   datum res = gdbm_fetch(fl_hashdat, keydat);
   if(res.dsize <= 0)
     return FALSE;
-  g_assert(res.dsize >= 3*8);
+  g_return_val_if_fail(res.dsize >= 3*8, FALSE);
   guint64 *r = (guint64 *)res.dptr;
   nfo->lastmod = GINT64_FROM_LE(r[0]);
   nfo->filesize = GINT64_FROM_LE(r[1]);
@@ -287,7 +287,7 @@ void fl_hashdat_gc() {
 static void fl_hashindex_insert(struct fl_list *fl) {
   GSList *cur = g_hash_table_lookup(fl_hash_index, fl->tth);
   if(cur) {
-    g_assert(cur == g_slist_insert(cur, fl, 1)); // insert item without modifying the pointer
+    g_return_if_fail(cur == g_slist_insert(cur, fl, 1)); // insert item without modifying the pointer
   } else {
     cur = g_slist_prepend(cur, fl);
     g_hash_table_insert(fl_hash_index, fl->tth, cur);
@@ -430,7 +430,6 @@ static void fl_scan_dir(struct fl_list *parent, const char *path, gboolean inc_h
   GSequenceIter *iter;
   for(iter=g_sequence_get_begin_iter(parent->sub); !g_sequence_iter_is_end(iter); iter=g_sequence_iter_next(iter)) {
     struct fl_list *cur = g_sequence_get(iter);
-    g_assert(cur);
     if(!cur->isfile) {
       char *cpath = g_build_filename(path, cur->name, NULL);
       cur->sub = g_sequence_new(fl_list_free);
@@ -544,7 +543,7 @@ static void fl_hash_thread(gpointer data, gpointer udata) {
 
   tth_final(&tth, args->root);
   args->blocksize = tth.blocksize;
-  g_assert(tth.lastblock == tth_num_blocks(args->filesize, tth.blocksize));
+  g_warn_if_fail(tth.lastblock == tth_num_blocks(args->filesize, tth.blocksize));
   args->blocks = g_memdup(tth.blocks, tth.lastblock*24);
 
 fl_hash_finish:
@@ -675,7 +674,7 @@ static void fl_refresh_compare(struct fl_list *old, struct fl_list *new) {
 
     // old == new: same
     if(cmp == 0) {
-      g_assert(oldl->isfile == newl->isfile); // TODO: handle this case
+      g_warn_if_fail(!!oldl->isfile == !!newl->isfile); // TODO: handle this case
       if(oldl->isfile && (!oldl->hastth || newl->lastmod > oldl->lastmod || newl->size != oldl->size))
         fl_hash_queue_append(oldl);
       if(!oldl->isfile)
@@ -914,10 +913,9 @@ void fl_init() {
   }
   g_strfreev(shares);
 
-  // load our files.xml.bz
+  // load our files.xml.bz2
   fl_local_list = fl_load(fl_local_list_file, &err);
   if(!fl_local_list) {
-    g_assert(err);
     ui_mf(ui_main, UIP_MED, "Error loading local filelist: %s. Re-building list.", err->message);
     g_error_free(err);
     dorefresh = TRUE;

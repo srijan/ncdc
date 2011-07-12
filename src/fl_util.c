@@ -99,8 +99,8 @@ void fl_list_remove(struct fl_list *fl) {
   if(par) {
     // can't use _lookup(), too new (2.28)
     iter = g_sequence_iter_prev(g_sequence_search(par->sub, fl, fl_list_cmp, NULL));
-    g_assert(!g_sequence_iter_is_end(iter));
-    g_assert(g_sequence_get(iter) == fl);
+    g_return_if_fail(!g_sequence_iter_is_end(iter));
+    g_return_if_fail(g_sequence_get(iter) == fl);
 
     // update parent->hastth
     if(!fl->isfile || (fl->isfile && fl->hastth))
@@ -184,7 +184,7 @@ struct fl_list *fl_list_from_path(struct fl_list *root, const char *path) {
     path++;
   if(!path[0])
     return root;
-  g_assert(root->sub);
+  g_return_val_if_fail(root->sub, NULL);
   int slash = strcspn(path, "/");
   char *name = g_strndup(path, slash);
   struct fl_list *n = fl_list_file(root, name);

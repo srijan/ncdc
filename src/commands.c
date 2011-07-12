@@ -1167,9 +1167,11 @@ static void c_browse(char *args) {
     g_free(fn);
     g_free(tmp);
   }
-  if(e)
-    ui_tab_open(ui_fl_create(uid, FALSE), TRUE);
-  else {
+  if(e) {
+    struct ui_tab *tab = ui_fl_create(uid, FALSE);
+    if(tab)
+      ui_tab_open(tab, TRUE);
+  } else {
     dl_queue_addlist(u);
     ui_mf(NULL, 0, "File list of %s added to the download queue.", u->name);
   }

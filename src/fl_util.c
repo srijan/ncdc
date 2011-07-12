@@ -536,7 +536,7 @@ static xmlTextReaderPtr fl_load_open(const char *file, GError **err) {
     return NULL;
   }
 
-  xmlTextReaderSetErrorHandler(reader, fl_load_error, &xc);
+  xmlTextReaderSetErrorHandler(reader, fl_load_error, xc);
   return reader;
 }
 

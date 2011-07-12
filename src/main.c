@@ -235,7 +235,10 @@ static void catch_sigwinch(int sig) {
 // redirect all non-fatal errors to stderr (NOT stdout!)
 static void log_redirect(const gchar *dom, GLogLevelFlags level, const gchar *msg, gpointer dat) {
   if(!(level & (G_LOG_LEVEL_INFO|G_LOG_LEVEL_DEBUG)) || conf_log_debug()) {
-    fprintf(stderr, "*%s* %s\n", loglevel_to_str(level), msg);
+    time_t tm = time(NULL);
+    char ts[50];
+    strftime(ts, 49, "[%F %H:%M:%S %Z]", localtime(&tm));
+    fprintf(stderr, "%s *%s* %s\n", ts, loglevel_to_str(level), msg);
     fflush(stderr);
   }
 }

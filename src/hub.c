@@ -1008,7 +1008,7 @@ static void nmdc_search(struct hub *hub, char *from, int size_m, guint64 size, i
   // TTH lookup (YAY! this is fast!)
   if(type == 9) {
     if(strncmp(query, "TTH:", 4) != 0 || strlen(query) != 4+39) {
-      g_warning("Invalid TTH $Search for %s", from);
+      g_message("Invalid TTH $Search for %s", from);
       return;
     }
     char root[24];

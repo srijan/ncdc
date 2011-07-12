@@ -78,6 +78,7 @@ static void dl_queue_start(struct dl *dl) {
   struct hub_user *u = g_hash_table_lookup(hub_uids, &(dl->uid));
   if(!u)
     return;
+  g_debug("dl:%016"G_GINT64_MODIFIER"x: trying to open a connection", u->uid);
   // try to open a C-C connection
   // TODO: re-use an existing download connection if we have one open
   hub_opencc(u->hub, u);
@@ -94,6 +95,7 @@ static void dl_queue_start(struct dl *dl) {
 // we immediately try to connect again. Some hubs might not like this
 // "aggressive" behaviour...
 void dl_queue_expect(guint64 uid, struct cc_expect *e) {
+  g_debug("dl:%016"G_GINT64_MODIFIER"x: expect = %s", uid, e?"true":"false");
   struct dl *dl = dl_queue_user(uid);
   g_return_if_fail(dl);
   dl->expect = e;
@@ -108,6 +110,7 @@ void dl_queue_expect(guint64 uid, struct cc_expect *e) {
 // being negotiated. Otherwise, it means we've failed to initiate the download
 // and should try again.
 void dl_queue_cc(guint64 uid, struct cc *cc) {
+  g_debug("dl:%016"G_GINT64_MODIFIER"x: cc = %s", uid, cc?"true":"false");
   struct dl *dl = dl_queue_user(uid);
   g_return_if_fail(dl);
   dl->cc = cc;
@@ -146,7 +149,7 @@ void dl_queue_addlist(struct hub_user *u) {
     return;
   }
   // insert & start
-  g_debug("dl: Added to queue: %s", dl->dest);
+  g_debug("dl:%016"G_GINT64_MODIFIER"x: queueing files.xml.bz2", u->uid);
   g_hash_table_insert(queue_users, &(dl->uid), dl);
   dl_queue_start(dl);
 }
@@ -156,7 +159,7 @@ void dl_queue_addlist(struct hub_user *u) {
 // Indicates how many bytes we received from a user before we disconnected.
 void dl_received(struct dl *dl, guint64 bytes) {
   dl->have += bytes;
-  g_debug("dl: Received %"G_GUINT64_FORMAT" bytes for %s (size = %"G_GUINT64_FORMAT", have = %"G_GUINT64_FORMAT")", bytes, dl->dest, dl->size, dl->have);
+  g_debug("dl:%016"G_GINT64_MODIFIER"x: Received %"G_GUINT64_FORMAT" bytes for %s (size = %"G_GUINT64_FORMAT", have = %"G_GUINT64_FORMAT")", dl->uid, bytes, dl->dest, dl->size, dl->have);
 
   // For filelists: Don't allow resuming of the download. It could happen that
   // the client modifies its filelist in between our retries. In that case the
@@ -180,6 +183,7 @@ void dl_received(struct dl *dl, guint64 bytes) {
   // Now we have a completed download. Rename it to the final destination.
   g_return_if_fail(close(dl->incfd) == 0);
   g_return_if_fail(rename(dl->inc, dl->dest) == 0);
+  g_debug("dl:%016"G_GINT64_MODIFIER"x: download finished, removing from queue", dl->uid);
   // open the file list
   struct ui_tab *t = ui_fl_create(dl->uid, TRUE);
   if(t)

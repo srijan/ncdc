@@ -343,7 +343,8 @@ static gboolean handle_sendfile(struct net *n) {
 
 #ifdef HAVE_SENDFILE
   }
-  g_return_val_if_reached(FALSE);
+  g_critical("sendfile() returned an unknown error: %d", errno);
+  return FALSE;
 #endif
 }
 

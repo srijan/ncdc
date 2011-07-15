@@ -548,12 +548,9 @@ void path_suggest(char *opath, char **sug) {
     name = path;
     dir = path_expand(".");
   }
-  GError *err = NULL;
-  GDir *d = g_dir_open(dir, 0, &err);
-  if(!d) {
-    g_error_free(err);
+  GDir *d = g_dir_open(dir, 0, NULL);
+  if(!d)
     goto path_suggest_f;
-  }
 
   const char *n;
   int i = 0, len = strlen(name);

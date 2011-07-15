@@ -199,8 +199,36 @@ void dl_received(struct dl *dl, guint64 bytes) {
 
 
 
+// Removes old filelists from /fl/. Can be run from a timer.
+gboolean dl_fl_clean(gpointer dat) {
+  char *dir = g_build_filename(conf_dir, "fl", NULL);
+  GDir *d = g_dir_open(dir, 0, NULL);
+  if(!d) {
+    g_free(dir);
+    return TRUE;
+  }
+
+  const char *n;
+  time_t ref = time(NULL) - 7*24*3600; // keep lists for one week
+  while((n = g_dir_read_name(d))) {
+    if(strcmp(n, ".") == 0 || strcmp(n, "..") == 0)
+      continue;
+    char *fn = g_build_filename(dir, n, NULL);
+    struct stat st;
+    if(stat(fn, &st) >= 0 && st.st_mtime < ref)
+      unlink(fn);
+    g_free(fn);
+  }
+  g_dir_close(d);
+  g_free(dir);
+  return TRUE;
+}
+
+
 void dl_init_global() {
   queue_users = g_hash_table_new(g_int64_hash, g_int64_equal);
+  // Delete old filelists
+  dl_fl_clean(NULL);
 }
 
 
@@ -212,5 +240,7 @@ void dl_close_global() {
   g_hash_table_iter_init(&iter, queue_users);
   while(g_hash_table_iter_next(&iter, NULL, (gpointer *)&dl))
     unlink(dl->inc);
+  // Delete old filelists
+  dl_fl_clean(NULL);
 }
 

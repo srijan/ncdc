@@ -348,6 +348,7 @@ int main(int argc, char **argv) {
 
   g_timeout_add_seconds_full(G_PRIORITY_HIGH, 1, one_second_timer, NULL, NULL);
   g_timeout_add(100, screen_update_check, NULL);
+  g_timeout_add_seconds_full(G_PRIORITY_LOW, 24*3600, dl_fl_clean, NULL, NULL);
 
   g_main_loop_run(main_loop);
 

@@ -624,13 +624,20 @@ static void ui_userlist_key(struct ui_tab *tab, guint64 key) {
         ui_tab_cur = g_list_find(ui_tabs, t);
     }
     break;
-  case INPT_CHAR('g'):
+  case INPT_CHAR('g'): // g (grant slot)
     if(!sel)
       ui_m(NULL, 0, "No user selected.");
     else {
       cc_grant(sel);
       ui_m(NULL, 0, "Slot granted.");
     }
+    break;
+  case INPT_CHAR('b'): // b (/browse userlist)
+  case INPT_CHAR('B'): // B (force /browse userlist)
+    if(!sel)
+      ui_m(NULL, 0, "No user selected.");
+    else
+      ui_fl_queue(sel, key == INPT_CHAR('B'));
     break;
   }
 
@@ -865,6 +872,52 @@ static void ui_conn_key(guint64 key) {
 
 
 // File list browser (UIT_FL)
+
+
+// Open or queue a file list. (Not really a ui_* function, but where else would it belong?)
+void ui_fl_queue(struct hub_user *u, gboolean force) {
+  // check for u == we
+  if(u && (u->hub->adc ? u->hub->sid == u->sid : u->hub->nick_valid && strcmp(u->hub->nick_hub, u->name_hub) == 0))
+    u = NULL;
+  guint64 uid = u ? u->uid : 0;
+
+  // check for existing tab
+  GList *n;
+  for(n=ui_tabs; n; n=n->next) {
+    struct ui_tab *t = n->data;
+    if(t->type == UIT_FL && t->uid == uid)
+      break;
+  }
+  if(n) {
+    ui_tab_cur = n;
+    return;
+  }
+
+  // open own list
+  if(!u) {
+    ui_tab_open(ui_fl_create(0, FALSE), TRUE);
+    return;
+  }
+
+  // check for cached file list, otherwise queue it
+  gboolean e = !force;
+  if(!force) {
+    char *tmp = g_strdup_printf("%"G_GINT64_MODIFIER"x.xml.bz2", uid);
+    char *fn = g_build_filename(conf_dir, "fl", tmp, NULL);
+    e = g_file_test(fn, G_FILE_TEST_IS_REGULAR);
+    g_free(fn);
+    g_free(tmp);
+  }
+  if(e) {
+    struct ui_tab *tab = ui_fl_create(uid, FALSE);
+    if(tab)
+      ui_tab_open(tab, TRUE);
+  } else {
+    dl_queue_addlist(u);
+    ui_mf(NULL, 0, "File list of %s added to the download queue.", u->name);
+  }
+}
+
 
 // File list is passed to this tab, and will be freed upon closing.
 struct ui_tab *ui_fl_create(guint64 uid, gboolean report_to_main) {

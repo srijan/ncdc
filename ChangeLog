@@ -1,3 +1,16 @@
+0.3 - 2011-07-15
+	- Added file list browser
+	- Added downloading of other people's file list
+	- Added 'hubname' setting to rename hub tabs
+	- Added -v, -c and -n commandline options
+	- Added -n option to /open to prevent an autoconnect
+	- Added referer notification
+	- Improved handling of some ADC commands
+	- Improved logging of debug messages
+	- Fixed error when uploading an empty file list
+	- Fixed display of join/quits on ADC hubs
+	- Fixed several crashes
+
 0.2 - 2011-06-27
 	- ADC support
 	- Added slot granting and /grant command

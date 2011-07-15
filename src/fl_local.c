@@ -126,16 +126,12 @@ GSList *fl_local_from_tth(const char *root) {
 gboolean fl_flush(gpointer dat) {
   if(fl_needflush) {
     // save our file list
-    if(fl_local_list) {
-      GError *err = NULL;
-      if(!fl_save(fl_local_list, fl_local_list_file, NULL, 9999, &err)) {
-        // this is a pretty fatal error... oh well, better luck next time
-        ui_mf(ui_main, UIP_MED, "Error saving file list: %s", err->message);
-        g_error_free(err);
-      }
-    } else
-      unlink(fl_local_list_file);
-
+    GError *err = NULL;
+    if(!fl_save(fl_local_list, fl_local_list_file, NULL, 9999, &err)) {
+      // this is a pretty fatal error... oh well, better luck next time
+      ui_mf(ui_main, UIP_MED, "Error saving file list: %s", err->message);
+      g_error_free(err);
+    }
     // sync the hash data
     gdbm_sync(fl_hashdat);
   }
@@ -905,23 +901,27 @@ void fl_init() {
   g_timeout_add_seconds_full(G_PRIORITY_LOW, 60, fl_init_autorefresh, NULL, NULL);
 
   // read config
+  gboolean sharing = TRUE;
   char **shares = g_key_file_get_keys(conf_file, "share", NULL, NULL);
-  if(!shares || !g_strv_length(shares)) {
-    fl_hashdat_open(TRUE);
-    g_strfreev(shares);
-    return;
-  }
+  if(!shares || !g_strv_length(shares))
+    sharing = FALSE;
   g_strfreev(shares);
 
   // load our files.xml.bz2
-  fl_local_list = fl_load(fl_local_list_file, &err);
-  if(!fl_local_list) {
+  fl_local_list = sharing ? fl_load(fl_local_list_file, &err) : NULL;
+  if(sharing && !fl_local_list) {
     ui_mf(ui_main, UIP_MED, "Error loading local filelist: %s. Re-building list.", err->message);
     g_error_free(err);
     dorefresh = TRUE;
     fl_hashdat_open(TRUE);
-  } else
+  } else if(sharing)
     fl_hashdat_open(FALSE);
+  else {
+    fl_hashdat_open(TRUE);
+    // Force a refresh when we're not sharing anything. This makes sure that we
+    // at least have a files.xml.bz2
+    dorefresh = TRUE;
+  }
 
   // Get last modification times, check for any incomplete directories and
   // initiate a refresh if there is one.  (If there is an incomplete directory,

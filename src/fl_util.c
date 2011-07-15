@@ -727,14 +727,16 @@ gboolean fl_save(struct fl_list *fl, const char *file, GString *buf, int level, 
   base32_encode(conf_cid, cid);
   CHECKFAIL(xmlTextWriterWriteAttribute(writer, (xmlChar *)"CID", (xmlChar *)cid));
 
-  char *path = fl_list_path(fl);
+  char *path = fl ? fl_list_path(fl) : g_strdup("/");
   CHECKFAIL(xmlTextWriterWriteAttribute(writer, (xmlChar *)"Base", (xmlChar *)path));
   g_free(path);
 
   // all <Directory ..> elements
-  if(!fl_save_childs(writer, fl, level-1)) {
-    success = FALSE;
-    goto fl_save_error;
+  if(fl && fl->sub) {
+    if(!fl_save_childs(writer, fl, level-1)) {
+      success = FALSE;
+      goto fl_save_error;
+    }
   }
 
   CHECKFAIL(xmlTextWriterEndElement(writer));

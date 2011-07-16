@@ -298,27 +298,10 @@ static void handle_error(struct net *n, int action, GError *err) {
 }
 
 
-static void handle_recvfile(struct net *n, guint64 read) {
-  struct cc *cc = n->handle;
-  dl_received(cc->dlf, read);
-  // TODO: if this wasn't called because of an error, check for more stuff to
-  // download from this user.
-}
-
-
-static void handle_adcsnd(struct cc *cc, guint64 start, guint64 bytes) {
-  g_return_if_fail(cc->dlf);
-  g_return_if_fail(cc->dlf->have == start);
-  if(!cc->dlf->size)
-    cc->last_size = cc->dlf->size = bytes;
-  cc->last_length = bytes;
-  net_recvfile(cc->net, cc->dlf->incfd, bytes, handle_recvfile);
-}
-
-
 static void handle_download(struct cc *cc) {
   cc->dlf = dl_queue_user(cc->uid);
-  g_return_if_fail(cc->dlf);
+  if(!cc->dlf)
+    return;
   // get virtual path
   char fn[45] = {};
   if(cc->dlf->islist)
@@ -337,6 +320,25 @@ static void handle_download(struct cc *cc) {
   cc->last_file = g_strdup(cc->dlf->islist ? "files.xml.bz2" : cc->dlf->dest);
   cc->last_offset = cc->dlf->have;
   cc->last_size = cc->dlf->size;
+}
+
+
+static void handle_recvfile(struct net *n, guint64 read) {
+  struct cc *cc = n->handle;
+  dl_received(cc->dlf, read);
+  // check for more stuff to download
+  if(read == cc->last_length)
+    handle_download(cc);
+}
+
+
+static void handle_adcsnd(struct cc *cc, guint64 start, guint64 bytes) {
+  g_return_if_fail(cc->dlf);
+  g_return_if_fail(cc->dlf->have == start);
+  if(!cc->dlf->size)
+    cc->last_size = cc->dlf->size = bytes;
+  cc->last_length = bytes;
+  net_recvfile(cc->net, cc->dlf->incfd, bytes, handle_recvfile);
 }
 
 

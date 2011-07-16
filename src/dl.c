@@ -80,7 +80,9 @@ struct dl *dl_queue_user(guint64 uid) {
 
 
 static void dl_queue_start(struct dl *dl) {
-  g_return_if_fail(dl && dl->u && !(dl->u->cc || dl->u->expect));
+  g_return_if_fail(dl && dl->u);
+  if(dl->u->cc || dl->u->expect)
+    return;
   // get user/hub
   struct hub_user *u = g_hash_table_lookup(hub_uids, &dl->u->uid);
   if(!u)

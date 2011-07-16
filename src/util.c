@@ -153,6 +153,7 @@ void conf_init() {
   cdir("logs");
   cdir("inc");
   cdir("fl");
+  cdir("dl");
 #undef cdir
 
   // make sure that there is no other ncdc instance working with the same config directory

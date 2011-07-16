@@ -319,12 +319,22 @@ static void handle_adcsnd(struct cc *cc, guint64 start, guint64 bytes) {
 static void handle_download(struct cc *cc) {
   cc->dlf = dl_queue_user(cc->uid);
   g_return_if_fail(cc->dlf);
+  // get virtual path
+  char fn[45] = {};
+  if(cc->dlf->islist)
+    strcpy(fn, "files.xml.bz2"); // TODO: fallback for clients that don't support BZIP?
+  else {
+    strcpy(fn, "TTH/");
+    base32_encode(cc->dlf->hash, fn+4);
+  }
+  // send GET request
   if(cc->adc)
-    net_sendf(cc->net, "CGET file files.xml.bz2 %"G_GUINT64_FORMAT" -1", cc->dlf->have);
+    net_sendf(cc->net, "CGET file %s %"G_GUINT64_FORMAT" -1", fn, cc->dlf->have);
   else
-    net_sendf(cc->net, "$ADCGET file files.xml.bz2 %"G_GUINT64_FORMAT" -1", cc->dlf->have);
+    net_sendf(cc->net, "$ADCGET file %s %"G_GUINT64_FORMAT" -1", fn, cc->dlf->have);
   g_free(cc->last_file);
-  cc->last_file = g_strdup("files.xml.bz2");
+  // TODO: dest includes the full path, while really only the filename is interesting
+  cc->last_file = g_strdup(cc->dlf->islist ? "files.xml.bz2" : cc->dlf->dest);
   cc->last_offset = cc->dlf->have;
   cc->last_size = cc->dlf->size;
 }

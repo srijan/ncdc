@@ -1082,6 +1082,20 @@ static void ui_fl_key(struct ui_tab *tab, guint64 key) {
         tab->list->sel = g_sequence_get_begin_iter(tab->fl_list->sub);
     }
     break;
+
+  case INPT_CHAR('d'): // d (download)
+    if(!sel)
+      ui_m(NULL, 0, "Nothing selected.");
+    else if(!sel->isfile)
+      ui_m(NULL, 0, "Downloading of directories is not supported yet.");
+    else if(!tab->uid)
+      ui_m(NULL, 0, "Can't download from yourself.");
+    else {
+      g_return_if_fail(sel->hastth);
+      dl_queue_addfile(tab->uid, sel->tth, sel->name);
+      ui_mf(NULL, 0, "%s added to queue.", sel->name);
+    }
+    break;
   }
 }
 

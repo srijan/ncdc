@@ -201,13 +201,28 @@ void dl_queue_addlist(struct hub_user *u) {
   dl->dest = g_build_filename(conf_dir, "fl", fn, NULL);
   g_free(fn);
   // insert & start
-  dl_queue_insert(dl, u->uid);
   g_debug("dl:%016"G_GINT64_MODIFIER"x: queueing files.xml.bz2", u->uid);
+  dl_queue_insert(dl, u->uid);
+}
+
+
+// Add a regular file to the queue. fn is just a filname, without path. If
+// there is another file in the queue with the same filename, something else
+// will be chosen instead.
+void dl_queue_addfile(guint64 uid, char *hash, char *fn) {
+  g_return_if_fail(!g_hash_table_lookup(queue, hash));
+  struct dl *dl = g_slice_new0(struct dl);
+  memcpy(dl->hash, hash, 24);
+  // TODO: actually rename fn on collision
+  dl->dest = g_build_filename(conf_dir, "dl", fn, NULL);
+  g_debug("dl:%016"G_GINT64_MODIFIER"x: queueing %s", uid, fn);
+  dl_queue_insert(dl, uid);
 }
 
 
 
 // Indicates how many bytes we received from a user before we disconnected.
+// TODO: hash checking
 void dl_received(struct dl *dl, guint64 bytes) {
   dl->have += bytes;
   g_debug("dl:%016"G_GINT64_MODIFIER"x: Received %"G_GUINT64_FORMAT" bytes for %s (size = %"G_GUINT64_FORMAT", have = %"G_GUINT64_FORMAT")", dl->u->uid, bytes, dl->dest, dl->size, dl->have);
@@ -228,13 +243,13 @@ void dl_received(struct dl *dl, guint64 bytes) {
   // If we're not done yet, let it download more in a next try. (dl_queue_cc()
   // is called automatically after the connection with the user has been
   // removed, and that will continue the download)
-  //if(dl->have < dl->size)
-  //  return;
+  if(dl->have < dl->size)
+    return;
 
   // Now we have a completed download. Rename it to the final destination.
   g_return_if_fail(close(dl->incfd) == 0);
   g_return_if_fail(rename(dl->inc, dl->dest) == 0);
-  g_debug("dl:%016"G_GINT64_MODIFIER"x: download finished, removing from queue", dl->u->uid);
+  g_debug("dl:%016"G_GINT64_MODIFIER"x: download of `%s' finished, removing from queue", dl->u->uid, dl->dest);
   // open the file list
   if(dl->islist) {
     struct ui_tab *t = ui_fl_create(dl->u->uid, TRUE);

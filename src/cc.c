@@ -318,6 +318,7 @@ static void handle_adcsnd(struct cc *cc, guint64 start, guint64 bytes) {
 
 static void handle_download(struct cc *cc) {
   cc->dlf = dl_queue_user(cc->uid);
+  g_return_if_fail(cc->dlf);
   if(cc->adc)
     net_sendf(cc->net, "CGET file files.xml.bz2 %"G_GUINT64_FORMAT" -1", cc->dlf->have);
   else

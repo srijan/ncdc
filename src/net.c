@@ -146,6 +146,10 @@ struct net {
       (n)->conn = NULL;\
       g_string_truncate((n)->in, 0);\
       g_string_truncate((n)->out, 0);\
+      if(n->recv_cb) {\
+        n->recv_cb(n, n->recv_length);\
+        n->recv_cb = NULL;\
+      }\
       if((n)->setsock) {\
         g_object_unref((n)->sock);\
         (n)->setsock = FALSE;\
@@ -558,10 +562,7 @@ void net_sendfile(struct net *n, const char *path, guint64 offset, guint64 lengt
 // TODO: error reporting?
 // Receives `length' bytes from the socket and writes it to fd. The callback is
 // called when length bytes are read or when a read error occurred - in both
-// cases it indicates how many bytes it actually received. The callback is
-// *not* called when net_disconnect() is called or when there was a write
-// error. It is assumed that we're not writing while receiving a file, and that
-// a _disconnect() is intended to throw away the data anyway.
+// cases it indicates how many bytes it actually received.
 void net_recvfile(struct net *n, int fd, guint64 length, void (*cb)(struct net *, guint64)) {
   n->recv_left = length;
   n->recv_fd = fd;

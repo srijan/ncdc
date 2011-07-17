@@ -85,10 +85,23 @@ static GHashTable *queue = NULL;
 static GHashTable *queue_users = NULL;
 
 
-// Returns the first item in the download queue for this user.
-struct dl *dl_queue_user(guint64 uid) {
+// Returns the first item in the download queue for this user, and makes sure
+// dl->incfd is opened.
+struct dl *dl_queue_next(guint64 uid) {
   struct dl_user *du = g_hash_table_lookup(queue_users, &uid);
-  return du ? du->queue.head->data : NULL;
+  if(!du)
+    return NULL;
+  struct dl *dl = du->queue.head->data;
+  g_return_val_if_fail(dl != NULL, NULL);
+  // open dl->incfd, if it's not open
+  if(dl->incfd <= 0) {
+    dl->incfd = open(dl->inc, O_WRONLY|O_CREAT|O_APPEND, 0666);
+    if(dl->incfd < 0) {
+      g_warning("Error opening %s: %s", dl->inc, g_strerror(errno));
+      return NULL;
+    }
+  }
+  return dl;
 }
 
 
@@ -118,13 +131,6 @@ static void dl_queue_insert(struct dl *dl, guint64 uid, gboolean init) {
   char hash[40] = {};
   base32_encode(dl->hash, hash);
   dl->inc = g_build_filename(conf_dir, "inc", hash, NULL);
-  // open the incomplete file (actually only needed when writing to it... but
-  // keeping it opened for the lifetime of the queue item is easier for now)
-  dl->incfd = open(dl->inc, O_WRONLY|O_CREAT|O_APPEND, 0666);
-  if(dl->incfd < 0) {
-    g_warning("Error opening %s: %s", dl->inc, g_strerror(errno));
-    return;
-  }
   // create or re-use dl_user struct
   dl->u = g_hash_table_lookup(queue_users, &uid);
   if(!dl->u) {
@@ -172,6 +178,9 @@ static void dl_queue_insert(struct dl *dl, guint64 uid, gboolean init) {
 
 // removes an item from the queue
 static void dl_queue_rm(struct dl *dl) {
+  // close the incomplete file, in case it's still open
+  if(dl->incfd > 0)
+    g_warn_if_fail(close(dl->incfd) == 0);
   // update and optionally remove dl_user struct
   g_queue_remove(&dl->u->queue, dl);
   if(!dl->u->queue.head) {
@@ -313,6 +322,7 @@ void dl_queue_addfile(guint64 uid, char *hash, guint64 size, char *fn) {
 // Indicates how many bytes we received from a user before we disconnected.
 // TODO: hash checking
 void dl_received(struct dl *dl, guint64 bytes) {
+  g_warn_if_fail(dl->incfd > 0);
   dl->have += bytes;
   g_debug("dl:%016"G_GINT64_MODIFIER"x: Received %"G_GUINT64_FORMAT" bytes for %s (size = %"G_GUINT64_FORMAT", have = %"G_GUINT64_FORMAT")", dl->u->uid, bytes, dl->dest, dl->size, dl->have);
 
@@ -337,6 +347,7 @@ void dl_received(struct dl *dl, guint64 bytes) {
 
   // Now we have a completed download. Rename it to the final destination.
   g_return_if_fail(close(dl->incfd) == 0);
+  dl->incfd = 0;
   g_return_if_fail(rename(dl->inc, dl->dest) == 0);
   g_debug("dl:%016"G_GINT64_MODIFIER"x: download of `%s' finished, removing from queue", dl->u->uid, dl->dest);
   // open the file list

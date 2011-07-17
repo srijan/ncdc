@@ -299,7 +299,7 @@ static void handle_error(struct net *n, int action, GError *err) {
 
 
 static void handle_download(struct cc *cc) {
-  cc->dlf = dl_queue_user(cc->uid);
+  cc->dlf = dl_queue_next(cc->uid);
   if(!cc->dlf)
     return;
   // get virtual path

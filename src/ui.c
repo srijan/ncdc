@@ -1317,10 +1317,8 @@ static void ui_draw_status() {
       g_hash_table_size(fl_hash_queue), str_formatsize(fl_hash_queue_size), ((float)ratecalc_get(&fl_hash_rate))/(1024.0f*1024.0f));
     mvaddstr(winrows-1, 0, buf);
   }
-  // Note: Only upload is displayed, since we can't download yet anyway.
-  // And protocol overhead isn't very significant.
-  g_snprintf(buf, 100, "[U:%6d KiB/s]", ratecalc_get(&net_out)/1024);
-  mvaddstr(winrows-1, wincols-28, buf);
+  g_snprintf(buf, 100, "[U/D:%6d/%6d KiB/s]", ratecalc_get(&net_out)/1024, ratecalc_get(&net_in)/1024);
+  mvaddstr(winrows-1, wincols-37, buf);
   g_snprintf(buf, 100, "[S:%3d/%3d]", cc_slots_in_use(NULL), conf_slots());
   mvaddstr(winrows-1, wincols-11, buf);
 

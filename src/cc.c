@@ -305,7 +305,7 @@ static void handle_download(struct cc *cc) {
   // get virtual path
   char fn[45] = {};
   if(cc->dlf->islist)
-    strcpy(fn, "files.xml.bz2"); // TODO: fallback for clients that don't support BZIP?
+    strcpy(fn, "files.xml.bz2"); // TODO: fallback for clients that don't support BZIP? (as if they exist...)
   else {
     strcpy(fn, "TTH/");
     base32_encode(cc->dlf->hash, fn+4);
@@ -327,7 +327,7 @@ static void handle_recvfile(struct net *n, guint64 read) {
   struct cc *cc = n->handle;
   dl_received(cc->dlf, read);
   // check for more stuff to download
-  if(read == cc->last_length)
+  if(read == cc->last_length && n->conn)
     handle_download(cc);
 }
 
@@ -560,7 +560,7 @@ static void adc_handle(struct cc *cc, char *msg) {
         } else
           handle_id(cc, u);
       }
-      if(cc->dl)
+      if(cc->dl && cc->net->conn)
         handle_download(cc);
     }
     break;
@@ -868,10 +868,15 @@ void cc_adc_connect(struct cc *cc, struct hub_user *u, unsigned short port, char
   g_snprintf(tmp, 10, "%d", port);
   strncat(cc->remoteaddr, ":", 23-strlen(cc->remoteaddr));
   strncat(cc->remoteaddr, tmp, 23-strlen(cc->remoteaddr));
-  // check / update user info
-  handle_id(cc, u);
   // check whether this was as a reply to a RCM from us
   cc_expect_adc_rm(cc, NULL);
+  // check / update user info
+  handle_id(cc, u);
+  // handle_id() can do a cc_disconnect() when it discovers a duplicate
+  // connection. This will reset cc->token, and we should stop this connection
+  // attempt.
+  if(!cc->token)
+    return;
   // connect
   net_connect(cc->net, cc->remoteaddr, 0, handle_connect);
   g_clear_error(&(cc->err));

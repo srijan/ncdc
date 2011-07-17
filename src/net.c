@@ -565,6 +565,7 @@ void net_sendfile(struct net *n, const char *path, guint64 offset, guint64 lengt
 // cases it indicates how many bytes it actually received.
 void net_recvfile(struct net *n, int fd, guint64 length, void (*cb)(struct net *, guint64)) {
   n->recv_left = length;
+  n->recv_length = 0;
   n->recv_fd = fd;
   n->recv_cb = cb;
   // copy stuff from the buffer to the fd
@@ -583,6 +584,10 @@ void net_recvfile(struct net *n, int fd, guint64 length, void (*cb)(struct net *
       l -= r;
     }
     g_string_erase(n->in, 0, w);
+  }
+  if(!n->recv_left) {
+    n->recv_cb(n, length);
+    n->recv_cb = NULL;
   }
 }
 

@@ -304,9 +304,7 @@ int main(int argc, char **argv) {
   g_type_init();
   conf_init();
   hub_init_global();
-  cc_init_global();
   net_init_global();
-  dl_init_global();
 
   // setup logging
   char *errlog = g_build_filename(conf_dir, "stderr.log", NULL);
@@ -318,7 +316,9 @@ int main(int argc, char **argv) {
   g_log_set_handler(NULL, G_LOG_FATAL_MASK | G_LOG_FLAG_FATAL | G_LOG_LEVEL_ERROR, log_fatal, NULL);
   g_log_set_default_handler(log_redirect, NULL);
 
-  // init UI
+  // init more stuff
+  cc_init_global();
+  dl_init_global();
   ui_cmdhist_init("history");
   ui_init();
 

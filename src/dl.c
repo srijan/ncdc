@@ -25,11 +25,13 @@
 
 
 #include "ncdc.h"
+#include <stdlib.h>
 #include <string.h>
 #include <errno.h>
 
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <gdbm.h>
 
 
 #if INTERFACE
@@ -59,6 +61,17 @@ struct dl_user {
 };
 
 
+// GDBM data file.
+static GDBM_FILE dl_dat;
+
+// The 'have' field is currently not saved in the data file, stat() is used on
+// startup on the incomplete file to get this information. We'd still need some
+// progress indication in the data file in the future, to indicate which parts
+// have been TTH-checked, etc.
+#define DLDAT_INFO  0 // <8 bytes: size><8 bytes: reserved><zero-terminated-string: destination>
+#define DLDAT_USERS 1 // <8 bytes: amount(=1)><8 bytes: uid>
+
+
 // Download queue. This should be serialized into a file when we can download
 // more than only file lists - since we don't want to lose those from the queue
 // after a restart.
@@ -81,6 +94,11 @@ struct dl *dl_queue_user(guint64 uid) {
 
 static void dl_queue_start(struct dl *dl) {
   g_return_if_fail(dl && dl->u);
+  // Note: Even if this check fails, it is possible that we already have a
+  // connection opened with the same user. This happens when an item is added
+  // to the queue while we are connected to the user and the queue for that
+  // user was empty. If this happens we're currently opening a second
+  // connection to the same user, which isn't very nice...
   if(dl->u->cc || dl->u->expect)
     return;
   // get user/hub
@@ -95,14 +113,14 @@ static void dl_queue_start(struct dl *dl) {
 
 
 // Adds a dl item to the queue. dl->inc will be determined and opened here.
-static void dl_queue_insert(struct dl *dl, guint64 uid) {
+static void dl_queue_insert(struct dl *dl, guint64 uid, gboolean init) {
   // figure out dl->inc
   char hash[40] = {};
   base32_encode(dl->hash, hash);
   dl->inc = g_build_filename(conf_dir, "inc", hash, NULL);
   // open the incomplete file (actually only needed when writing to it... but
   // keeping it opened for the lifetime of the queue item is easier for now)
-  dl->incfd = open(dl->inc, O_WRONLY|O_CREAT, 0666);
+  dl->incfd = open(dl->inc, O_WRONLY|O_CREAT|O_APPEND, 0666);
   if(dl->incfd < 0) {
     g_warning("Error opening %s: %s", dl->inc, g_strerror(errno));
     return;
@@ -116,9 +134,39 @@ static void dl_queue_insert(struct dl *dl, guint64 uid) {
     g_hash_table_insert(queue_users, &dl->u->uid, dl->u);
   }
   g_queue_push_tail(&dl->u->queue, dl);
-  // insert and start
+  // insert in the global queue
   g_hash_table_insert(queue, dl->hash, dl);
-  dl_queue_start(dl);
+
+  // insert in the data file
+  if(!dl->islist && !init) {
+    char key[25];
+    datum keydat = { key, 25 };
+    datum val;
+    memcpy(key+1, dl->hash, 24);
+
+    key[0] = DLDAT_INFO;
+    guint64 size = GINT64_TO_LE(dl->size);
+    int nfovallen = 16 + strlen(dl->dest) + 1;
+    char nfo[nfovallen];
+    memset(nfo, 0, nfovallen);
+    memcpy(nfo, &size, 8);
+    // bytes 8-15 are reserved, and initialized to zero
+    memcpy(nfo+16, dl->dest, strlen(dl->dest));
+    val.dptr = nfo;
+    val.dsize = nfovallen;
+    gdbm_store(dl_dat, keydat, val, GDBM_REPLACE);
+
+    key[0] = DLDAT_USERS;
+    guint64 users[2] = { GINT64_TO_LE(1), GINT64_TO_LE(uid) };
+    val.dptr = (char *)users;
+    val.dsize = 2*8;
+    gdbm_store(dl_dat, keydat, val, GDBM_REPLACE);
+    gdbm_sync(dl_dat);
+  }
+
+  // start download, if possible
+  if(!init)
+    dl_queue_start(dl);
 }
 
 
@@ -129,6 +177,17 @@ static void dl_queue_rm(struct dl *dl) {
   if(!dl->u->queue.head) {
     g_hash_table_remove(queue_users, &dl->u->uid);
     g_slice_free(struct dl_user, dl->u);
+  }
+  // remove from the data file
+  if(!dl->islist) {
+    char key[25];
+    datum keydat = { key, 25 };
+    memcpy(key+1, dl->hash, 24);
+    key[0] = DLDAT_INFO;
+    gdbm_delete(dl_dat, keydat);
+    key[0] = DLDAT_USERS;
+    gdbm_delete(dl_dat, keydat);
+    gdbm_sync(dl_dat);
   }
   // free and remove dl struct
   g_free(dl->inc);
@@ -204,21 +263,23 @@ void dl_queue_addlist(struct hub_user *u) {
   g_free(fn);
   // insert & start
   g_debug("dl:%016"G_GINT64_MODIFIER"x: queueing files.xml.bz2", u->uid);
-  dl_queue_insert(dl, u->uid);
+  dl_queue_insert(dl, u->uid, FALSE);
 }
 
 
 // Add a regular file to the queue. fn is just a filname, without path. If
 // there is another file in the queue with the same filename, something else
 // will be chosen instead.
-void dl_queue_addfile(guint64 uid, char *hash, char *fn) {
+void dl_queue_addfile(guint64 uid, char *hash, guint64 size, char *fn) {
   g_return_if_fail(!g_hash_table_lookup(queue, hash));
+  g_return_if_fail(size >= 0);
   struct dl *dl = g_slice_new0(struct dl);
   memcpy(dl->hash, hash, 24);
+  dl->size = size;
   // TODO: actually rename fn on collision
   dl->dest = g_build_filename(conf_dir, "dl", fn, NULL);
   g_debug("dl:%016"G_GINT64_MODIFIER"x: queueing %s", uid, fn);
-  dl_queue_insert(dl, uid);
+  dl_queue_insert(dl, uid, FALSE);
 }
 
 
@@ -263,6 +324,59 @@ void dl_received(struct dl *dl, guint64 bytes) {
 }
 
 
+// loads a single item from the data file
+static void dl_queue_loaditem(char *hash) {
+  char key[25];
+  memcpy(key+1, hash, 24);
+  datum keydat = { key, 25 };
+
+  key[0] = DLDAT_INFO;
+  datum nfo = gdbm_fetch(dl_dat, keydat);
+  g_return_if_fail(nfo.dsize > 17);
+  key[0] = DLDAT_USERS;
+  datum users = gdbm_fetch(dl_dat, keydat);
+  g_return_if_fail(users.dsize >= 16);
+
+  struct dl *dl = g_slice_new0(struct dl);
+  memcpy(dl->hash, hash, 24);
+  memcpy(&dl->size, nfo.dptr, 8);
+  dl->size = GINT64_FROM_LE(dl->size);
+  dl->dest = g_strdup(nfo.dptr+16);
+
+  // get size of the incomplete file
+  char tth[40] = {};
+  base32_encode(dl->hash, tth);
+  char *fn = g_build_filename(conf_dir, "inc", tth, NULL);
+  struct stat st;
+  if(stat(fn, &st) >= 0)
+    dl->have = st.st_size;
+  g_free(fn);
+
+  // and insert in the hash tables
+  guint64 uid;
+  memcpy(&uid, users.dptr+8, 8);
+  uid = GINT64_FROM_LE(uid);
+  dl_queue_insert(dl, uid, TRUE);
+  g_debug("dl:%016"G_GINT64_MODIFIER"x: load `%s' from data file (size = %"G_GUINT64_FORMAT", have = %"G_GUINT64_FORMAT")", uid, dl->dest, dl->size, dl->have);
+
+  free(nfo.dptr);
+  free(users.dptr);
+}
+
+
+// loads the queued items from the data file
+static void dl_queue_loaddat() {
+  datum key = gdbm_firstkey(dl_dat);
+  while(key.dptr) {
+    char *str = key.dptr;
+    if(key.dsize == 25 && str[0] == DLDAT_INFO)
+      dl_queue_loaditem(str+1);
+    key = gdbm_nextkey(dl_dat, key);
+    free(str);
+  }
+}
+
+
 
 
 
@@ -295,19 +409,27 @@ gboolean dl_fl_clean(gpointer dat) {
 void dl_init_global() {
   queue_users = g_hash_table_new(g_int64_hash, g_int64_equal);
   queue = g_hash_table_new(g_int_hash, tiger_hash_equal);
+  // open data file
+  char *fn = g_build_filename(conf_dir, "dl.dat", NULL);
+  dl_dat = gdbm_open(fn, 0, GDBM_WRCREAT, 0600, NULL);
+  g_free(fn);
+  if(!dl_dat)
+    g_error("Unable to open dl.dat.");
+  dl_queue_loaddat();
   // Delete old filelists
   dl_fl_clean(NULL);
 }
 
 
 void dl_close_global() {
-  // Delete incomplete files. They won't be completed anyway, since we don't
-  // have a persistent download queue at the moment.
+  gdbm_close(dl_dat);
+  // Delete incomplete file lists. They won't be completed anyway.
   GHashTableIter iter;
   struct dl *dl;
-  g_hash_table_iter_init(&iter, queue_users);
+  g_hash_table_iter_init(&iter, queue);
   while(g_hash_table_iter_next(&iter, NULL, (gpointer *)&dl))
-    unlink(dl->inc);
+    if(dl->islist)
+      unlink(dl->inc);
   // Delete old filelists
   dl_fl_clean(NULL);
 }

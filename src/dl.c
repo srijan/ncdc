@@ -267,6 +267,23 @@ void dl_queue_addlist(struct hub_user *u) {
 }
 
 
+static gboolean check_dupe_dest(char *dest) {
+  GHashTableIter iter;
+  struct dl *dl;
+  g_hash_table_iter_init(&iter, queue);
+  // Note: it is assumed that dl->dest is a cannonical path. That is, it does
+  // not have any funky symlink magic, duplicate slashes, or references to
+  // current/parent directories. This check will fail otherwise.
+  while(g_hash_table_iter_next(&iter, NULL, (gpointer *)&dl))
+    if(strcmp(dl->dest, dest) == 0)
+      return TRUE;
+
+  if(g_file_test(dest, G_FILE_TEST_EXISTS))
+    return TRUE;
+  return FALSE;
+}
+
+
 // Add a regular file to the queue. fn is just a filname, without path. If
 // there is another file in the queue with the same filename, something else
 // will be chosen instead.
@@ -276,8 +293,17 @@ void dl_queue_addfile(guint64 uid, char *hash, guint64 size, char *fn) {
   struct dl *dl = g_slice_new0(struct dl);
   memcpy(dl->hash, hash, 24);
   dl->size = size;
-  // TODO: actually rename fn on collision
-  dl->dest = g_build_filename(conf_dir, "dl", fn, NULL);
+  // Figure out dl->dest. It is assumed that fn + any dupe-prevention-extension
+  // does not exceed NAME_MAX. (Not that checking against NAME_MAX is really
+  // reliable - some filesystems have an even more strict limit)
+  int num = 1;
+  char *base = g_build_filename(conf_dir, "dl", fn, NULL);
+  dl->dest = base;
+  while(check_dupe_dest(dl->dest)) {
+    g_free(dl->dest);
+    dl->dest = g_strdup_printf("%s.%d", base, num++);
+  }
+  // and add to the queue
   g_debug("dl:%016"G_GINT64_MODIFIER"x: queueing %s", uid, fn);
   dl_queue_insert(dl, uid, FALSE);
 }

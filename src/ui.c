@@ -847,9 +847,9 @@ static void ui_conn_key(guint64 key) {
   case INPT_CHAR('f'):
     if(!cc)
       ui_m(NULL, 0, "Nothing selected.");
-    else if(!cc->nick_raw || !cc->hub)
+    else if(!cc->hub || (cc->hub->adc ? !cc->nick : !cc->nick_raw))
       ui_m(NULL, 0, "User or hub unknown.");
-    else if(!ui_hub_finduser(cc->hub->tab, cc->nick_raw, FALSE))
+    else if(!ui_hub_finduser(cc->hub->tab, cc->hub->adc ? cc->nick : cc->nick_raw, FALSE))
       ui_m(NULL, 0, "User has left the hub.");
     break;
   case INPT_CHAR('d'):

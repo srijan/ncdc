@@ -300,9 +300,11 @@ static gboolean check_dupe_dest(char *dest) {
 // Add a regular file to the queue. fn is just a filname, without path. If
 // there is another file in the queue with the same filename, something else
 // will be chosen instead.
-void dl_queue_addfile(guint64 uid, char *hash, guint64 size, char *fn) {
-  g_return_if_fail(!g_hash_table_lookup(queue, hash));
-  g_return_if_fail(size >= 0);
+// Returns true if it was added, false if it was already in the queue.
+gboolean dl_queue_addfile(guint64 uid, char *hash, guint64 size, char *fn) {
+  if(g_hash_table_lookup(queue, hash))
+    return FALSE;
+  g_return_val_if_fail(size >= 0, FALSE);
   struct dl *dl = g_slice_new0(struct dl);
   memcpy(dl->hash, hash, 24);
   dl->size = size;
@@ -320,6 +322,7 @@ void dl_queue_addfile(guint64 uid, char *hash, guint64 size, char *fn) {
   // and add to the queue
   g_debug("dl:%016"G_GINT64_MODIFIER"x: queueing %s", uid, fn);
   dl_queue_insert(dl, uid, FALSE);
+  return TRUE;
 }
 
 

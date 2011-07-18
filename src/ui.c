@@ -1090,8 +1090,10 @@ static void ui_fl_key(struct ui_tab *tab, guint64 key) {
       ui_m(NULL, 0, "Can't download from yourself.");
     else {
       g_return_if_fail(sel->hastth);
-      dl_queue_addfile(tab->uid, sel->tth, sel->size, sel->name);
-      ui_mf(NULL, 0, "%s added to queue.", sel->name);
+      if(dl_queue_addfile(tab->uid, sel->tth, sel->size, sel->name))
+        ui_mf(NULL, 0, "%s added to queue.", sel->name);
+      else
+        ui_mf(NULL, 0, "%s already queued.", sel->name);
     }
     break;
   }

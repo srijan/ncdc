@@ -222,7 +222,8 @@ static void dl_queue_rm(struct dl *dl) {
 void dl_queue_expect(guint64 uid, struct cc_expect *e) {
   g_debug("dl:%016"G_GINT64_MODIFIER"x: expect = %s", uid, e?"true":"false");
   struct dl_user *du = g_hash_table_lookup(queue_users, &uid);
-  g_return_if_fail(du);
+  if(!du)
+    return;
   du->expect = e;
   if(!e && !du->cc)
     dl_queue_start(du->queue.head->data); // TODO: this only works with single-source downloading
@@ -237,7 +238,8 @@ void dl_queue_expect(guint64 uid, struct cc_expect *e) {
 void dl_queue_cc(guint64 uid, struct cc *cc) {
   g_debug("dl:%016"G_GINT64_MODIFIER"x: cc = %s", uid, cc?"true":"false");
   struct dl_user *du = g_hash_table_lookup(queue_users, &uid);
-  g_return_if_fail(du);
+  if(!du)
+    return;
   du->cc = cc;
   if(!cc && !du->expect)
     dl_queue_start(du->queue.head->data); // TODO: this only works with single-source downloading

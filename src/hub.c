@@ -147,7 +147,8 @@ static struct hub_user *user_add(struct hub *hub, const char *name, const char *
   // notify the UI
   ui_hub_userchange(hub->tab, UIHUB_UC_JOIN, u);
   // notify the dl manager
-  dl_queue_useronline(u->uid);
+  if(hub->nick_valid)
+    dl_queue_useronline(u->uid);
   return u;
 }
 
@@ -391,6 +392,17 @@ static void user_adc_nfo(struct hub *hub, struct hub_user *u, struct adc_cmd *cm
 
 #undef P
 
+
+// Call dl_queue_useronline() for every user on the this hub. Should be called
+// when we might be able to send CTM/RCM's (i.e. when hub->nick_valid becomes
+// true).
+static void user_notifydl(struct hub *hub) {
+  GHashTableIter iter;
+  struct hub_user *u;
+  g_hash_table_iter_init(&iter, hub->users);
+  while(g_hash_table_iter_next(&iter, NULL, (gpointer *)&u))
+    dl_queue_useronline(u->uid);
+}
 
 
 
@@ -814,13 +826,10 @@ static void adc_handle(struct hub *hub, char *msg) {
         // we are properly logged in.
         if(u->sid == hub->sid) {
           hub->state = ADC_S_NORMAL;
-          hub->nick_valid = TRUE;
           hub->isop = u->isop;
-          // Some broken hubs send our own INF more than once, and not always
-          // at the end. The following will help the detection in that case,
-          // but brakes with good hubs. :-(
-          //hub->joincomplete = hub->received_first;
-          //hub->received_first = TRUE;
+          if(!hub->nick_valid)
+            user_notifydl(hub);
+          hub->nick_valid = TRUE;
           hub->joincomplete = TRUE;
         }
       }
@@ -1133,6 +1142,10 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
         hub_send_nfo(hub);
         net_send(hub->net, "$GetNickList");
         hub->nick_valid = TRUE;
+        // Most hubs send the user list after our nick has been validated (in
+        // contrast to ADC), but it doesn't hurt to call this function at this
+        // point anyway.
+        user_notifydl(hub);
       }
     } else {
       struct hub_user *u = user_add(hub, nick, NULL);

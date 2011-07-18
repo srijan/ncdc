@@ -337,11 +337,11 @@ void cc_download(struct cc *cc) {
 }
 
 
-static void handle_recvfile(struct net *n, guint64 read) {
+static void handle_recvfile(struct net *n, int read, char *buf, guint64 left) {
   struct cc *cc = n->handle;
-  dl_received(cc->dlf, read);
+  dl_received(cc->dlf, read, buf);
   // check for more stuff to download
-  if(read == cc->last_length && n->conn)
+  if(!left && n->conn)
     cc_download(cc);
 }
 
@@ -352,7 +352,7 @@ static void handle_adcsnd(struct cc *cc, guint64 start, guint64 bytes) {
   if(!cc->dlf->size)
     cc->last_size = cc->dlf->size = bytes;
   cc->last_length = bytes;
-  net_recvfile(cc->net, cc->dlf->incfd, bytes, handle_recvfile);
+  net_recvfile(cc->net, bytes, handle_recvfile);
 }
 
 

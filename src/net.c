@@ -79,11 +79,9 @@ struct net {
   int file_fd;
   gint64 file_left;
   guint64 file_offset;
-  // receiving a file
-  int recv_fd;
+  // receiving raw data (a file, usually)
   guint64 recv_left;
-  guint64 recv_length;
-  void (*recv_cb)(struct net *, guint64); // don't confuse the name with cb_rcv...
+  void (*recv_cb)(struct net *, int, char *, guint64); // don't confuse the name with cb_rcv...
   // in/out rates
   struct ratecalc *rate_in;
   struct ratecalc *rate_out;
@@ -146,10 +144,8 @@ struct net {
       (n)->conn = NULL;\
       g_string_truncate((n)->in, 0);\
       g_string_truncate((n)->out, 0);\
-      if(n->recv_cb) {\
-        n->recv_cb(n, n->recv_length);\
-        n->recv_cb = NULL;\
-      }\
+      (n)->recv_left = 0;\
+      (n)->recv_cb = NULL;\
       if((n)->setsock) {\
         g_object_unref((n)->sock);\
         (n)->setsock = FALSE;\
@@ -219,53 +215,30 @@ static void consume_input(struct net *n) {
         g_set_error_literal(&err, 1, 0, "Remote disconnected.");\
       n->cb_err(n, action, err);\
       g_error_free(err);\
-      if(action == NETERR_RECV && n->recv_cb) {\
-        n->recv_cb(n, n->recv_length);\
-        n->recv_cb = NULL;\
-      }\
       return FALSE;\
     }\
   } while(0)
 
 
-// TODO: do this in a separate thread to avoid blocking on HDD writes.
-// TODO: use splice() on Linux
-static gboolean handle_recvfile(struct net *n) {
-  char buf[10240];
-  GError *err = NULL;
-  gssize read = g_socket_receive(n->sock, buf, MIN(10240, n->recv_left), NULL, &err);
-  handle_ioerr(n, n->in_src, read, err, NETERR_RECV);
-  ratecalc_add(&net_in, read);
-  ratecalc_add(n->rate_in, read);
-
-  int l = read;
-  while(l > 0) {
-    int r = write(n->recv_fd, buf + (read-l), l);
-    g_return_val_if_fail(r >= 0, FALSE);
-    l -= r;
-    n->recv_left -= r;
-    n->recv_length += r;
-  }
-
-  // run callback if we're ready
-  if(n->recv_left <= 0 && n->recv_cb) {
-    net_ref(n);
-    n->recv_cb(n, n->recv_length);
-    n->recv_cb = NULL;
-    net_unref(n);
-  }
-  return TRUE;
-}
-
-
 static gboolean handle_input(GSocket *sock, GIOCondition cond, gpointer dat) {
+  static char rawbuf[102400]; // can be static under the assumption that all handle_inputs are run in a single thread.
   GError *err = NULL;
   struct net *n = dat;
   time(&(n->timeout_last));
 
-  // receive file data
-  if(n->recv_left > 0)
-    return handle_recvfile(n);
+  // receive raw data
+  if(n->recv_left > 0) {
+    gssize read = g_socket_receive(n->sock, rawbuf, 102400, NULL, &err);
+    handle_ioerr(n, n->in_src, read, err, NETERR_RECV);
+    ratecalc_add(&net_in, read);
+    ratecalc_add(n->rate_in, read);
+    int w = MIN(read, n->recv_left);
+    n->recv_left -= w;
+    n->recv_cb(n, w, rawbuf, n->recv_left);
+    if(read > w)
+      g_string_append_len(n->in, rawbuf+w, read-w);
+    return TRUE;
+  }
 
   // we need to be able to access the net object after calling callbacks that
   // may do an unref().
@@ -559,36 +532,19 @@ void net_sendfile(struct net *n, const char *path, guint64 offset, guint64 lengt
 }
 
 
-// TODO: error reporting?
-// Receives `length' bytes from the socket and writes it to fd. The callback is
-// called when length bytes are read or when a read error occurred - in both
-// cases it indicates how many bytes it actually received.
-void net_recvfile(struct net *n, int fd, guint64 length, void (*cb)(struct net *, guint64)) {
+// Receives `length' bytes from the socket and calls cb() on every read.
+void net_recvfile(struct net *n, guint64 length, void (*cb)(struct net *, int, char *, guint64)) {
   n->recv_left = length;
-  n->recv_length = 0;
-  n->recv_fd = fd;
   n->recv_cb = cb;
-  // copy stuff from the buffer to the fd
+  // read stuff from the buffer in case it's not empty
   if(n->in->len >= 0) {
     int w = MIN(n->in->len, length);
-    if(w == length)
-      n->recv_left = n->recv_fd = 0;
-    else {
-      n->recv_left -= w;
-      n->recv_length += w;
-    }
-    int l = w;
-    while(l > 0) {
-      int r = write(fd, n->in->str + (w-l), l);
-      g_return_if_fail(r >= 0);
-      l -= r;
-    }
+    n->recv_left -= w;
+    n->recv_cb(n, w, n->in->str, n->recv_left);
     g_string_erase(n->in, 0, w);
   }
-  if(!n->recv_left) {
-    n->recv_cb(n, length);
+  if(!n->recv_left)
     n->recv_cb = NULL;
-  }
 }
 
 

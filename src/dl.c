@@ -85,22 +85,25 @@ static GHashTable *queue = NULL;
 static GHashTable *queue_users = NULL;
 
 
-// Returns the first item in the download queue for this user, and makes sure
-// dl->incfd is opened.
+// Returns the first item in the download queue for this user, and prepares the item for downloading.
 struct dl *dl_queue_next(guint64 uid) {
   struct dl_user *du = g_hash_table_lookup(queue_users, &uid);
   if(!du)
     return NULL;
   struct dl *dl = du->queue.head->data;
   g_return_val_if_fail(dl != NULL, NULL);
-  // open dl->incfd, if it's not open
-  if(dl->incfd <= 0) {
-    dl->incfd = open(dl->inc, O_WRONLY|O_CREAT|O_APPEND, 0666);
-    if(dl->incfd < 0) {
-      g_warning("Error opening %s: %s", dl->inc, g_strerror(errno));
-      return NULL;
-    }
+
+  // For filelists: Don't allow resuming of the download. It could happen that
+  // the client modifies its filelist in between our retries. In that case the
+  // downloaded filelist would end up being corrupted. To avoid that: make sure
+  // lists are downloaded in one go, and throw away any incomplete data.
+  if(dl->islist && dl->have > 0) {
+    dl->have = dl->size = 0;
+    g_return_val_if_fail(close(dl->incfd) == 0, NULL);
+    dl->incfd = open(dl->inc, O_WRONLY|O_CREAT|O_TRUNC, 0666);
+    g_return_val_if_fail(dl->incfd >= 0, NULL);
   }
+
   return dl;
 }
 
@@ -328,34 +331,9 @@ gboolean dl_queue_addfile(guint64 uid, char *hash, guint64 size, char *fn) {
 }
 
 
-
-// Indicates how many bytes we received from a user before we disconnected.
-// TODO: hash checking
-void dl_received(struct dl *dl, guint64 bytes) {
-  g_warn_if_fail(dl->incfd > 0);
-  dl->have += bytes;
-  g_debug("dl:%016"G_GINT64_MODIFIER"x: Received %"G_GUINT64_FORMAT" bytes for %s (size = %"G_GUINT64_FORMAT", have = %"G_GUINT64_FORMAT")", dl->u->uid, bytes, dl->dest, dl->size, dl->have);
-
-  // For filelists: Don't allow resuming of the download. It could happen that
-  // the client modifies its filelist in between our retries. In that case the
-  // downloaded filelist would end up being corrupted. To avoid that: make sure
-  // lists are downloaded in one go, and throw away any incomplete data.
-  if(dl->islist && dl->have < dl->size) {
-    dl->have = dl->size = 0;
-    g_return_if_fail(close(dl->incfd) == 0);
-    dl->incfd = open(dl->inc, O_WRONLY|O_CREAT|O_TRUNC, 0666);
-    g_return_if_fail(dl->incfd >= 0);
-    return;
-  }
-
-  // For non-filelists:
-  // If we're not done yet, let it download more in a next try. (dl_queue_cc()
-  // is called automatically after the connection with the user has been
-  // removed, and that will continue the download)
-  if(dl->have < dl->size)
-    return;
-
-  // Now we have a completed download. Rename it to the final destination.
+// Called when we've got a complete file
+static void dl_finished(struct dl *dl) {
+  // close and rename to final destination
   g_return_if_fail(close(dl->incfd) == 0);
   dl->incfd = 0;
   g_return_if_fail(rename(dl->inc, dl->dest) == 0);
@@ -366,9 +344,47 @@ void dl_received(struct dl *dl, guint64 bytes) {
     if(t)
       ui_tab_open(t, FALSE);
   }
-  // and remove
+  // and remove from the queue
   dl_queue_rm(dl);
 }
+
+
+// Called when we've received some file data.
+// TODO: hash checking
+// TODO: do this in a separate thread to avoid blocking on HDD writes.
+// TODO: improved error handling
+void dl_received(struct dl *dl, int length, char *buf) {
+  //g_debug("dl:%016"G_GINT64_MODIFIER"x: Received %d bytes for %s (size = %"G_GUINT64_FORMAT", have = %"G_GUINT64_FORMAT")", dl->u->uid, length, dl->dest, dl->size, dl->have+length);
+  g_return_if_fail(dl->have + length <= dl->size);
+
+  // open dl->incfd, if it's not open yet
+  if(dl->incfd <= 0) {
+    dl->incfd = open(dl->inc, O_WRONLY|O_CREAT|O_APPEND, 0666);
+    if(dl->incfd < 0) {
+      g_warning("Error opening %s: %s", dl->inc, g_strerror(errno));
+      return;
+    }
+  }
+
+  // save to the file and update dl->have
+  while(length > 0) {
+    int r = write(dl->incfd, buf, length);
+    if(r < 0) {
+      g_warning("Error writing to %s: %s", dl->inc, g_strerror(errno));
+      return;
+    }
+    length -= r;
+    buf += r;
+    dl->have += r;
+  }
+
+  if(dl->have >= dl->size) {
+    g_warn_if_fail(dl->have == dl->size);
+    dl_finished(dl);
+  }
+}
+
+
 
 
 // loads a single item from the data file

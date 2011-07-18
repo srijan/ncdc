@@ -169,6 +169,7 @@ struct cc {
   gboolean slot_mini : 1;
   gboolean slot_granted : 1;
   gboolean dl : 1;
+  gboolean candl : 1;  // if cc_download() has been called at least once
   int dir;        // (NMDC) our direction. -1 = Upload, otherwise: Download $dir
   int state;      // (ADC)
   char cid[8];    // (ADC)
@@ -261,6 +262,19 @@ static struct cc *cc_check_dupe(struct cc *cc) {
 }
 
 
+// Returns the cc object of a connection with the specified user and marked for
+// downloading.
+struct cc *cc_get_uid_download(guint64 uid) {
+  GSequenceIter *i = g_sequence_get_begin_iter(cc_list);
+  for(; !g_sequence_iter_is_end(i); i=g_sequence_iter_next(i)) {
+    struct cc *c = g_sequence_get(i);
+    if(c->uid == uid && c->candl)
+      return c;
+  }
+  return NULL;
+}
+
+
 static gboolean request_slot(struct cc *cc, gboolean need_full) {
   int minislots;
   int slots = cc_slots_in_use(&minislots);
@@ -298,7 +312,8 @@ static void handle_error(struct net *n, int action, GError *err) {
 }
 
 
-static void handle_download(struct cc *cc) {
+void cc_download(struct cc *cc) {
+  cc->candl = TRUE;
   cc->dlf = dl_queue_next(cc->uid);
   if(!cc->dlf)
     return;
@@ -316,7 +331,6 @@ static void handle_download(struct cc *cc) {
   else
     net_sendf(cc->net, "$ADCGET file %s %"G_GUINT64_FORMAT" -1", fn, cc->dlf->have);
   g_free(cc->last_file);
-  // TODO: dest includes the full path, while really only the filename is interesting
   cc->last_file = g_strdup(cc->dlf->islist ? "files.xml.bz2" : cc->dlf->dest);
   cc->last_offset = cc->dlf->have;
   cc->last_size = cc->dlf->size;
@@ -328,7 +342,7 @@ static void handle_recvfile(struct net *n, guint64 read) {
   dl_received(cc->dlf, read);
   // check for more stuff to download
   if(read == cc->last_length && n->conn)
-    handle_download(cc);
+    cc_download(cc);
 }
 
 
@@ -561,7 +575,7 @@ static void adc_handle(struct cc *cc, char *msg) {
           handle_id(cc, u);
       }
       if(cc->dl && cc->net->conn)
-        handle_download(cc);
+        cc_download(cc);
     }
     break;
 
@@ -681,7 +695,7 @@ static void nmdc_direction(struct cc *cc, gboolean down, int num) {
 
   // if we can download, do so!
   if(cc->dl)
-    handle_download(cc);
+    cc_download(cc);
 }
 
 

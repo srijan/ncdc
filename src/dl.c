@@ -107,20 +107,23 @@ struct dl *dl_queue_next(guint64 uid) {
 
 static void dl_queue_start(struct dl *dl) {
   g_return_if_fail(dl && dl->u);
-  // Note: Even if this check fails, it is possible that we already have a
-  // connection opened with the same user. This happens when an item is added
-  // to the queue while we are connected to the user and the queue for that
-  // user was empty. If this happens we're currently opening a second
-  // connection to the same user, which isn't very nice...
-  if(dl->u->cc || dl->u->expect)
+  if(dl->u->expect)
     return;
+  // try to re-use an existing connection
+  if(dl->u->cc) {
+    // download connection in the idle state
+    if(dl->u->cc->candl && dl->u->cc->net->conn && !dl->u->cc->net->recv_left) {
+      g_debug("dl:%016"G_GINT64_MODIFIER"x: re-using connection", dl->u->uid);
+      cc_download(dl->u->cc);
+    }
+    return;
+  }
   // get user/hub
   struct hub_user *u = g_hash_table_lookup(hub_uids, &dl->u->uid);
   if(!u)
     return;
   g_debug("dl:%016"G_GINT64_MODIFIER"x: trying to open a connection", u->uid);
   // try to open a C-C connection
-  // TODO: re-use an existing download connection if we have one open
   hub_opencc(u->hub, u);
 }
 
@@ -138,6 +141,7 @@ static void dl_queue_insert(struct dl *dl, guint64 uid, gboolean init) {
     dl->u->uid = uid;
     g_queue_init(&dl->u->queue);
     g_hash_table_insert(queue_users, &dl->u->uid, dl->u);
+    dl->u->cc = cc_get_uid_download(uid);
   }
   g_queue_push_tail(&dl->u->queue, dl);
   // insert in the global queue
@@ -307,11 +311,12 @@ void dl_queue_addfile(guint64 uid, char *hash, guint64 size, char *fn) {
   // reliable - some filesystems have an even more strict limit)
   int num = 1;
   char *base = g_build_filename(conf_dir, "dl", fn, NULL);
-  dl->dest = base;
+  dl->dest = g_strdup(base);
   while(check_dupe_dest(dl->dest)) {
     g_free(dl->dest);
     dl->dest = g_strdup_printf("%s.%d", base, num++);
   }
+  g_free(base);
   // and add to the queue
   g_debug("dl:%016"G_GINT64_MODIFIER"x: queueing %s", uid, fn);
   dl_queue_insert(dl, uid, FALSE);

@@ -1201,7 +1201,12 @@ void ui_m(struct ui_tab *tab, int flags, const char *msg) {
   dat->msg = (flags & UIM_PASS) ? (char *)msg : g_strdup(msg);
   dat->tab = tab;
   dat->flags = flags;
-  g_idle_add_full(G_PRIORITY_HIGH_IDLE, ui_m_mainthread, dat, NULL);
+  // call directly if we're running from the main thread. use an idle function
+  // otherwise.
+  if(g_main_context_is_owner(NULL))
+    ui_m_mainthread(dat);
+  else
+    g_idle_add_full(G_PRIORITY_HIGH_IDLE, ui_m_mainthread, dat, NULL);
 }
 
 

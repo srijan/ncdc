@@ -709,7 +709,7 @@ void ui_conn_close() {
 #if INTERFACE
 #define UICONN_ADD 0
 #define UICONN_DEL 1
-#define UICONN_MOD 2
+#define UICONN_MOD 2  // when the nick or hub changes
 #endif
 
 

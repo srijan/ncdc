@@ -489,6 +489,8 @@ static void handle_id(struct cc *cc, struct hub_user *u) {
   cc->isop = u->isop;
   cc->uid = u->uid;
 
+  ui_conn_listchange(cc->iter, UICONN_MOD);
+
   if(cc->adc)
     memcpy(cc->cid, u->cid, 8);
 
@@ -721,8 +723,6 @@ static void nmdc_handle(struct cc *cc, char *cmd) {
   if(g_regex_match(mynick, cmd, 0, &nfo)) { // 1 = nick
     char *nick = g_match_info_fetch(nfo, 1);
     nmdc_mynick(cc, nick);
-    if(ui_conn)
-      ui_conn_listchange(cc->iter, UICONN_MOD);
     g_free(nick);
   }
   g_match_info_free(nfo);

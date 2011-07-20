@@ -506,17 +506,21 @@ void hub_send_nfo(struct hub *hub) {
   GList *n;
   for(n=ui_tabs; n; n=n->next) {
     struct ui_tab *t = n->data;
-    if(t->type != UIT_HUB)
+    if(t->type != UIT_HUB || !t->hub->nick_valid)
       continue;
     if(t->hub->isop)
       h_op++;
     else if(t->hub->isreg)
       h_reg++;
-    else if(t->hub->nick_valid)
+    else
       h_norm++;
   }
-  if(!hub->nick_valid)
-    h_norm++;
+  if(!hub->nick_valid) {
+    if(hub->isreg)
+      h_reg++;
+    else
+      h_norm++;
+  }
   slots = conf_slots();
   ip4 = cc_listen ? ip4_pack(cc_listen_ip) : 0;
   share = fl_local_list_size;

@@ -43,6 +43,7 @@
 #define UIT_MSG      3
 #define UIT_CONN     4
 #define UIT_FL       5
+#define UIT_DL       6
 
 struct ui_tab {
   int type; // UIT_ type
@@ -50,7 +51,7 @@ struct ui_tab {
   char *name;
   struct ui_logwindow *log;    // MAIN, HUB, MSG
   struct hub *hub;             // HUB, USERLIST, MSG
-  struct ui_listing *list;     // USERLIST, CONN
+  struct ui_listing *list;     // USERLIST, CONN, FL, DL
   guint64 uid;                 // FL (TODO: MSG)
   // HUB
   struct ui_tab *userlist_tab;
@@ -717,6 +718,7 @@ void ui_conn_listchange(GSequenceIter *iter, int change) {
   g_return_if_fail(ui_conn);
   switch(change) {
   case UICONN_ADD:
+    g_sequence_sort_changed(iter, ui_conn_sort_func, NULL);
     ui_listing_inserted(ui_conn->list);
     break;
   case UICONN_DEL:
@@ -1102,6 +1104,126 @@ static void ui_fl_key(struct ui_tab *tab, guint64 key) {
 
 
 
+// Download queue tab (UIT_DL)
+
+// these can only be one download queue tab, so this can be static
+struct ui_tab *ui_dl;
+
+
+static gint ui_dl_sort_func(gconstpointer da, gconstpointer db, gpointer dat) {
+  const struct dl *a = da;
+  const struct dl *b = db;
+  return a->islist && !b->islist ? 1 : !a->islist && b->islist ? -1 : strcmp(a->dest, b->dest);
+}
+
+
+struct ui_tab *ui_dl_create() {
+  ui_dl = g_new0(struct ui_tab, 1);
+  ui_dl->name = "queue";
+  ui_dl->type = UIT_DL;
+  // create and pupulate the list
+  GSequence *l = g_sequence_new(NULL);
+  GHashTableIter iter;
+  g_hash_table_iter_init(&iter, dl_queue);
+  struct dl *dl;
+  while(g_hash_table_iter_next(&iter, NULL, (gpointer *)&dl))
+    dl->iter = g_sequence_insert_sorted(l, dl, ui_dl_sort_func, NULL);
+  ui_dl->list = ui_listing_create(l);
+  return ui_dl;
+}
+
+
+void ui_dl_close() {
+  ui_tab_remove(ui_dl);
+  ui_listing_free(ui_dl->list);
+  g_free(ui_dl);
+  ui_dl = NULL;
+}
+
+
+#if INTERFACE
+#define UIDL_ADD 0
+#define UIDL_DEL 1
+#endif
+
+
+void ui_dl_listchange(struct dl *dl, int change) {
+  g_return_if_fail(ui_dl);
+  switch(change) {
+  case UICONN_ADD:
+    dl->iter = g_sequence_insert_sorted(ui_dl->list->list, dl, ui_dl_sort_func, NULL);
+    ui_listing_inserted(ui_dl->list);
+    break;
+  case UICONN_DEL:
+    ui_listing_remove(ui_dl->list, dl->iter);
+    g_sequence_remove(dl->iter);
+    break;
+  }
+}
+
+
+static char *ui_dl_title() {
+  return g_strdup("Download queue");
+}
+
+
+static void ui_dl_draw_row(struct ui_listing *list, GSequenceIter *iter, int row, void *dat) {
+  struct dl *dl = g_sequence_get(iter);
+  char tmp[100];
+  if(iter == list->sel) {
+    attron(A_BOLD);
+    mvaddch(row, 0, '>');
+    attroff(A_BOLD);
+  }
+
+  struct hub_user *u = g_hash_table_lookup(hub_uids, &dl->u->uid);
+  if(u) {
+    mvaddnstr(row, 2, u->name, str_offset_from_columns(u->name, 19));
+    mvaddnstr(row, 22, u->hub->tab->name, str_offset_from_columns(u->name, 13));
+  } else {
+    g_snprintf(tmp, 99, "ID:%016"G_GINT64_MODIFIER"x (offline)", dl->u->uid);
+    mvaddstr(row, 2, tmp);
+  }
+
+  mvaddstr(row, 36, str_formatsize(dl->size));
+  g_snprintf(tmp, 99, "%3d%%", (int) ((dl->have*100)/dl->size));
+  mvaddstr(row, 47, tmp);
+
+  if(dl->islist)
+    mvaddstr(row, 59, "files.xml.bz2");
+  else // TODO: cut off in the middle (or something?)
+    mvaddnstr(row, 59, dl->dest, str_offset_from_columns(dl->dest, wincols-59));
+}
+
+
+static void ui_dl_draw() {
+  //char tmp[100];
+  attron(A_BOLD);
+  mvaddstr(1, 2,  "User");
+  mvaddstr(1, 22, "Hub");
+  mvaddstr(1, 36, "Size");
+  mvaddstr(1, 47, "Progress");
+  mvaddstr(1, 59, "File");
+  attroff(A_BOLD);
+
+  int bottom = winrows-5;
+  ui_listing_draw(ui_dl->list, 2, bottom-1, ui_dl_draw_row, NULL);
+
+  // TODO: footer
+}
+
+
+static void ui_dl_key(guint64 key) {
+  if(ui_listing_key(ui_dl->list, key, (winrows-4)/2))
+    return;
+
+  //struct dl *dl = g_sequence_iter_is_end(ui_dl->list->sel) ? NULL : g_sequence_get(ui_dl->list->sel);
+}
+
+
+
+
+
 
 // Generic message displaying thing.
 
@@ -1470,7 +1592,8 @@ void ui_draw() {
     curtab->type == UIT_USERLIST ? ui_userlist_title(curtab) :
     curtab->type == UIT_MSG      ? ui_msg_title(curtab) :
     curtab->type == UIT_CONN     ? ui_conn_title() :
-    curtab->type == UIT_FL       ? ui_fl_title(curtab) : g_strdup("");
+    curtab->type == UIT_FL       ? ui_fl_title(curtab) :
+    curtab->type == UIT_DL       ? ui_dl_title() : g_strdup("");
   attron(A_REVERSE);
   mvhline(0, 0, ' ', wincols);
   mvaddstr(0, 0, title);
@@ -1497,6 +1620,7 @@ void ui_draw() {
   case UIT_MSG:      ui_msg_draw(curtab);  break;
   case UIT_CONN:     ui_conn_draw(); break;
   case UIT_FL:       ui_fl_draw(curtab); break;
+  case UIT_DL:       ui_dl_draw(); break;
   }
 
   refresh();
@@ -1562,6 +1686,10 @@ void ui_input(guint64 key) {
     cmd_handle("/connections");
     break;
 
+  case INPT_ALT('q'): // alt+q (alias for /queue)
+    cmd_handle("/queue");
+    break;
+
   default:
     // alt+num (switch tab)
     if(key >= INPT_ALT('0') && key <= INPT_ALT('9')) {
@@ -1577,6 +1705,7 @@ void ui_input(guint64 key) {
       case UIT_MSG:      ui_msg_key(curtab, key); break;
       case UIT_CONN:     ui_conn_key(key); break;
       case UIT_FL:       ui_fl_key(curtab, key); break;
+      case UIT_DL:       ui_dl_key(key); break;
       }
     }
     // TODO: some user feedback on invalid key

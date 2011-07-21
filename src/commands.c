@@ -817,6 +817,8 @@ static void c_close(char *args) {
     ui_conn_close();
   else if(tab->type == UIT_FL)
     ui_fl_close(tab);
+  else if(tab->type == UIT_DL)
+    ui_dl_close(tab);
 }
 
 
@@ -1022,6 +1024,18 @@ static void c_connections(char *args) {
       ui_tab_cur = g_list_find(ui_tabs, ui_conn);
     else
       ui_tab_open(ui_conn_create(), TRUE);
+  }
+}
+
+
+static void c_queue(char *args) {
+  if(args[0])
+    ui_m(NULL, 0, "This command does not accept any arguments.");
+  else {
+    if(ui_dl)
+      ui_tab_cur = g_list_find(ui_tabs, ui_dl);
+    else
+      ui_tab_open(ui_dl_create(), TRUE);
   }
 }
 
@@ -1246,6 +1260,10 @@ static struct cmd cmds[] = {
   },
   { "pm", c_msg, c_msg_sug,
     "<user> [<message>]", "Alias for /msg",
+    ""
+  },
+  { "queue", c_queue, NULL,
+    NULL, "Open the download queue.",
     ""
   },
   { "quit", c_quit, NULL,

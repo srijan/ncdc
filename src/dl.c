@@ -36,8 +36,13 @@
 
 #if INTERFACE
 
-// no need to make this one public
-struct dl_user;
+struct dl_user {
+  guint64 uid;
+  struct cc_expect *expect;
+  struct cc *cc;
+  GQueue queue; // queue of struct dl's. First item = active
+};
+
 
 struct dl {
   char hash[24]; // TTH for files, tiger(uid) for filelists
@@ -48,17 +53,10 @@ struct dl {
   guint64 have; // what we have so far
   char *inc;    // path to the incomplete file (/inc/<base32-hash>)
   char *dest;   // destination path (must be on same filesystem as the incomplete file)
+  GSequenceIter *iter; // used by UIT_DL
 };
 
 #endif
-
-
-struct dl_user {
-  guint64 uid;
-  struct cc_expect *expect;
-  struct cc *cc;
-  GQueue queue; // queue of struct dl's. First item = active
-};
 
 
 // GDBM data file.
@@ -72,13 +70,9 @@ static GDBM_FILE dl_dat;
 #define DLDAT_USERS 1 // <8 bytes: amount(=1)><8 bytes: uid>
 
 
-// Download queue. This should be serialized into a file when we can download
-// more than only file lists - since we don't want to lose those from the queue
-// after a restart.
-//
-// Key = dl->hash
-// Value = struct dl
-static GHashTable *queue = NULL;
+// Download queue.
+// Key = dl->hash, Value = struct dl
+GHashTable *dl_queue = NULL;
 
 
 // uid -> dl_user lookup table.
@@ -148,7 +142,9 @@ static void dl_queue_insert(struct dl *dl, guint64 uid, gboolean init) {
   }
   g_queue_push_tail(&dl->u->queue, dl);
   // insert in the global queue
-  g_hash_table_insert(queue, dl->hash, dl);
+  g_hash_table_insert(dl_queue, dl->hash, dl);
+  if(ui_dl)
+    ui_dl_listchange(dl, UIDL_ADD);
 
   // insert in the data file
   if(!dl->islist && !init) {
@@ -206,9 +202,11 @@ static void dl_queue_rm(struct dl *dl) {
     gdbm_sync(dl_dat);
   }
   // free and remove dl struct
+  if(ui_dl)
+    ui_dl_listchange(dl, UIDL_DEL);
+  g_hash_table_remove(dl_queue, dl->hash);
   g_free(dl->inc);
   g_free(dl->dest);
-  g_hash_table_remove(queue, dl->hash);
   g_slice_free(struct dl, dl);
 }
 
@@ -270,7 +268,7 @@ void dl_queue_addlist(struct hub_user *u) {
   tiger_init(&tg);
   tiger_update(&tg, (char *)&u->uid, 8);
   tiger_final(&tg, dl->hash);
-  if(g_hash_table_lookup(queue, dl->hash)) {
+  if(g_hash_table_lookup(dl_queue, dl->hash)) {
     g_warning("dl:%016"G_GINT64_MODIFIER"x: files.xml.bz2 already in the queue.", u->uid);
     g_slice_free(struct dl, dl);
     return;
@@ -288,7 +286,7 @@ void dl_queue_addlist(struct hub_user *u) {
 static gboolean check_dupe_dest(char *dest) {
   GHashTableIter iter;
   struct dl *dl;
-  g_hash_table_iter_init(&iter, queue);
+  g_hash_table_iter_init(&iter, dl_queue);
   // Note: it is assumed that dl->dest is a cannonical path. That is, it does
   // not have any funky symlink magic, duplicate slashes, or references to
   // current/parent directories. This check will fail otherwise.
@@ -307,7 +305,7 @@ static gboolean check_dupe_dest(char *dest) {
 // will be chosen instead.
 // Returns true if it was added, false if it was already in the queue.
 gboolean dl_queue_addfile(guint64 uid, char *hash, guint64 size, char *fn) {
-  if(g_hash_table_lookup(queue, hash))
+  if(g_hash_table_lookup(dl_queue, hash))
     return FALSE;
   g_return_val_if_fail(size >= 0, FALSE);
   struct dl *dl = g_slice_new0(struct dl);
@@ -471,7 +469,7 @@ gboolean dl_fl_clean(gpointer dat) {
 
 void dl_init_global() {
   queue_users = g_hash_table_new(g_int64_hash, g_int64_equal);
-  queue = g_hash_table_new(g_int_hash, tiger_hash_equal);
+  dl_queue = g_hash_table_new(g_int_hash, tiger_hash_equal);
   // open data file
   char *fn = g_build_filename(conf_dir, "dl.dat", NULL);
   dl_dat = gdbm_open(fn, 0, GDBM_WRCREAT, 0600, NULL);
@@ -489,7 +487,7 @@ void dl_close_global() {
   // Delete incomplete file lists. They won't be completed anyway.
   GHashTableIter iter;
   struct dl *dl;
-  g_hash_table_iter_init(&iter, queue);
+  g_hash_table_iter_init(&iter, dl_queue);
   while(g_hash_table_iter_next(&iter, NULL, (gpointer *)&dl))
     if(dl->islist)
       unlink(dl->inc);

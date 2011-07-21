@@ -380,9 +380,11 @@ void ui_hub_userlist_open(struct ui_tab *tab) {
 }
 
 
-gboolean ui_hub_finduser(struct ui_tab *tab, const char *user, gboolean utf8) {
-  struct hub_user *u = utf8 ? hub_user_get(tab->hub, user) : g_hash_table_lookup(tab->hub->users, user);
-  if(!u)
+gboolean ui_hub_finduser(struct ui_tab *tab, guint64 uid, const char *user, gboolean utf8) {
+  struct hub_user *u =
+    uid ? g_hash_table_lookup(hub_uids, &uid) :
+    utf8 ? hub_user_get(tab->hub, user) : g_hash_table_lookup(tab->hub->users, user);
+  if(!u || u->hub != tab->hub)
     return FALSE;
   ui_hub_userlist_open(tab);
   // u->iter should be valid at this point.
@@ -849,9 +851,9 @@ static void ui_conn_key(guint64 key) {
   case INPT_CHAR('f'):
     if(!cc)
       ui_m(NULL, 0, "Nothing selected.");
-    else if(!cc->hub || (cc->hub->adc ? !cc->nick : !cc->nick_raw))
+    else if(!cc->hub || !cc->uid)
       ui_m(NULL, 0, "User or hub unknown.");
-    else if(!ui_hub_finduser(cc->hub->tab, cc->hub->adc ? cc->nick : cc->nick_raw, FALSE))
+    else if(!ui_hub_finduser(cc->hub->tab, cc->uid, NULL, FALSE))
       ui_m(NULL, 0, "User has left the hub.");
     break;
   case INPT_CHAR('d'):
@@ -1217,7 +1219,21 @@ static void ui_dl_key(guint64 key) {
   if(ui_listing_key(ui_dl->list, key, (winrows-4)/2))
     return;
 
-  //struct dl *dl = g_sequence_iter_is_end(ui_dl->list->sel) ? NULL : g_sequence_get(ui_dl->list->sel);
+  struct dl *sel = g_sequence_iter_is_end(ui_dl->list->sel) ? NULL : g_sequence_get(ui_dl->list->sel);
+
+  switch(key) {
+  case INPT_CHAR('f'):
+    if(!sel)
+      ui_m(NULL, 0, "Nothing selected.");
+    else {
+      struct hub_user *u = g_hash_table_lookup(hub_uids, &sel->u->uid);
+      if(!u)
+        ui_m(NULL, 0, "User is not online.");
+      else
+        ui_hub_finduser(u->hub->tab, u->uid, NULL, FALSE);
+    }
+    break;
+  }
 }
 
 

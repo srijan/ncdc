@@ -1069,7 +1069,7 @@ static void c_whois(char *args) {
       u = tab->msg_uname;
   } else
     u = args;
-  if(u && !ui_hub_finduser(h, u, utf8))
+  if(u && !ui_hub_finduser(h, 0, u, utf8))
     ui_m(NULL, 0, "No user found with that name.");
 }
 

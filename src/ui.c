@@ -1233,6 +1233,14 @@ static void ui_dl_key(guint64 key) {
         ui_hub_finduser(u->hub->tab, u->uid, NULL, FALSE);
     }
     break;
+  case INPT_CHAR('d'):
+    if(!sel)
+      ui_m(NULL, 0, "Nothing selected.");
+    else {
+      ui_mf(NULL, 0, "Removed `%s' from queue.", sel->dest);
+      dl_queue_rm(sel);
+    }
+    break;
   }
 }
 

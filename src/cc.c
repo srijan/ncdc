@@ -176,7 +176,7 @@ struct cc {
   int timeout_src;
   time_t last_action;
   char remoteaddr[24]; // xxx.xxx.xxx.xxx:ppppp
-  struct dl *dlf;
+  char dl_hash[24];
   char *token;    // (ADC)
   char *last_file;
   guint64 uid;
@@ -314,43 +314,54 @@ static void handle_error(struct net *n, int action, GError *err) {
 
 void cc_download(struct cc *cc) {
   cc->candl = TRUE;
-  cc->dlf = dl_queue_next(cc->uid);
-  if(!cc->dlf)
+  struct dl *dl = dl_queue_next(cc->uid);
+  if(!dl)
     return;
+  memcpy(cc->dl_hash, dl->hash, 24);
   // get virtual path
   char fn[45] = {};
-  if(cc->dlf->islist)
+  if(dl->islist)
     strcpy(fn, "files.xml.bz2"); // TODO: fallback for clients that don't support BZIP? (as if they exist...)
   else {
     strcpy(fn, "TTH/");
-    base32_encode(cc->dlf->hash, fn+4);
+    base32_encode(dl->hash, fn+4);
   }
   // send GET request
   if(cc->adc)
-    net_sendf(cc->net, "CGET file %s %"G_GUINT64_FORMAT" -1", fn, cc->dlf->have);
+    net_sendf(cc->net, "CGET file %s %"G_GUINT64_FORMAT" -1", fn, dl->have);
   else
-    net_sendf(cc->net, "$ADCGET file %s %"G_GUINT64_FORMAT" -1", fn, cc->dlf->have);
+    net_sendf(cc->net, "$ADCGET file %s %"G_GUINT64_FORMAT" -1", fn, dl->have);
   g_free(cc->last_file);
-  cc->last_file = g_strdup(cc->dlf->islist ? "files.xml.bz2" : cc->dlf->dest);
-  cc->last_offset = cc->dlf->have;
-  cc->last_size = cc->dlf->size;
+  cc->last_file = g_strdup(dl->islist ? "files.xml.bz2" : dl->dest);
+  cc->last_offset = dl->have;
+  cc->last_size = dl->size;
 }
 
 
 static void handle_recvfile(struct net *n, int read, char *buf, guint64 left) {
   struct cc *cc = n->handle;
-  dl_received(cc->dlf, read, buf);
+  struct dl *dl = g_hash_table_lookup(dl_queue, cc->dl_hash);
+  if(dl)
+    dl_received(dl, read, buf);
+  // If the item has been removed from the queue while there is still data left
+  // to download, interrupt the download by forcing a disconnect.
+  if(!dl && left)
+    cc_disconnect(cc);
   // check for more stuff to download
-  if(!left && n->conn)
+  if(!left)
     cc_download(cc);
 }
 
 
 static void handle_adcsnd(struct cc *cc, guint64 start, guint64 bytes) {
-  g_return_if_fail(cc->dlf);
-  g_return_if_fail(cc->dlf->have == start);
-  if(!cc->dlf->size)
-    cc->last_size = cc->dlf->size = bytes;
+  struct dl *dl = g_hash_table_lookup(dl_queue, cc->dl_hash);
+  if(!dl) {
+    cc_disconnect(cc);
+    return;
+  }
+  g_return_if_fail(dl->have == start);
+  if(!dl->size)
+    cc->last_size = dl->size = bytes;
   cc->last_length = bytes;
   net_recvfile(cc->net, bytes, handle_recvfile);
 }

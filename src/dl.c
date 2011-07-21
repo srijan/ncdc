@@ -180,10 +180,13 @@ static void dl_queue_insert(struct dl *dl, guint64 uid, gboolean init) {
 
 
 // removes an item from the queue
-static void dl_queue_rm(struct dl *dl) {
+void dl_queue_rm(struct dl *dl) {
   // close the incomplete file, in case it's still open
   if(dl->incfd > 0)
     g_warn_if_fail(close(dl->incfd) == 0);
+  // remove the incomplete file, in case we still have it
+  if(dl->inc && g_file_test(dl->inc, G_FILE_TEST_EXISTS))
+    unlink(dl->inc);
   // update and optionally remove dl_user struct
   g_queue_remove(&dl->u->queue, dl);
   if(!dl->u->queue.head) {

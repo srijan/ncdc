@@ -729,7 +729,7 @@ static void nmdc_handle(struct cc *cc, char *cmd) {
   CMDREGEX(supports, "Supports (.+)");
   CMDREGEX(direction, "Direction (Download|Upload) ([0-9]+)");
   CMDREGEX(adcget, "ADCGET ([^ ]+) (.+) ([0-9]+) (-?[0-9]+)");
-  CMDREGEX(adcsnd, "ADCSND file files.xml.bz2 ([0-9]+) (-?[0-9]+)");
+  CMDREGEX(adcsnd, "ADCSND file .+ ([0-9]+) (-?[0-9]+)");
 
   // $MyNick
   if(g_regex_match(mynick, cmd, 0, &nfo)) { // 1 = nick

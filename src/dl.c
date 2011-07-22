@@ -311,11 +311,10 @@ static gboolean check_dupe_dest(char *dest) {
 }
 
 
-// Add a regular file to the queue. fn is just a filname, without path. If
-// there is another file in the queue with the same filename, something else
-// will be chosen instead.
+// Add a regular file to the queue. If there is another file in the queue with
+// the same filename, something else will be chosen instead.
 // Returns true if it was added, false if it was already in the queue.
-gboolean dl_queue_addfile(guint64 uid, char *hash, guint64 size, char *fn) {
+static gboolean dl_queue_addfile(guint64 uid, char *hash, guint64 size, char *fn) {
   if(g_hash_table_lookup(dl_queue, hash))
     return FALSE;
   g_return_val_if_fail(size >= 0, FALSE);
@@ -339,6 +338,23 @@ gboolean dl_queue_addfile(guint64 uid, char *hash, guint64 size, char *fn) {
   g_debug("dl:%016"G_GINT64_MODIFIER"x: queueing %s", uid, fn);
   dl_queue_insert(dl, uid, FALSE);
   return TRUE;
+}
+
+
+// Recursively adds a file or directory to the queue.
+void dl_queue_add_fl(guint64 uid, struct fl_list *fl, char *base) {
+  char *name = base ? g_build_filename(base, fl->name, NULL) : g_strdup(fl->name);
+  if(fl->isfile) {
+    if(!dl_queue_addfile(uid, fl->tth, fl->size, name))
+      ui_mf(NULL, 0, "Ignoring `%s': already queued.", name);
+  } else {
+    GSequenceIter *i = g_sequence_get_begin_iter(fl->sub);
+    for(; !g_sequence_iter_is_end(i); i=g_sequence_iter_next(i))
+      dl_queue_add_fl(uid, g_sequence_get(i), name);
+  }
+  if(!base)
+    ui_mf(NULL, 0, "%s added to queue.", name);
+  g_free(name);
 }
 
 

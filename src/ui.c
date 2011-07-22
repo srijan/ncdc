@@ -53,6 +53,7 @@ struct ui_tab {
   struct hub *hub;             // HUB, USERLIST, MSG
   struct ui_listing *list;     // USERLIST, CONN, FL, DL
   guint64 uid;                 // FL (TODO: MSG)
+  gboolean details;            // USERLIST, CONN
   // HUB
   struct ui_tab *userlist_tab;
   gboolean hub_joincomplete;
@@ -60,7 +61,6 @@ struct ui_tab {
   struct hub_user *msg_user;
   char *msg_uname;
   // USERLIST
-  gboolean user_details;
   gboolean user_reverse;
   gboolean user_sort_share;
   gboolean user_opfirst;
@@ -389,7 +389,7 @@ gboolean ui_hub_finduser(struct ui_tab *tab, guint64 uid, const char *user, gboo
   ui_hub_userlist_open(tab);
   // u->iter should be valid at this point.
   tab->userlist_tab->list->sel = u->iter;
-  tab->userlist_tab->user_details = TRUE;
+  tab->userlist_tab->details = TRUE;
   return TRUE;
 }
 
@@ -524,7 +524,7 @@ static void ui_userlist_draw(struct ui_tab *tab) {
   attroff(A_BOLD);
 
   // rows
-  int bottom = tab->user_details ? winrows-7 : winrows-3;
+  int bottom = tab->details ? winrows-7 : winrows-3;
   int pos = ui_listing_draw(tab->list, 2, bottom-1, ui_userlist_draw_row, &o);
 
   // footer
@@ -540,7 +540,7 @@ static void ui_userlist_draw(struct ui_tab *tab) {
   attroff(A_REVERSE);
 
   // detailed info box
-  if(!tab->user_details)
+  if(!tab->details)
     return;
   if(g_sequence_iter_is_end(tab->list->sel))
     mvaddstr(bottom+1, 2, "No user selected.");
@@ -613,7 +613,7 @@ static void ui_userlist_key(struct ui_tab *tab, guint64 key) {
     break;
   case INPT_CTRL('j'): // newline
   case INPT_CHAR('i'): // i       (toggle user info)
-    tab->user_details = !tab->user_details;
+    tab->details = !tab->details;
     break;
   case INPT_CHAR('m'): // m (/msg user)
     if(!sel)
@@ -796,7 +796,7 @@ static void ui_conn_draw() {
   mvaddstr(1, 57, "File");
   attroff(A_BOLD);
 
-  int bottom = winrows-11;
+  int bottom = ui_conn->details ? winrows-11 : winrows-3;
   int pos = ui_listing_draw(ui_conn->list, 2, bottom-1, ui_conn_draw_row, NULL);
 
   // footer
@@ -807,6 +807,8 @@ static void ui_conn_draw() {
   attroff(A_REVERSE);
 
   // detailed info
+  if(!ui_conn->details)
+    return;
   struct cc *cc = g_sequence_iter_is_end(ui_conn->list->sel) ? NULL : g_sequence_get(ui_conn->list->sel);
   if(!cc) {
     mvaddstr(bottom+1, 0, "Nothing selected.");
@@ -848,6 +850,10 @@ static void ui_conn_key(guint64 key) {
   struct cc *cc = g_sequence_iter_is_end(ui_conn->list->sel) ? NULL : g_sequence_get(ui_conn->list->sel);
 
   switch(key) {
+  case INPT_CTRL('j'): // newline
+  case INPT_CHAR('i'): // i - toggle detailed info
+    ui_conn->details = !ui_conn->details;
+    break;
   case INPT_CHAR('f'): // f - find user
     if(!cc)
       ui_m(NULL, 0, "Nothing selected.");

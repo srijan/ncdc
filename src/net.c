@@ -156,6 +156,7 @@ struct net {
       }\
       ratecalc_unregister((n)->rate_in);\
       ratecalc_unregister((n)->rate_out);\
+      time(&(n)->timeout_last);\
     }\
   } while(0)
 

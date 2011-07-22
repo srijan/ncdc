@@ -787,6 +787,77 @@ static void ui_conn_draw_row(struct ui_listing *list, GSequenceIter *iter, int r
 }
 
 
+static void ui_conn_draw_details(int l) {
+  char tmp[100];
+  struct cc *cc = g_sequence_iter_is_end(ui_conn->list->sel) ? NULL : g_sequence_get(ui_conn->list->sel);
+  if(!cc) {
+    mvaddstr(l+1, 0, "Nothing selected.");
+    return;
+  }
+
+  // labels
+  attron(A_BOLD);
+  mvaddstr(l+1,  3, "Username:");
+  mvaddstr(l+1, 42, "Hub:");
+  mvaddstr(l+2,  4, "IP/port:");
+  mvaddstr(l+2, 39, "Status:");
+  mvaddstr(l+3,  9, "Up:");
+  mvaddstr(l+3, 41, "Down:");
+  mvaddstr(l+4,  7, "Size:");
+  mvaddstr(l+5,  5, "Offset:");
+  mvaddstr(l+6,  6, "Chunk:");
+  mvaddstr(l+4, 37, "Progress:");
+  mvaddstr(l+5, 42, "ETA:");
+  mvaddstr(l+6, 41, "Idle:");
+  mvaddstr(l+7,  7, "File:");
+  mvaddstr(l+8,  1, "Last error:");
+  attroff(A_BOLD);
+
+  // line 1
+  mvaddstr(l+1, 13, cc->nick ? cc->nick : "Unknown / connecting");
+  mvaddstr(l+1, 47, cc->hub ? cc->hub->tab->name : "-");
+  // line 2
+  mvaddstr(l+2, 13, cc->remoteaddr);
+  mvaddstr(l+2, 47,
+    !cc->nick || (cc->adc && cc->state != ADC_S_NORMAL) ? "Connecting" :
+    cc->timeout_src    ? "Disconnected" :
+    cc->net->file_left ? "Uploading" :
+    cc->net->recv_left ? "Downloading" : "Idle");
+  // line 3
+  g_snprintf(tmp, 99, "%d KiB/s (%s)", ratecalc_get(cc->net->rate_out)/1024, str_formatsize(cc->net->rate_out->total));
+  mvaddstr(l+3, 13, tmp);
+  g_snprintf(tmp, 99, "%d KiB/s (%s)", ratecalc_get(cc->net->rate_in)/1024, str_formatsize(cc->net->rate_in->total));
+  mvaddstr(l+3, 47, tmp);
+  // size / offset / chunk (line 4/5/6)
+  mvaddstr(l+4, 13, cc->last_size ? str_formatsize(cc->last_size) : "-");
+  mvaddstr(l+5, 13, cc->last_size ? str_formatsize(cc->last_offset) : "-");
+  mvaddstr(l+6, 13, cc->last_length ? str_formatsize(cc->last_length) : "-");
+  // progress / eta / idle (line 4/5/6)
+  guint64 left = cc->dl ? cc->net->recv_left : cc->net->file_left;
+  if(cc->last_length && !cc->timeout_src)
+    g_snprintf(tmp, 99, "%3d%%", (int)(((cc->last_length-left)*100)/cc->last_length));
+  else
+    strcpy(tmp, "-");
+  mvaddstr(l+4, 47, tmp);
+  if(cc->last_length && !cc->timeout_src)
+    mvaddstr(l+5, 47, ratecalc_eta(cc->dl ? cc->net->rate_in : cc->net->rate_out, left));
+  else
+    mvaddstr(l+5, 47, "-");
+  g_snprintf(tmp, 99, "%ds", (int)(time(NULL)-cc->net->timeout_last));
+  mvaddstr(l+6, 47, tmp);
+  // line 7
+  if(cc->last_file)
+    mvaddnstr(l+7, 13, cc->last_file, str_offset_from_columns(cc->last_file, wincols-13));
+  else
+    mvaddstr(l+7, 13, "None.");
+  // line 8
+  if(cc->err)
+    mvaddnstr(l+8, 13, cc->err->message, str_offset_from_columns(cc->err->message, wincols-13));
+  else
+    mvaddstr(l+8, 13, "-");
+}
+
+
 static void ui_conn_draw() {
   char tmp[100];
   attron(A_BOLD);
@@ -807,39 +878,8 @@ static void ui_conn_draw() {
   attroff(A_REVERSE);
 
   // detailed info
-  if(!ui_conn->details)
-    return;
-  struct cc *cc = g_sequence_iter_is_end(ui_conn->list->sel) ? NULL : g_sequence_get(ui_conn->list->sel);
-  if(!cc) {
-    mvaddstr(bottom+1, 0, "Nothing selected.");
-    return;
-  }
-  attron(A_BOLD);
-  mvaddstr(bottom+1,  1, "Username:");
-  mvaddstr(bottom+1, 40, "Hub:");
-  mvaddstr(bottom+2,  2, "IP/port:");
-  mvaddstr(bottom+2, 37, "Status:");
-  mvaddstr(bottom+3,  7, "Up:");
-  mvaddstr(bottom+3, 39, "Down:");
-  mvaddstr(bottom+4,  5, "File:");
-  attroff(A_BOLD);
-  mvaddstr(bottom+1, 11, cc->nick ? cc->nick : "Unknown / connecting");
-  mvaddstr(bottom+1, 45, cc->hub ? cc->hub->tab->name : "-");
-  mvaddstr(bottom+2, 11, cc->remoteaddr);
-  mvaddstr(bottom+2, 45,
-    !cc->nick || (cc->adc && cc->state != ADC_S_NORMAL) ? "Connecting" :
-    cc->timeout_src    ? "Disconnected" :
-    cc->net->file_left ? "Uploading" :
-    cc->net->recv_left ? "Downloading" : "Idle");
-  g_snprintf(tmp, 99, "%d KiB/s (%s)", ratecalc_get(cc->net->rate_out)/1024, str_formatsize(cc->net->rate_out->total));
-  mvaddstr(bottom+3, 11, tmp);
-  g_snprintf(tmp, 99, "%d KiB/s (%s)", ratecalc_get(cc->net->rate_in)/1024, str_formatsize(cc->net->rate_in->total));
-  mvaddstr(bottom+3, 45, tmp);
-  if(cc->last_file)
-    mvaddnstr(bottom+4, 11, cc->last_file, str_offset_from_columns(cc->last_file, wincols-12));
-  else
-    mvaddstr(bottom+4, 11, "None.");
-  // TODO: more info (chunk size, file size, progress, error info, idle time)
+  if(ui_conn->details)
+    ui_conn_draw_details(bottom);
 }
 
 

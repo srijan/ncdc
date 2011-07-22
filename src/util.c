@@ -686,7 +686,7 @@ struct ratecalc {
 
 #define ratecalc_unregister(rc) do {\
     ratecalc_list = g_slist_remove(ratecalc_list, rc);\
-    (rc)->isreg = 0;\
+    (rc)->isreg = (rc)->rate = 0;\
   } while(0)
 
 #define ratecalc_get(rc) ((rc)->rate)
@@ -706,6 +706,31 @@ struct ratecalc {
 #endif
 
 GSList *ratecalc_list = NULL;
+
+
+// calculates an ETA and formats it into a "?d ?h ?m ?s" thing
+char *ratecalc_eta(struct ratecalc *rc, guint64 left) {
+  static char buf[100];
+  int sec = left / MAX(1, ratecalc_get(rc));
+  int l = 0;
+  buf[0] = 0;
+  if(sec > 356*24*3600)
+    return "-";
+  if(sec >= 24*3600) {
+    l += g_snprintf(buf+l, 99-l, "%dd ", sec/(24*3600));
+    sec %= 24*3600;
+  }
+  if(sec >= 3600) {
+    l += g_snprintf(buf+l, 99-l, "%dh ", sec/3600);
+    sec %= 3600;
+  }
+  if(sec >= 60) {
+    l += g_snprintf(buf+l, 99-l, "%dm ", sec/60);
+    sec %= 60;
+  }
+  g_snprintf(buf+l, 99-l, "%ds", sec);
+  return buf;
+}
 
 
 

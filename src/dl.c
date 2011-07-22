@@ -318,7 +318,9 @@ gboolean dl_queue_addfile(guint64 uid, char *hash, guint64 size, char *fn) {
   // does not exceed NAME_MAX. (Not that checking against NAME_MAX is really
   // reliable - some filesystems have an even more strict limit)
   int num = 1;
-  char *base = g_build_filename(conf_dir, "dl", fn, NULL);
+  char *tmp = conf_download_dir();
+  char *base = g_build_filename(tmp, fn, NULL);
+  g_free(tmp);
   dl->dest = g_strdup(base);
   while(check_dupe_dest(dl->dest)) {
     g_free(dl->dest);
@@ -334,13 +336,26 @@ gboolean dl_queue_addfile(guint64 uid, char *hash, guint64 size, char *fn) {
 
 // Called when we've got a complete file
 static void dl_finished(struct dl *dl) {
-  // close and rename to final destination
-  g_return_if_fail(close(dl->incfd) == 0);
-  dl->incfd = 0;
-  g_return_if_fail(rename(dl->inc, dl->dest) == 0);
   g_debug("dl:%016"G_GINT64_MODIFIER"x: download of `%s' finished, removing from queue", dl->u->uid, dl->dest);
+  // close
+  if(dl->incfd > 0)
+    g_warn_if_fail(close(dl->incfd) == 0);
+  dl->incfd = 0;
+  // Move the file to the destination.
+  // TODO: this may block for a while if they are not on the same filesystem,
+  // do this in a separate thread?
+  GFile *src = g_file_new_for_path(dl->inc);
+  GFile *dest = g_file_new_for_path(dl->dest);
+  GError *err = NULL;
+  g_file_move(src, dest, G_FILE_COPY_BACKUP, NULL, NULL, NULL, &err);
+  g_object_unref(src);
+  g_object_unref(dest);
+  if(err) {
+    ui_mf(ui_main, UIP_MED, "Error moving `%s' to `%s': %s", dl->inc, dl->dest, err->message);
+    g_error_free(err);
+  }
   // open the file list
-  if(dl->islist) {
+  if(!err && dl->islist) {
     struct ui_tab *t = ui_fl_create(dl->u->uid, TRUE);
     if(t)
       ui_tab_open(t, FALSE);

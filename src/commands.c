@@ -29,6 +29,7 @@
 #include <limits.h>
 #include <stdlib.h>
 #include <errno.h>
+#include <sys/stat.h>
 
 
 // currently opened tab, see cmd_handle()
@@ -107,6 +108,7 @@ static gboolean bool_var(const char *val) {
 
 #define UNSET(group, key) do {\
     g_key_file_remove_key(conf_file, group, key, NULL);\
+    conf_save();\
     ui_mf(NULL, 0, "%s.%s reset.", group, key);\
   } while(0)
 
@@ -133,6 +135,7 @@ static void set_nick(char *group, char *key, char *val) {
     return;
   }
   g_key_file_set_string(conf_file, group, key, val);
+  conf_save();
   get_string(group, key);
   ui_m(NULL, 0, "Your new nick will be used for new hub connections.");
   // TODO: nick change without reconnect on ADC?
@@ -145,6 +148,7 @@ static void set_userinfo(char *group, char *key, char *val) {
     UNSET(group, key);
   else {
     g_key_file_set_string(conf_file, group, key, val);
+    conf_save();
     get_string(group, key);
   }
   hub_global_nfochange();
@@ -169,6 +173,7 @@ static void set_encoding(char *group, char *key, char *val) {
     }
   } else {
     g_key_file_set_string(conf_file, group, key, val);
+    conf_save();
     get_encoding(group, key);
   }
   // TODO: note that this only affects new incoming data? and that a reconnect
@@ -199,6 +204,7 @@ static void set_bool_f(char *group, char *key, char *val) {
     UNSET(group, key);
   else {
     g_key_file_set_boolean(conf_file, group, key, bool_var(val));
+    conf_save();
     get_bool_f(group, key);
   }
 }
@@ -246,6 +252,7 @@ static void set_active_ip(char *group, char *key, char *val) {
     return;
   }
   g_key_file_set_string(conf_file, group, key, val);
+  conf_save();
   get_string(group, key);
 }
 
@@ -259,6 +266,7 @@ static void set_active_port(char *group, char *key, char *val) {
     if((!v && errno == EINVAL) || v < 0 || v > 65535)
       ui_m(NULL, 0, "Invalid port number.");
     g_key_file_set_integer(conf_file, group, key, v);
+    conf_save();
     get_int(group, key);
   }
   cc_listen_start();
@@ -282,6 +290,7 @@ static void set_autorefresh(char *group, char *key, char *val) {
       ui_m(NULL, 0, "Interval between automatic refreshes should be at least 10 minutes.");
     else {
       g_key_file_set_integer(conf_file, group, key, v);
+      conf_save();
       get_autorefresh(group, key);
     }
   }
@@ -302,6 +311,7 @@ static void set_slots(char *group, char *key, char *val) {
       ui_m(NULL, 0, "Invalid number.");
     else {
       g_key_file_set_integer(conf_file, group, key, v);
+      conf_save();
       get_slots(group, key);
       hub_global_nfochange();
     }
@@ -325,6 +335,7 @@ static void set_minislot_size(char *group, char *key, char *val) {
       ui_m(NULL, 0, "Minislot size must be at least 64 KiB.");
     else {
       g_key_file_set_integer(conf_file, group, key, v);
+      conf_save();
       get_minislot_size(group, key);
     }
   }
@@ -347,6 +358,7 @@ static void set_minislots(char *group, char *key, char *val) {
       ui_m(NULL, 0, "You must have at least 1 minislot.");
     else {
       g_key_file_set_integer(conf_file, group, key, v);
+      conf_save();
       get_minislots(group, key);
     }
   }
@@ -365,6 +377,7 @@ static void set_password(char *group, char *key, char *val) {
     UNSET(group, key);
   else {
     g_key_file_set_string(conf_file, group, key, val);
+    conf_save();
     if(tab->type == UIT_HUB && tab->hub->net->conn && !tab->hub->nick_valid)
       hub_password(tab->hub, NULL);
     ui_m(NULL, 0, "Password saved.");
@@ -411,6 +424,67 @@ static void set_hubname(char *group, char *key, char *val) {
 }
 
 
+static void get_download_dir(char *group, char *key) {
+  char *d = conf_download_dir();
+  ui_mf(NULL, 0, "%s.%s = %s", group, key, d);
+  g_free(d);
+}
+
+
+static void set_download_dir(char *group, char *key, char *val) {
+  char *nval = val ? g_strdup(val) : g_build_filename(conf_dir, "dl", NULL);
+  gboolean cont = FALSE, warn = FALSE;
+  // check if it exists
+  if(g_file_test(nval, G_FILE_TEST_EXISTS)) {
+    if(!g_file_test(nval, G_FILE_TEST_IS_DIR))
+      ui_mf(NULL, 0, "%s: Not a directory.", nval);
+    else
+      cont = TRUE;
+  // otherwise, create
+  } else {
+    GFile *d = g_file_new_for_path(nval);
+    GError *err = NULL;
+    g_file_make_directory_with_parents(d, NULL, &err);
+    g_object_unref(d);
+    if(err) {
+      ui_mf(NULL, 0, "Error creating `%s': %s", nval, err->message);
+      g_error_free(err);
+    } else
+      cont = TRUE;
+  }
+  // test whether they are on the same filesystem
+  if(cont) {
+    struct stat inc, dest;
+    char *incd = g_build_filename(conf_dir, "inc", NULL);
+    if(stat(incd, &inc) < 0) {
+      ui_mf(NULL, 0, "Error stat'ing %s: %s", incd, g_strerror(errno));
+      cont = FALSE;
+    }
+    g_free(incd);
+    if(cont && stat(nval, &dest) < 0) {
+      ui_mf(NULL, 0, "Error stat'ing %s: %s", nval, g_strerror(errno));
+      cont = FALSE;
+    }
+    if(cont && inc.st_dev != dest.st_dev)
+      warn = TRUE;
+  }
+  // no errors? save.
+  if(cont) {
+    if(!val)
+      UNSET(group, key);
+    else {
+      g_key_file_set_string(conf_file, group, key, val);
+      get_download_dir(group, key);
+      conf_save();
+    }
+  }
+  if(warn)
+    ui_m(NULL, 0, "WARNING: The download directory is not on the same filesystem as the incoming"
+                  " directory. This may cause the program to hang when downloading large files.");
+  g_free(nval);
+}
+
+
 // the settings list
 // TODO: help text / documentation?
 static struct setting settings[] = {
@@ -421,6 +495,7 @@ static struct setting settings[] = {
   { "autorefresh",   "global", get_autorefresh,   set_autorefresh,   NULL             }, // in minutes, 0 = disabled
   { "connection",    NULL,     get_string,        set_userinfo,      NULL             },
   { "description",   NULL,     get_string,        set_userinfo,      NULL             },
+  { "download_dir",  "global", get_download_dir,  set_download_dir,  path_suggest     },
   { "email",         NULL,     get_string,        set_userinfo,      NULL             },
   { "encoding",      NULL,     get_encoding,      set_encoding,      set_encoding_sug },
   { "hubname",       NULL,     get_hubname,       set_hubname,       NULL             }, // makes no sense in "global"

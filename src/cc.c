@@ -500,7 +500,8 @@ static void handle_id(struct cc *cc, struct hub_user *u) {
   cc->isop = u->isop;
   cc->uid = u->uid;
 
-  ui_conn_listchange(cc->iter, UICONN_MOD);
+  if(ui_conn)
+    ui_conn_listchange(cc->iter, UICONN_MOD);
 
   if(cc->adc)
     memcpy(cc->cid, u->cid, 8);

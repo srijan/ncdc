@@ -69,6 +69,17 @@ static GDBM_FILE dl_dat;
 #define DLDAT_INFO  0 // <8 bytes: size><8 bytes: reserved><zero-terminated-string: destination>
 #define DLDAT_USERS 1 // <8 bytes: amount(=1)><8 bytes: uid>
 
+static int dl_dat_needsync = FALSE;
+
+// Performs a gdbm_sync() in an upcoming iteration of the main loop. This
+// delayed write allows doing bulk operations on the data file while avoiding a
+// gdbm_sync() on every change.
+#define dl_dat_sync()\
+  if(!dl_dat_needsync) {\
+    dl_dat_needsync = TRUE;\
+    g_idle_add(dl_dat_sync_do, NULL);\
+  }
+
 
 // Download queue.
 // Key = dl->hash, Value = struct dl
@@ -77,6 +88,14 @@ GHashTable *dl_queue = NULL;
 
 // uid -> dl_user lookup table.
 static GHashTable *queue_users = NULL;
+
+
+
+static gboolean dl_dat_sync_do(gpointer dat) {
+  gdbm_sync(dl_dat);
+  dl_dat_needsync = FALSE;
+  return FALSE;
+}
 
 
 // Returns the first item in the download queue for this user, and prepares the item for downloading.
@@ -178,7 +197,7 @@ static void dl_queue_insert(struct dl *dl, guint64 uid, gboolean init) {
     val.dptr = (char *)users;
     val.dsize = 2*8;
     gdbm_store(dl_dat, keydat, val, GDBM_REPLACE);
-    gdbm_sync(dl_dat);
+    dl_dat_sync();
   }
 
   // start download, if possible
@@ -210,7 +229,7 @@ void dl_queue_rm(struct dl *dl) {
     gdbm_delete(dl_dat, keydat);
     key[0] = DLDAT_USERS;
     gdbm_delete(dl_dat, keydat);
-    gdbm_sync(dl_dat);
+    dl_dat_sync();
   }
   // free and remove dl struct
   if(ui_dl)

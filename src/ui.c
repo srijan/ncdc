@@ -848,7 +848,7 @@ static void ui_conn_key(guint64 key) {
   struct cc *cc = g_sequence_iter_is_end(ui_conn->list->sel) ? NULL : g_sequence_get(ui_conn->list->sel);
 
   switch(key) {
-  case INPT_CHAR('f'):
+  case INPT_CHAR('f'): // f - find user
     if(!cc)
       ui_m(NULL, 0, "Nothing selected.");
     else if(!cc->hub || !cc->uid)
@@ -856,13 +856,32 @@ static void ui_conn_key(guint64 key) {
     else if(!ui_hub_finduser(cc->hub->tab, cc->uid, NULL, FALSE))
       ui_m(NULL, 0, "User has left the hub.");
     break;
-  case INPT_CHAR('d'):
+  case INPT_CHAR('d'): // d - disconnect
     if(!cc)
       ui_m(NULL, 0, "Nothing selected.");
     else if(!cc->net->conn)
       ui_m(NULL, 0, "Not connected.");
     else
       cc_disconnect(cc);
+    break;
+  case INPT_CHAR('q'): // q - find queue item
+    if(!cc)
+      ui_m(NULL, 0, "Nothing selected.");
+    else if(!cc->candl || !cc->last_file)
+      ui_m(NULL, 0, "Not downloading a file.");
+    else {
+      struct dl *dl = g_hash_table_lookup(dl_queue, cc->dl_hash);
+      if(!dl)
+        ui_m(NULL, 0, "File has been removed from the queue.");
+      else {
+        if(ui_dl)
+          ui_tab_cur = g_list_find(ui_tabs, ui_dl);
+        else
+          ui_tab_open(ui_dl_create(), TRUE);
+        // dl->iter should be valid at this point
+        ui_dl->list->sel = dl->iter;
+      }
+    }
     break;
   }
 }
@@ -1230,7 +1249,7 @@ static void ui_dl_key(guint64 key) {
   struct dl *sel = g_sequence_iter_is_end(ui_dl->list->sel) ? NULL : g_sequence_get(ui_dl->list->sel);
 
   switch(key) {
-  case INPT_CHAR('f'):
+  case INPT_CHAR('f'): // f - find user
     if(!sel)
       ui_m(NULL, 0, "Nothing selected.");
     else {
@@ -1241,12 +1260,26 @@ static void ui_dl_key(guint64 key) {
         ui_hub_finduser(u->hub->tab, u->uid, NULL, FALSE);
     }
     break;
-  case INPT_CHAR('d'):
+  case INPT_CHAR('d'): // d - remove item
     if(!sel)
       ui_m(NULL, 0, "Nothing selected.");
     else {
       ui_mf(NULL, 0, "Removed `%s' from queue.", sel->dest);
       dl_queue_rm(sel);
+    }
+    break;
+  case INPT_CHAR('c'): // c - find connection
+    if(!sel)
+      ui_m(NULL, 0, "Nothing selected.");
+    else if(!sel->u->cc)
+      ui_m(NULL, 0, "Download not in progress.");
+    else {
+      if(ui_conn)
+        ui_tab_cur = g_list_find(ui_tabs, ui_conn);
+      else
+        ui_tab_open(ui_conn_create(), TRUE);
+      // cc->iter should be valid at this point
+      ui_conn->list->sel = sel->u->cc->iter;
     }
     break;
   }

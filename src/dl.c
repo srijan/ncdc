@@ -365,15 +365,25 @@ static void dl_finished(struct dl *dl) {
   if(dl->incfd > 0)
     g_warn_if_fail(close(dl->incfd) == 0);
   dl->incfd = 0;
+  // Create destination directory, if it does not exist yet.
+  char *parent = g_path_get_dirname(dl->dest);
+  GError *err = NULL;
+  if(!g_file_test(parent, G_FILE_TEST_IS_DIR)) {
+    GFile *p = g_file_new_for_path(parent);
+    g_file_make_directory_with_parents(p, NULL, &err);
+    g_object_unref(p);
+  }
+  g_free(parent);
   // Move the file to the destination.
   // TODO: this may block for a while if they are not on the same filesystem,
   // do this in a separate thread?
-  GFile *src = g_file_new_for_path(dl->inc);
-  GFile *dest = g_file_new_for_path(dl->dest);
-  GError *err = NULL;
-  g_file_move(src, dest, dl->islist ? G_FILE_COPY_OVERWRITE : G_FILE_COPY_BACKUP, NULL, NULL, NULL, &err);
-  g_object_unref(src);
-  g_object_unref(dest);
+  if(!err) {
+    GFile *src = g_file_new_for_path(dl->inc);
+    GFile *dest = g_file_new_for_path(dl->dest);
+    g_file_move(src, dest, dl->islist ? G_FILE_COPY_OVERWRITE : G_FILE_COPY_BACKUP, NULL, NULL, NULL, &err);
+    g_object_unref(src);
+    g_object_unref(dest);
+  }
   if(err) {
     ui_mf(ui_main, UIP_MED, "Error moving `%s' to `%s': %s", dl->inc, dl->dest, err->message);
     g_error_free(err);

@@ -355,7 +355,7 @@ static void dl_finished(struct dl *dl) {
   GFile *src = g_file_new_for_path(dl->inc);
   GFile *dest = g_file_new_for_path(dl->dest);
   GError *err = NULL;
-  g_file_move(src, dest, G_FILE_COPY_BACKUP, NULL, NULL, NULL, &err);
+  g_file_move(src, dest, dl->islist ? G_FILE_COPY_OVERWRITE : G_FILE_COPY_BACKUP, NULL, NULL, NULL, &err);
   g_object_unref(src);
   g_object_unref(dest);
   if(err) {

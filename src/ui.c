@@ -1115,7 +1115,7 @@ struct ui_tab *ui_dl;
 static gint ui_dl_sort_func(gconstpointer da, gconstpointer db, gpointer dat) {
   const struct dl *a = da;
   const struct dl *b = db;
-  return a->islist && !b->islist ? 1 : !a->islist && b->islist ? -1 : strcmp(a->dest, b->dest);
+  return a->islist && !b->islist ? -1 : !a->islist && b->islist ? 1 : strcmp(a->dest, b->dest);
 }
 
 
@@ -1188,7 +1188,10 @@ static void ui_dl_draw_row(struct ui_listing *list, GSequenceIter *iter, int row
   }
 
   mvaddstr(row, 36, str_formatsize(dl->size));
-  g_snprintf(tmp, 99, "%3d%%", (int) ((dl->have*100)/dl->size));
+  if(dl->size)
+    g_snprintf(tmp, 99, "%3d%%", (int) ((dl->have*100)/dl->size));
+  else
+    strcpy(tmp, "  -");
   mvaddstr(row, 47, tmp);
 
   if(dl->islist)

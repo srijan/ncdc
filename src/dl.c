@@ -40,7 +40,7 @@ struct dl_user {
   guint64 uid;
   struct cc_expect *expect;
   struct cc *cc;
-  GQueue queue; // queue of struct dl's. First item = active
+  GSList *queue; // ordered list of struct dl's. First item = active. (TODO: GSequence for performance?)
 };
 
 
@@ -82,9 +82,9 @@ static GHashTable *queue_users = NULL;
 // Returns the first item in the download queue for this user, and prepares the item for downloading.
 struct dl *dl_queue_next(guint64 uid) {
   struct dl_user *du = g_hash_table_lookup(queue_users, &uid);
-  if(!du)
+  if(!du || !du->queue)
     return NULL;
-  struct dl *dl = du->queue.head->data;
+  struct dl *dl = du->queue->data;
   g_return_val_if_fail(dl != NULL, NULL);
 
   // For filelists: Don't allow resuming of the download. It could happen that
@@ -125,6 +125,15 @@ static void dl_queue_start(struct dl *dl) {
 }
 
 
+// Sort function when inserting items in the queue of a single user. This
+// ensures that the files are downloaded in a predictable order.
+static gint dl_user_queue_sort_func(gconstpointer a, gconstpointer b) {
+  const struct dl *x = a;
+  const struct dl *y = b;
+  return x->islist && !y->islist ? -1 : !x->islist && y->islist ? 1 : strcmp(x->dest, y->dest);
+}
+
+
 // Adds a dl item to the queue. dl->inc will be determined and opened here.
 static void dl_queue_insert(struct dl *dl, guint64 uid, gboolean init) {
   // figure out dl->inc
@@ -136,11 +145,10 @@ static void dl_queue_insert(struct dl *dl, guint64 uid, gboolean init) {
   if(!dl->u) {
     dl->u = g_slice_new0(struct dl_user);
     dl->u->uid = uid;
-    g_queue_init(&dl->u->queue);
     g_hash_table_insert(queue_users, &dl->u->uid, dl->u);
     dl->u->cc = cc_get_uid_download(uid);
   }
-  g_queue_push_tail(&dl->u->queue, dl);
+  dl->u->queue = g_slist_insert_sorted(dl->u->queue, dl, dl_user_queue_sort_func);
   // insert in the global queue
   g_hash_table_insert(dl_queue, dl->hash, dl);
   if(ui_dl)
@@ -188,8 +196,8 @@ void dl_queue_rm(struct dl *dl) {
   if(dl->inc && g_file_test(dl->inc, G_FILE_TEST_EXISTS))
     unlink(dl->inc);
   // update and optionally remove dl_user struct
-  g_queue_remove(&dl->u->queue, dl);
-  if(!dl->u->queue.head) {
+  dl->u->queue = g_slist_remove(dl->u->queue, dl);
+  if(!dl->u->queue) {
     g_hash_table_remove(queue_users, &dl->u->uid);
     g_slice_free(struct dl_user, dl->u);
   }
@@ -230,7 +238,7 @@ void dl_queue_expect(guint64 uid, struct cc_expect *e) {
     return;
   du->expect = e;
   if(!e && !du->cc)
-    dl_queue_start(du->queue.head->data); // TODO: this only works with single-source downloading
+    dl_queue_start(du->queue->data); // TODO: this only works with single-source downloading
 }
 
 
@@ -246,7 +254,7 @@ void dl_queue_cc(guint64 uid, struct cc *cc) {
     return;
   du->cc = cc;
   if(!cc && !du->expect)
-    dl_queue_start(du->queue.head->data); // TODO: this only works with single-source downloading
+    dl_queue_start(du->queue->data); // TODO: this only works with single-source downloading
 }
 
 
@@ -255,7 +263,7 @@ void dl_queue_cc(guint64 uid, struct cc *cc) {
 void dl_queue_useronline(guint64 uid) {
   struct dl_user *du = g_hash_table_lookup(queue_users, &uid);
   if(du && !du->cc && !du->expect)
-    dl_queue_start(du->queue.head->data); // TODO: this only works with single-source downloading
+    dl_queue_start(du->queue->data); // TODO: this only works with single-source downloading
 }
 
 

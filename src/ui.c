@@ -1229,7 +1229,7 @@ static void ui_dl_draw_row(struct ui_listing *list, GSequenceIter *iter, int row
 
 
 static void ui_dl_draw() {
-  //char tmp[100];
+  char tmp[100];
   attron(A_BOLD);
   mvaddstr(1, 2,  "User");
   mvaddstr(1, 22, "Hub");
@@ -1238,10 +1238,17 @@ static void ui_dl_draw() {
   mvaddstr(1, 59, "File");
   attroff(A_BOLD);
 
-  int bottom = winrows-5;
-  ui_listing_draw(ui_dl->list, 2, bottom-1, ui_dl_draw_row, NULL);
+  int bottom = winrows-3;
+  int pos = ui_listing_draw(ui_dl->list, 2, bottom-1, ui_dl_draw_row, NULL);
 
-  // TODO: footer
+  // footer
+  attron(A_REVERSE);
+  mvhline(bottom, 0, ' ', wincols);
+  g_snprintf(tmp, 99, "%5d files - %3d%%", g_hash_table_size(dl_queue), pos);
+  mvaddstr(bottom, wincols-19, tmp);
+  attroff(A_REVERSE);
+
+  // TODO: detailed info
 }
 
 

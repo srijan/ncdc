@@ -1193,8 +1193,13 @@ static void ui_dl_draw_row(struct ui_listing *list, GSequenceIter *iter, int row
 
   if(dl->islist)
     mvaddstr(row, 59, "files.xml.bz2");
-  else // TODO: cut off in the middle (or something?)
-    mvaddnstr(row, 59, dl->dest, str_offset_from_columns(dl->dest, wincols-59));
+  else {
+    char *def = conf_download_dir();
+    int len = strlen(def);
+    char *dest = strncmp(def, dl->dest, len) == 0 ? dl->dest+len+1 : dl->dest;
+    mvaddnstr(row, 59, dest, str_offset_from_columns(dest, wincols-59));
+    g_free(def);
+  }
 }
 
 

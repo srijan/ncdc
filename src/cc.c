@@ -615,6 +615,18 @@ static void adc_handle(struct cc *cc, char *msg) {
       handle_adcsnd(cc, g_ascii_strtoull(cmd.argv[2], NULL, 0), g_ascii_strtoull(cmd.argv[3], NULL, 0));
     break;
 
+  case ADCC_STA:
+    if(cmd.argc < 2)
+      g_message("Unknown command from %s: %s", net_remoteaddr(cc->net), msg);
+    else if(cmd.argv[0][0] == '1' || cmd.argv[0][0] == '2') {
+      g_set_error(&cc->err, 1, 0, "(%s) %s", cmd.argv[0], cmd.argv[1]);
+      if(cmd.argv[0][0] == '2')
+        cc_disconnect(cc);
+      // TODO: communicate 51/52 (file (part) not available) with the DL queue
+    } else if(!adc_getparam(cmd.argv, "RF", NULL))
+      g_message("Status: %s: (%s) %s", net_remoteaddr(cc->net), cmd.argv[0], cmd.argv[1]);
+    break;
+
   default:
     g_message("Unknown command from %s: %s", net_remoteaddr(cc->net), msg);
   }
@@ -730,6 +742,8 @@ static void nmdc_handle(struct cc *cc, char *cmd) {
   CMDREGEX(direction, "Direction (Download|Upload) ([0-9]+)");
   CMDREGEX(adcget, "ADCGET ([^ ]+) (.+) ([0-9]+) (-?[0-9]+)");
   CMDREGEX(adcsnd, "ADCSND file .+ ([0-9]+) (-?[0-9]+)");
+  CMDREGEX(error, "Error (.+)");
+  CMDREGEX(maxedout, "MaxedOut");
 
   // $MyNick
   if(g_regex_match(mynick, cmd, 0, &nfo)) { // 1 = nick
@@ -823,13 +837,25 @@ static void nmdc_handle(struct cc *cc, char *cmd) {
     g_free(bytes);
   }
   g_match_info_free(nfo);
+
+  // $Error
+  if(g_regex_match(error, cmd, 0, &nfo)) { // 1 = message
+    char *msg = g_match_info_fetch(nfo, 1);
+    g_set_error(&cc->err, 1, 0, msg);
+    g_free(msg);
+    // TODO: communicate a "File Not Available" error to the DL queue
+  }
+  g_match_info_free(nfo);
+
+  if(g_regex_match(maxedout, cmd, 0, &nfo))
+    g_set_error_literal(&cc->err, 1, 0, "No Slots Available");
+  g_match_info_free(nfo);
 }
 
 
 static void handle_cmd(struct net *n, char *cmd) {
   struct cc *cc = n->handle;
 
-  // TODO: for incoming connections, detect whether this ADC or NMDC
   if(cc->adc)
     adc_handle(cc, cmd);
   else

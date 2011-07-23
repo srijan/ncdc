@@ -756,33 +756,44 @@ static void ui_conn_draw_row(struct ui_listing *list, GSequenceIter *iter, int r
                          'I'); // idle
 
   if(cc->nick)
-    mvaddnstr(row, 4, cc->nick, str_offset_from_columns(cc->nick, 19));
+    mvaddnstr(row, 4, cc->nick, str_offset_from_columns(cc->nick, 15));
   else {
-    g_snprintf(tmp, 99, "IP:%s", cc->remoteaddr);
+    strcpy(tmp, "IP:");
+    strcat(tmp, cc->remoteaddr);
+    /*if(index(tmp+3, ':'))
+      *(index(tmp)) = 0;*/
     mvaddstr(row, 4, tmp);
   }
 
   if(cc->hub)
-    mvaddnstr(row, 24, cc->hub->tab->name, str_offset_from_columns(cc->hub->tab->name, 14));
+    mvaddnstr(row, 20, cc->hub->tab->name, str_offset_from_columns(cc->hub->tab->name, 11));
+
+
+  mvaddstr(row, 32, cc->last_length ? str_formatsize(cc->last_length) : "-");
+
+  guint64 left = cc->dl ? cc->net->recv_left : cc->net->file_left;
+  if(cc->last_length && !cc->timeout_src)
+    g_snprintf(tmp, 99, "%3d%%", (int)(((cc->last_length-left)*100)/cc->last_length));
+  else
+    strcpy(tmp, "  -");
+  mvaddstr(row, 44, tmp);
 
   if(cc->timeout_src)
     strcpy(tmp, "     -");
   else
     g_snprintf(tmp, 99, "%6d", ratecalc_get(cc->dl ? cc->net->rate_in : cc->net->rate_out)/1024);
-  mvaddstr(row, 46, tmp);
-
-  // TODO: progress bar or something?
+  mvaddstr(row, 49, tmp);
 
   if(cc->err) {
-    mvaddstr(row, 57, "Disconnected: ");
-    addnstr(cc->err->message, str_offset_from_columns(cc->err->message, wincols-72));
+    mvaddstr(row, 56, "Disconnected: ");
+    addnstr(cc->err->message, str_offset_from_columns(cc->err->message, wincols-(56+14)));
   } else if(cc->last_file) {
     char *file = rindex(cc->last_file, '/');
     if(file)
       file++;
     else
       file = cc->last_file;
-      mvaddnstr(row, 57, file, str_offset_from_columns(file, wincols-57));
+      mvaddnstr(row, 56, file, str_offset_from_columns(file, wincols-56));
   }
 }
 
@@ -862,9 +873,10 @@ static void ui_conn_draw() {
   char tmp[100];
   attron(A_BOLD);
   mvaddstr(1, 2,  "S Username");
-  mvaddstr(1, 24, "Hub");
-  mvaddstr(1, 46, "KiB/s");
-  mvaddstr(1, 57, "File");
+  mvaddstr(1, 20, "Hub");
+  mvaddstr(1, 32, "Chunk          %");
+  mvaddstr(1, 49, " KiB/s");
+  mvaddstr(1, 56, "File");
   attroff(A_BOLD);
 
   int bottom = ui_conn->details ? winrows-11 : winrows-3;

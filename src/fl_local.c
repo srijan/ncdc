@@ -900,6 +900,11 @@ void fl_init() {
   // adjust the timer on every change.
   g_timeout_add_seconds_full(G_PRIORITY_LOW, 60, fl_init_autorefresh, NULL, NULL);
 
+  // The following code may take a while on large shares, so indicate to the UI
+  // that we're busy.
+  ui_m(NULL, UIM_NOLOG|UIM_DIRECT, "Loading file list...");
+  ui_draw();
+
   // read config
   gboolean sharing = TRUE;
   char **shares = g_key_file_get_keys(conf_file, "share", NULL, NULL);
@@ -932,6 +937,10 @@ void fl_init() {
     if(dorefresh)
       ui_m(ui_main, UIM_NOTIFY, "File list incomplete, refreshing...");
   }
+
+  // reset loading indicator
+  if(!fl_local_list || !dorefresh)
+    ui_m(NULL, UIM_NOLOG|UIM_DIRECT, NULL);
 
   if(dorefresh || conf_autorefresh())
     fl_refresh(NULL);

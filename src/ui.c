@@ -1363,19 +1363,20 @@ static void ui_dl_key(guint64 key) {
 // Message should also be notified in status bar (implied automatically if the
 // requested tab has no log window). This also uses UIP_EMPTY if no other UIP_
 // flag is set.
-#define UIM_NOTIFY 4
+#define UIM_NOTIFY  4
 // Ownership of the message string is passed to the message handling function.
 // (Which fill g_free() it after use)
-#define UIM_PASS   8
+#define UIM_PASS    8
 // This is a chat message, i.e. check to see if your name is part of the
 // message, and if so, give it UIP_HIGH.
-#define UIM_CHAT  16
+#define UIM_CHAT   16
+// Indicates that ui_m_mainthread() is called directly - without using an idle
+// function.
+#define UIM_DIRECT 32
+// Do not log to the tab. Implies UIM_NOTIFY
+#define UIM_NOLOG  (64 | UIM_NOTIFY)
 
 #endif
-
-// For internal use. Indicates that ui_m_mainthread() is called directly -
-// without using an idle function.
-#define UIM_DIRECT 32
 
 
 static char *ui_m_text = NULL;
@@ -1419,12 +1420,12 @@ static gboolean ui_m_mainthread(gpointer dat) {
     g_source_remove(ui_m_timer);
     ui_m_updated = TRUE;
   }
-  if(notify) {
+  if(notify && msg->msg) {
     ui_m_text = g_strdup(msg->msg);
     ui_m_timer = g_timeout_add(3000, ui_m_timeout, NULL);
     ui_m_updated = TRUE;
   }
-  if(tab->log) {
+  if(tab->log && msg->msg && !(msg->flags & (UIM_NOLOG & ~UIM_NOTIFY))) {
     if((msg->flags & UIM_CHAT) && tab->type == UIT_HUB && tab->hub->nick_valid) {
       char *name = g_regex_escape_string(tab->hub->nick, -1);
       char *pattern = g_strdup_printf("\\b%s\\b", name);
@@ -1455,7 +1456,7 @@ void ui_m(struct ui_tab *tab, int flags, const char *msg) {
   dat->flags = flags;
   // call directly if we're running from the main thread. use an idle function
   // otherwise.
-  if(g_main_context_is_owner(NULL)) {
+  if((dat->flags & UIM_DIRECT) || g_main_context_is_owner(NULL)) {
     dat->flags |= UIM_DIRECT;
     ui_m_mainthread(dat);
   } else

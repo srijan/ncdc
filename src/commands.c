@@ -1119,7 +1119,10 @@ static void c_gc(char *args) {
   if(args[0])
     ui_m(NULL, 0, "This command does not accept any arguments.");
   else {
+    ui_m(NULL, UIM_NOLOG, "Collecting garbage...");
+    ui_draw();
     fl_hashdat_gc();
+    ui_m(NULL, UIM_NOLOG, NULL);
     ui_m(NULL, 0, "Garbage-collection done.");
   }
 }

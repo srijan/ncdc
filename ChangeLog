@@ -1,3 +1,14 @@
+0.4 - 2011-07-23
+	- Added file downloading support
+	  WARNING: Downloaded files are not TTH checked at this moment.
+	- Added persistent download queue
+	- Added busy indicators on start-up and with /gc
+	- Added download speed indicator to status bar
+	- Improved connection list interface
+	- Improved performance of UI message handling
+	- Fixed a remote crash
+	- Fixed incorrect reporting of hub counters
+
 0.3 - 2011-07-15
 	- Added file list browser
 	- Added downloading of other people's file list

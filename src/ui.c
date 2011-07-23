@@ -1373,6 +1373,10 @@ static void ui_dl_key(guint64 key) {
 
 #endif
 
+// For internal use. Indicates that ui_m_mainthread() is called directly -
+// without using an idle function.
+#define UIM_DIRECT 32
+
 
 static char *ui_m_text = NULL;
 static guint ui_m_timer;
@@ -1404,8 +1408,7 @@ static gboolean ui_m_mainthread(gpointer dat) {
     tab = ui_tab_cur->data;
   // It can happen that the tab is closed while we were waiting for this idle
   // function to be called, so check whether it's still in the list.
-  // TODO: Performance can be improved by using a reference counter or so.
-  else if(!g_list_find(ui_tabs, tab))
+  else if(!(msg->flags & UIM_DIRECT) && !g_list_find(ui_tabs, tab))
     goto ui_m_cleanup;
 
   gboolean notify = (msg->flags & UIM_NOTIFY) || !tab->log;
@@ -1452,9 +1455,10 @@ void ui_m(struct ui_tab *tab, int flags, const char *msg) {
   dat->flags = flags;
   // call directly if we're running from the main thread. use an idle function
   // otherwise.
-  if(g_main_context_is_owner(NULL))
+  if(g_main_context_is_owner(NULL)) {
+    dat->flags |= UIM_DIRECT;
     ui_m_mainthread(dat);
-  else
+  } else
     g_idle_add_full(G_PRIORITY_HIGH_IDLE, ui_m_mainthread, dat, NULL);
 }
 

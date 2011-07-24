@@ -538,6 +538,89 @@ gboolean dl_fl_clean(gpointer dat) {
 }
 
 
+// Removes unused files in /inc/.
+static void dl_inc_clean() {
+  char *dir = g_build_filename(conf_dir, "inc", NULL);
+  GDir *d = g_dir_open(dir, 0, NULL);
+  if(!d) {
+    g_free(dir);
+    return;
+  }
+
+  const char *n;
+  char hash[24];
+  while((n = g_dir_read_name(d))) {
+    // Only consider files that we have created, which always happen to have a
+    // base32-encoded hash as filename.
+    if(strlen(n) != 39 || strspn(n, "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567") != 39)
+      continue;
+    base32_decode(n, hash);
+    if(g_hash_table_lookup(dl_queue, hash))
+      continue;
+    // not in the queue? delete.
+    char *fn = g_build_filename(dir, n, NULL);
+    unlink(fn);
+    g_free(fn);
+  }
+  g_dir_close(d);
+  g_free(dir);
+}
+
+
+// Removes unused items from dl.dat, performs a gdbm_reorganize(), removes
+// unused files in /inc/ and calls dl_fl_clean().
+// The dl.dat cleaning code is based on based on fl_hashdat_gc().
+void dl_gc() {
+  GSList *rm = NULL;
+  char hash[40];
+  hash[39] = 0;
+
+  // check for unused keys
+  datum key = gdbm_firstkey(dl_dat);
+  char *freethis = NULL;
+  for(; key.dptr; key=gdbm_nextkey(dl_dat, key)) {
+    char *str = key.dptr;
+    if(freethis)
+      free(freethis);
+    // We only touch keys that this or earlier versions of ncdc could have
+    // created. Unknown keys are left untouched as a later version could have
+    // made these and there is no way to tell whether these need to be cleaned
+    // up or not.
+    if(key.dsize == 25 && (str[0] == DLDAT_INFO || str[0] == DLDAT_USERS)
+        && !g_hash_table_lookup(dl_queue, str+1)) {
+      base32_encode(str+1, hash);
+      g_message("Removing unused key in dl.dat: type = %d, hash = %s", str[0], hash);
+      rm = g_slist_prepend(rm, str);
+      freethis = NULL;
+    } else
+      freethis = str;
+  }
+  if(freethis)
+    free(freethis);
+
+  // delete the unused keys
+  GSList *n = rm;
+  key.dsize = 25;
+  while(n) {
+    rm = n->next;
+    key.dptr = n->data;
+    gdbm_delete(dl_dat, key);
+    free(n->data);
+    g_slist_free_1(n);
+    n = rm;
+  }
+
+  // perform the reorganize
+  gdbm_reorganize(dl_dat);
+
+  // remove unused files in /inc/
+  dl_inc_clean();
+
+  // remove old files in /fl/
+  dl_fl_clean(NULL);
+}
+
+
 void dl_init_global() {
   queue_users = g_hash_table_new(g_int64_hash, g_int64_equal);
   dl_queue = g_hash_table_new(g_int_hash, tiger_hash_equal);

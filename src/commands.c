@@ -1122,6 +1122,7 @@ static void c_gc(char *args) {
     ui_m(NULL, UIM_NOLOG, "Collecting garbage...");
     ui_draw();
     fl_hashdat_gc();
+    dl_gc();
     ui_m(NULL, UIM_NOLOG, NULL);
     ui_m(NULL, 0, "Garbage-collection done.");
   }

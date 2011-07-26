@@ -913,6 +913,7 @@ void cc_adc_connect(struct cc *cc, struct hub_user *u, unsigned short port, char
   g_return_if_fail(u && u->active && u->ip4);
   cc->adc = TRUE;
   cc->token = g_strdup(token);
+  memcpy(cc->cid, u->cid, 8);
   cc->net->eom[0] = '\n';
   // build address
   strncpy(cc->remoteaddr, ip4_unpack(u->ip4), 23);

@@ -41,6 +41,7 @@ struct dl_user {
   struct cc_expect *expect;
   struct cc *cc;
   GSList *queue; // ordered list of struct dl's. First item = active. (TODO: GSequence for performance?)
+  gboolean active; // whether we're currently downloading or not. (i.e. whether this user is occupying a download slot)
 };
 
 
@@ -98,18 +99,42 @@ static gboolean dl_dat_sync_do(gpointer dat) {
 }
 
 
-// Returns the first item in the download queue for this user, and prepares the item for downloading.
+// Number of active downloads. (Can be cached to increase performance)
+static int dl_num_active() {
+  int n = 0;
+  struct dl_user *du;
+  GHashTableIter iter;
+  g_hash_table_iter_init(&iter, queue_users);
+  while(g_hash_table_iter_next(&iter, NULL, (gpointer *)&du))
+    if(du->active)
+      n++;
+  return n;
+}
+
+
+// Returns the first item in the download queue for this user, prepares the
+// item for downloading and sets this user as 'active'.
 struct dl *dl_queue_next(guint64 uid) {
   struct dl_user *du = g_hash_table_lookup(queue_users, &uid);
-  if(!du || !du->queue)
+  if(!du || !du->queue) {
+    du->active = FALSE;
+    // Nothing more for this user, check for other users.
+    dl_queue_startany();
     return NULL;
-  struct dl *dl = du->queue->data;
-  g_return_val_if_fail(dl != NULL, NULL);
+  }
+
+  // If we weren't downloading from this user yet, check that we can start a
+  // new download. If we can't, it means we accidentally connected to this
+  // user... let the connection idle.
+  if(!du->active && dl_num_active() >= conf_download_slots())
+    return NULL;
+  du->active = TRUE;
 
   // For filelists: Don't allow resuming of the download. It could happen that
   // the client modifies its filelist in between our retries. In that case the
   // downloaded filelist would end up being corrupted. To avoid that: make sure
   // lists are downloaded in one go, and throw away any incomplete data.
+  struct dl *dl = du->queue->data;
   if(dl->islist && dl->have > 0) {
     dl->have = dl->size = 0;
     g_return_val_if_fail(close(dl->incfd) == 0, NULL);
@@ -126,6 +151,10 @@ struct dl *dl_queue_next(guint64 uid) {
 // queued) or dl_queue_insert() (when a new item has been inserted).
 static void dl_queue_start(struct dl *dl) {
   g_return_if_fail(dl && dl->u);
+  // If we don't have download slots, then just forget it.
+  if(dl_num_active() >= conf_download_slots())
+    return;
+  // If we expect an incoming connection, then things will resolve itself automatically.
   if(dl->u->expect)
     return;
   // try to re-use an existing connection
@@ -144,6 +173,33 @@ static void dl_queue_start(struct dl *dl) {
   // try to open a C-C connection
   g_debug("dl:%016"G_GINT64_MODIFIER"x: trying to open a connection", u->uid);
   hub_opencc(u->hub, u);
+}
+
+
+// Called when one or more download slots have become free. Will attempt to
+// start a new download.
+// TODO: Prioritize downloads according do dl_user_queue_sort_func()?
+void dl_queue_startany() {
+  int n = conf_download_slots() - dl_num_active();
+  if(n < 1)
+    return;
+  struct dl_user *du;
+  GHashTableIter iter;
+  g_hash_table_iter_init(&iter, queue_users);
+  while(n > 0 && g_hash_table_iter_next(&iter, NULL, (gpointer *)&du)) {
+    // Don't consider any user from which are actively downloading, or from
+    // which we have nothing to donwload.
+    if(du->active || !du->queue)
+      continue;
+    if(// Case 1: We are still connected to a user, in idle state.
+      (du->cc && du->cc->net->conn && du->cc->candl) ||
+      // Case 2: We are not connected and do not expect to get connected.
+      (!du->cc && !du->expect)
+    ) {
+      dl_queue_start(du->queue->data);
+      n--;
+    }
+  }
 }
 
 
@@ -213,6 +269,7 @@ static void dl_queue_insert(struct dl *dl, guint64 uid, gboolean init) {
 // nothing is queued, and tries to start a connection if we're not connected
 // but something is queued.
 static void dl_queue_uchange(struct dl_user *du) {
+  g_warn_if_fail(du->cc || (!du->cc && !du->active));
   if(!du->expect && !du->cc && du->queue)
     dl_queue_start(du->queue->data); // TODO: this only works with single-source downloading
   else if(!du->expect && !du->cc && !du->queue) {
@@ -294,6 +351,17 @@ void dl_queue_useronline(guint64 uid) {
   struct dl_user *du = g_hash_table_lookup(queue_users, &uid);
   if(du)
     dl_queue_uchange(du);
+}
+
+
+// To be called when a cc connection is disconnected. (This happens before
+// _cc() is called, since _cc() is called on a timeout).
+void dl_queue_userdisconnect(guint64 uid) {
+  struct dl_user *du = g_hash_table_lookup(queue_users, &uid);
+  if(du) {
+    du->active = FALSE;
+    dl_queue_startany();
+  }
 }
 
 
@@ -436,6 +504,7 @@ static void dl_finished(struct dl *dl) {
 void dl_received(struct dl *dl, int length, char *buf) {
   //g_debug("dl:%016"G_GINT64_MODIFIER"x: Received %d bytes for %s (size = %"G_GUINT64_FORMAT", have = %"G_GUINT64_FORMAT")", dl->u->uid, length, dl->dest, dl->size, dl->have+length);
   g_return_if_fail(dl->have + length <= dl->size);
+  g_warn_if_fail(dl->u->active);
 
   // open dl->incfd, if it's not open yet
   if(dl->incfd <= 0) {

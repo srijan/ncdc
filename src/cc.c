@@ -603,9 +603,13 @@ static void adc_handle(struct cc *cc, char *msg) {
     break;
 
   case ADCC_STA:
-    if(cmd.argc < 2)
+    if(cmd.argc < 2 || strlen(cmd.argv[0]) != 3)
       g_message("Unknown command from %s: %s", net_remoteaddr(cc->net), msg);
-    else if(cmd.argv[0][0] == '1' || cmd.argv[0][0] == '2') {
+    else if(cmd.argv[0][1] == '5' && cmd.argv[0][2] == '3') {
+      // Make a "slots full" message fatal; dl.c assumes this behaviour.
+      g_set_error_literal(&cc->err, 1, 0, "No Slots Available");
+      cc_disconnect(cc);
+    } else if(cmd.argv[0][0] == '1' || cmd.argv[0][0] == '2') {
       g_set_error(&cc->err, 1, 0, "(%s) %s", cmd.argv[0], cmd.argv[1]);
       if(cmd.argv[0][0] == '2')
         cc_disconnect(cc);
@@ -703,8 +707,10 @@ static void nmdc_direction(struct cc *cc, gboolean down, int num) {
   }
 
   // If we wanted to download, but didn't get the chance to do so, notify the dl manager.
-  if(old_dl && !cc->dl)
+  if(old_dl && !cc->dl) {
+    dl_queue_userdisconnect(cc->uid);
     dl_queue_cc(cc->uid, NULL);
+  }
 
   // if we can download, do so!
   if(cc->dl)
@@ -834,8 +840,10 @@ static void nmdc_handle(struct cc *cc, char *cmd) {
   }
   g_match_info_free(nfo);
 
-  if(g_regex_match(maxedout, cmd, 0, &nfo))
+  if(g_regex_match(maxedout, cmd, 0, &nfo)) {
     g_set_error_literal(&cc->err, 1, 0, "No Slots Available");
+    cc_disconnect(cc);
+  }
   g_match_info_free(nfo);
 }
 
@@ -955,6 +963,8 @@ void cc_disconnect(struct cc *cc) {
   cc->timeout_src = g_timeout_add_seconds(60, handle_timeout, cc);
   g_free(cc->token);
   cc->token = NULL;
+  if(cc->dl && cc->uid)
+    dl_queue_userdisconnect(cc->uid);
 }
 
 
@@ -965,7 +975,7 @@ void cc_free(struct cc *cc) {
     g_source_remove(cc->timeout_src);
   if(ui_conn)
     ui_conn_listchange(cc->iter, UICONN_DEL);
-  if(cc->dl)
+  if(cc->dl && cc->uid)
     dl_queue_cc(cc->uid, NULL);
   g_sequence_remove(cc->iter);
   net_unref(cc->net);

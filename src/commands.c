@@ -485,6 +485,30 @@ static void set_download_dir(char *group, char *key, char *val) {
 }
 
 
+static void get_download_slots(char *group, char *key) {
+  ui_mf(NULL, 0, "%s.%s = %d", group, key, conf_download_slots());
+}
+
+
+static void set_download_slots(char *group, char *key, char *val) {
+  int oldval = conf_download_slots();
+  if(!val)
+    UNSET(group, key);
+  else {
+    long v = strtol(val, NULL, 10);
+    if((!v && errno == EINVAL) || v < INT_MIN || v > INT_MAX || v <= 0)
+      ui_m(NULL, 0, "Invalid number.");
+    else {
+      g_key_file_set_integer(conf_file, group, key, v);
+      conf_save();
+      get_download_slots(group, key);
+    }
+  }
+  if(conf_download_slots() > oldval)
+    dl_queue_startany();
+}
+
+
 // the settings list
 // TODO: help text / documentation?
 static struct setting settings[] = {
@@ -496,6 +520,7 @@ static struct setting settings[] = {
   { "connection",    NULL,     get_string,        set_userinfo,      NULL             },
   { "description",   NULL,     get_string,        set_userinfo,      NULL             },
   { "download_dir",  "global", get_download_dir,  set_download_dir,  path_suggest     },
+  { "download_slots","global", get_download_slots,set_download_slots,NULL,            },
   { "email",         NULL,     get_string,        set_userinfo,      NULL             },
   { "encoding",      NULL,     get_encoding,      set_encoding,      set_encoding_sug },
   { "hubname",       NULL,     get_hubname,       set_hubname,       NULL             }, // makes no sense in "global"

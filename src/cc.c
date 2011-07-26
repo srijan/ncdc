@@ -262,19 +262,6 @@ static struct cc *cc_check_dupe(struct cc *cc) {
 }
 
 
-// Returns the cc object of a connection with the specified user and marked for
-// downloading.
-struct cc *cc_get_uid_download(guint64 uid) {
-  GSequenceIter *i = g_sequence_get_begin_iter(cc_list);
-  for(; !g_sequence_iter_is_end(i); i=g_sequence_iter_next(i)) {
-    struct cc *c = g_sequence_get(i);
-    if(c->uid == uid && c->candl)
-      return c;
-  }
-  return NULL;
-}
-
-
 static gboolean request_slot(struct cc *cc, gboolean need_full) {
   int minislots;
   int slots = cc_slots_in_use(&minislots);

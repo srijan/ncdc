@@ -121,6 +121,9 @@ struct dl *dl_queue_next(guint64 uid) {
 }
 
 
+// Try to start the download for a specific dl item. Called from
+// dl_queue_uchange() (when we're not connected to a user, yet have something
+// queued) or dl_queue_insert() (when a new item has been inserted).
 static void dl_queue_start(struct dl *dl) {
   g_return_if_fail(dl && dl->u);
   if(dl->u->expect)
@@ -138,8 +141,8 @@ static void dl_queue_start(struct dl *dl) {
   struct hub_user *u = g_hash_table_lookup(hub_uids, &dl->u->uid);
   if(!u)
     return;
-  g_debug("dl:%016"G_GINT64_MODIFIER"x: trying to open a connection", u->uid);
   // try to open a C-C connection
+  g_debug("dl:%016"G_GINT64_MODIFIER"x: trying to open a connection", u->uid);
   hub_opencc(u->hub, u);
 }
 
@@ -165,7 +168,6 @@ static void dl_queue_insert(struct dl *dl, guint64 uid, gboolean init) {
     dl->u = g_slice_new0(struct dl_user);
     dl->u->uid = uid;
     g_hash_table_insert(queue_users, &dl->u->uid, dl->u);
-    dl->u->cc = cc_get_uid_download(uid);
   }
   dl->u->queue = g_slist_insert_sorted(dl->u->queue, dl, dl_user_queue_sort_func);
   // insert in the global queue
@@ -206,6 +208,20 @@ static void dl_queue_insert(struct dl *dl, guint64 uid, gboolean init) {
 }
 
 
+// Called on either dl_queue_expect(), dl_queue_cc(), dl_queue_useronline() or
+// dl_queue_rm().  Removes the dl_user struct if we're not connected and
+// nothing is queued, and tries to start a connection if we're not connected
+// but something is queued.
+static void dl_queue_uchange(struct dl_user *du) {
+  if(!du->expect && !du->cc && du->queue)
+    dl_queue_start(du->queue->data); // TODO: this only works with single-source downloading
+  else if(!du->expect && !du->cc && !du->queue) {
+    g_hash_table_remove(queue_users, &du->uid);
+    g_slice_free(struct dl_user, du);
+  }
+}
+
+
 // removes an item from the queue
 void dl_queue_rm(struct dl *dl) {
   // close the incomplete file, in case it's still open
@@ -216,10 +232,7 @@ void dl_queue_rm(struct dl *dl) {
     unlink(dl->inc);
   // update and optionally remove dl_user struct
   dl->u->queue = g_slist_remove(dl->u->queue, dl);
-  if(!dl->u->queue) {
-    g_hash_table_remove(queue_users, &dl->u->uid);
-    g_slice_free(struct dl_user, dl->u);
-  }
+  dl_queue_uchange(dl->u);
   // remove from the data file
   if(!dl->islist) {
     char key[25];
@@ -256,8 +269,7 @@ void dl_queue_expect(guint64 uid, struct cc_expect *e) {
   if(!du)
     return;
   du->expect = e;
-  if(!e && !du->cc)
-    dl_queue_start(du->queue->data); // TODO: this only works with single-source downloading
+  dl_queue_uchange(du);
 }
 
 
@@ -272,8 +284,7 @@ void dl_queue_cc(guint64 uid, struct cc *cc) {
   if(!du)
     return;
   du->cc = cc;
-  if(!cc && !du->expect)
-    dl_queue_start(du->queue->data); // TODO: this only works with single-source downloading
+  dl_queue_uchange(du);
 }
 
 
@@ -281,8 +292,8 @@ void dl_queue_cc(guint64 uid, struct cc *cc) {
 // get from that user.
 void dl_queue_useronline(guint64 uid) {
   struct dl_user *du = g_hash_table_lookup(queue_users, &uid);
-  if(du && !du->cc && !du->expect)
-    dl_queue_start(du->queue->data); // TODO: this only works with single-source downloading
+  if(du)
+    dl_queue_uchange(du);
 }
 
 

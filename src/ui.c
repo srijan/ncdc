@@ -534,7 +534,7 @@ static void ui_userlist_draw(struct ui_tab *tab) {
   mvaddstr(bottom, 0, "Totals:");
   g_snprintf(tmp, 200, "%s%c   %d users",
     str_formatsize(tab->hub->sharesize), tab->hub->sharecount == count ? ' ' : '+', count);
-  mvaddstr(bottom, o.cw_user+2, tmp);
+  mvaddstr(bottom, o.cw_user+5, tmp);
   g_snprintf(tmp, 200, "%3d%%", pos);
   mvaddstr(bottom, wincols-6, tmp);
   attroff(A_REVERSE);
@@ -785,15 +785,15 @@ static void ui_conn_draw_row(struct ui_listing *list, GSequenceIter *iter, int r
   mvaddstr(row, 49, tmp);
 
   if(cc->err) {
-    mvaddstr(row, 56, "Disconnected: ");
-    addnstr(cc->err->message, str_offset_from_columns(cc->err->message, wincols-(56+14)));
+    mvaddstr(row, 57, "Disconnected: ");
+    addnstr(cc->err->message, str_offset_from_columns(cc->err->message, wincols-(57+14)));
   } else if(cc->last_file) {
     char *file = rindex(cc->last_file, '/');
     if(file)
       file++;
     else
       file = cc->last_file;
-      mvaddnstr(row, 56, file, str_offset_from_columns(file, wincols-56));
+      mvaddnstr(row, 57, file, str_offset_from_columns(file, wincols-57));
   }
 }
 
@@ -876,7 +876,7 @@ static void ui_conn_draw() {
   mvaddstr(1, 20, "Hub");
   mvaddstr(1, 32, "Chunk          %");
   mvaddstr(1, 49, " KiB/s");
-  mvaddstr(1, 56, "File");
+  mvaddstr(1, 57, "File");
   attroff(A_BOLD);
 
   int bottom = ui_conn->details ? winrows-11 : winrows-3;

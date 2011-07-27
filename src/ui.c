@@ -1211,6 +1211,7 @@ struct ui_tab *ui_dl_create() {
 
 void ui_dl_close() {
   ui_tab_remove(ui_dl);
+  g_sequence_free(ui_dl->list->list);
   ui_listing_free(ui_dl->list);
   g_free(ui_dl);
   ui_dl = NULL;

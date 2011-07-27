@@ -45,11 +45,21 @@ struct dl_user {
 };
 
 
+#define DLP_ERR   -65 // disabled due to (permanent) error
+#define DLP_OFF   -64 // disabled by user
+#define DLP_VLOW   -2
+#define DLP_LOW    -1
+#define DLP_MED     0
+#define DLP_HIGH    1
+#define DLP_VHIGH   2
+
+
 struct dl {
-  char hash[24]; // TTH for files, tiger(uid) for filelists
-  gboolean islist;
-  struct dl_user *u; // user who has this file (should be a list for multi-source downloading)
+  gboolean islist : 1;
+  char prio;    // DLP_*
   int incfd;    // file descriptor for this file in <conf_dir>/inc/
+  char hash[24]; // TTH for files, tiger(uid) for filelists
+  struct dl_user *u; // user who has this file (should be a list for multi-source downloading)
   guint64 size; // total size of the file
   guint64 have; // what we have so far
   char *inc;    // path to the incomplete file (/inc/<base32-hash>)
@@ -67,7 +77,7 @@ static GDBM_FILE dl_dat;
 // startup on the incomplete file to get this information. We'd still need some
 // progress indication in the data file in the future, to indicate which parts
 // have been TTH-checked, etc.
-#define DLDAT_INFO  0 // <8 bytes: size><8 bytes: reserved><zero-terminated-string: destination>
+#define DLDAT_INFO  0 // <8 bytes: size><1 byte: prio><7 bytes: reserved><zero-terminated-string: destination>
 #define DLDAT_USERS 1 // <8 bytes: amount(=1)><8 bytes: uid>
 
 static int dl_dat_needsync = FALSE;
@@ -107,7 +117,7 @@ static gboolean dl_dat_sync_do(gpointer dat) {
 // item for downloading and sets this user as 'active'.
 struct dl *dl_queue_next(guint64 uid) {
   struct dl_user *du = g_hash_table_lookup(queue_users, &uid);
-  if(!du || !du->queue) {
+  if(!du || !du->queue || ((struct dl *)du->queue->data)->prio <= DLP_OFF) {
     if(du->active)
       queue_users_active--;
     du->active = FALSE;
@@ -146,6 +156,9 @@ struct dl *dl_queue_next(guint64 uid) {
 // queued) or dl_queue_insert() (when a new item has been inserted).
 static void dl_queue_start(struct dl *dl) {
   g_return_if_fail(dl && dl->u);
+  // Don't even try if it is marked as disabled
+  if(dl->prio <= DLP_OFF)
+    return;
   // If we don't have download slots, then just forget it.
   if(queue_users_active >= conf_download_slots())
     return;
@@ -184,7 +197,7 @@ void dl_queue_startany() {
   while(n > 0 && g_hash_table_iter_next(&iter, NULL, (gpointer *)&du)) {
     // Don't consider any user from which are actively downloading, or from
     // which we have nothing to donwload.
-    if(du->active || !du->queue)
+    if(du->active || !du->queue || ((struct dl *)du->queue->data)->prio <= DLP_OFF)
       continue;
     if(// Case 1: We are still connected to a user, in idle state.
       (du->cc && du->cc->net->conn && du->cc->candl) ||
@@ -203,7 +216,40 @@ void dl_queue_startany() {
 static gint dl_user_queue_sort_func(gconstpointer a, gconstpointer b) {
   const struct dl *x = a;
   const struct dl *y = b;
-  return x->islist && !y->islist ? -1 : !x->islist && y->islist ? 1 : strcmp(x->dest, y->dest);
+  return
+      x->islist && !y->islist ? -1 : !x->islist && y->islist ? 1
+    : x->prio > y->prio ? -1 : x->prio < y->prio ? 1
+    : strcmp(x->dest, y->dest);
+}
+
+
+static void dl_dat_saveinfo(struct dl *dl) {
+  char key[25];
+  key[0] = DLDAT_INFO;
+  memcpy(key+1, dl->hash, 24);
+  datum keydat = { key, 25 };
+
+  guint64 size = GINT64_TO_LE(dl->size);
+  int len = 16 + strlen(dl->dest) + 1;
+  char nfo[len];
+  memset(nfo, 0, len);
+  memcpy(nfo, &size, 8);
+  nfo[8] = dl->prio;
+  // bytes 9-15 are reserved, and initialized to zero
+  strcpy(nfo+16, dl->dest);
+  datum val = { nfo, len };
+
+  gdbm_store(dl_dat, keydat, val, GDBM_REPLACE);
+  dl_dat_sync();
+}
+
+
+void dl_queue_setprio(struct dl *dl, char prio) {
+  dl->prio = prio;
+  dl_dat_saveinfo(dl);
+  // Make sure dl->u->queue is still in the correct order
+  dl->u->queue = g_slist_remove(dl->u->queue, dl);
+  dl->u->queue = g_slist_insert_sorted(dl->u->queue, dl, dl_user_queue_sort_func);
 }
 
 
@@ -228,27 +274,14 @@ static void dl_queue_insert(struct dl *dl, guint64 uid, gboolean init) {
 
   // insert in the data file
   if(!dl->islist && !init) {
+    dl_dat_saveinfo(dl);
+
     char key[25];
-    datum keydat = { key, 25 };
-    datum val;
-    memcpy(key+1, dl->hash, 24);
-
-    key[0] = DLDAT_INFO;
-    guint64 size = GINT64_TO_LE(dl->size);
-    int nfovallen = 16 + strlen(dl->dest) + 1;
-    char nfo[nfovallen];
-    memset(nfo, 0, nfovallen);
-    memcpy(nfo, &size, 8);
-    // bytes 8-15 are reserved, and initialized to zero
-    memcpy(nfo+16, dl->dest, strlen(dl->dest));
-    val.dptr = nfo;
-    val.dsize = nfovallen;
-    gdbm_store(dl_dat, keydat, val, GDBM_REPLACE);
-
     key[0] = DLDAT_USERS;
+    memcpy(key+1, dl->hash, 24);
     guint64 users[2] = { GINT64_TO_LE(1), GINT64_TO_LE(uid) };
-    val.dptr = (char *)users;
-    val.dsize = 2*8;
+    datum keydat = { key, 25 };
+    datum val = { (char *)users, 2*8 };
     gdbm_store(dl_dat, keydat, val, GDBM_REPLACE);
     dl_dat_sync();
   }
@@ -547,6 +580,7 @@ static void dl_queue_loaditem(char *hash) {
   memcpy(dl->hash, hash, 24);
   memcpy(&dl->size, nfo.dptr, 8);
   dl->size = GINT64_FROM_LE(dl->size);
+  dl->prio = nfo.dptr[8];
   dl->dest = g_strdup(nfo.dptr+16);
 
   // get size of the incomplete file

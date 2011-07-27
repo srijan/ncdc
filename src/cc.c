@@ -609,6 +609,15 @@ static void adc_handle(struct cc *cc, char *msg) {
       // Make a "slots full" message fatal; dl.c assumes this behaviour.
       g_set_error_literal(&cc->err, 1, 0, "No Slots Available");
       cc_disconnect(cc);
+    } else if(cmd.argv[0][1] == '5' && (cmd.argv[0][2] == '1' || cmd.argv[0][2] == '2') && cc->candl) {
+      // File (Part) Not Available: notify dl.c
+      struct dl *dl = g_hash_table_lookup(dl_queue, cc->dl_hash);
+      if(dl)
+        dl_queue_setprio(dl, DLP_ERR);
+      if(cmd.argv[0][0] == '2')
+        cc_disconnect(cc);
+      else
+        cc_download(cc);
     } else if(cmd.argv[0][0] == '1' || cmd.argv[0][0] == '2') {
       g_set_error(&cc->err, 1, 0, "(%s) %s", cmd.argv[0], cmd.argv[1]);
       if(cmd.argv[0][0] == '2')
@@ -835,11 +844,18 @@ static void nmdc_handle(struct cc *cc, char *cmd) {
   if(g_regex_match(error, cmd, 0, &nfo)) { // 1 = message
     char *msg = g_match_info_fetch(nfo, 1);
     g_set_error(&cc->err, 1, 0, msg);
+    // Handle "File Not Available" and ".. no more exists"
+    if(cc->candl && (str_casestr(msg, "file not available") || str_casestr(msg, "no more exists"))) {
+      struct dl *dl = g_hash_table_lookup(dl_queue, cc->dl_hash);
+      if(dl)
+        dl_queue_setprio(dl, DLP_ERR);
+      cc_download(cc);
+    }
     g_free(msg);
-    // TODO: communicate a "File Not Available" error to the DL queue
   }
   g_match_info_free(nfo);
 
+  // $MaxedOut
   if(g_regex_match(maxedout, cmd, 0, &nfo)) {
     g_set_error_literal(&cc->err, 1, 0, "No Slots Available");
     cc_disconnect(cc);

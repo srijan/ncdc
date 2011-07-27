@@ -484,11 +484,8 @@ static void dl_finished(struct dl *dl) {
     g_error_free(err);
   }
   // open the file list
-  if(!err && dl->islist) {
-    struct ui_tab *t = ui_fl_create(dl->u->uid, TRUE);
-    if(t)
-      ui_tab_open(t, FALSE);
-  }
+  if(!err && dl->islist)
+    ui_tab_open(ui_fl_create(dl->u->uid), FALSE);
   // and remove from the queue
   dl_queue_rm(dl);
 }

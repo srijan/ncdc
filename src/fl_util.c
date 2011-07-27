@@ -579,6 +579,50 @@ struct fl_list *fl_load(const char *file, GError **err) {
 
 
 
+// Async version of fl_load(). Performs the load in a background thread.
+
+static GThreadPool *fl_load_pool = NULL;
+
+struct fl_load_async_dat {
+  char *file;
+  void (*cb)(struct fl_list *, GError *, void *);
+  void *dat;
+  GError *err;
+  struct fl_list *fl;
+};
+
+
+static gboolean fl_load_async_d(gpointer dat) {
+  struct fl_load_async_dat *arg = dat;
+  arg->cb(arg->fl, arg->err, arg->dat);
+  g_free(arg->file);
+  g_slice_free(struct fl_load_async_dat, arg);
+  return FALSE;
+}
+
+
+static void fl_load_async_f(gpointer dat, gpointer udat) {
+  struct fl_load_async_dat *arg = dat;
+  arg->fl = fl_load(arg->file, &arg->err);
+  g_idle_add(fl_load_async_d, arg);
+}
+
+
+// Ownership of both the file list and the error is passed to the callback
+// function.
+void fl_load_async(const char *file, void (*cb)(struct fl_list *, GError *, void *), void *dat) {
+  if(!fl_load_pool)
+    fl_load_pool = g_thread_pool_new(fl_load_async_f, NULL, 2, FALSE, NULL);
+  struct fl_load_async_dat *arg = g_slice_new0(struct fl_load_async_dat);
+  arg->file = g_strdup(file);
+  arg->dat = dat;
+  arg->cb = cb;
+  g_thread_pool_push(fl_load_pool, arg, NULL);
+}
+
+
+
+
 
 // Save a filelist to a .xml file
 

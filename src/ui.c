@@ -71,6 +71,8 @@ struct ui_tab {
   // FL
   struct fl_list *fl_list;
   char *fl_uname;
+  gboolean fl_loading;
+  GError *fl_err;
 };
 
 #endif
@@ -974,7 +976,7 @@ void ui_fl_queue(struct hub_user *u, gboolean force) {
 
   // open own list
   if(!u) {
-    ui_tab_open(ui_fl_create(0, FALSE), TRUE);
+    ui_tab_open(ui_fl_create(0), TRUE);
     return;
   }
 
@@ -987,50 +989,60 @@ void ui_fl_queue(struct hub_user *u, gboolean force) {
     g_free(fn);
     g_free(tmp);
   }
-  if(e) {
-    struct ui_tab *tab = ui_fl_create(uid, FALSE);
-    if(tab)
-      ui_tab_open(tab, TRUE);
-  } else {
+  if(e)
+    ui_tab_open(ui_fl_create(uid), TRUE);
+  else {
     dl_queue_addlist(u);
     ui_mf(NULL, 0, "File list of %s added to the download queue.", u->name);
   }
 }
 
 
-// File list is passed to this tab, and will be freed upon closing.
-struct ui_tab *ui_fl_create(guint64 uid, gboolean report_to_main) {
-  // get file list
-  struct fl_list *fl = NULL;
-  if(!uid)
-    fl = fl_local_list ? fl_list_copy(fl_local_list) : NULL;
-  else {
-    char *tmp = g_strdup_printf("%016"G_GINT64_MODIFIER"x.xml.bz2", uid);
-    char *fn = g_build_filename(conf_dir, "fl", tmp, NULL);
-    GError *err = NULL;
-    fl = fl_load(fn, &err);
-    g_free(fn);
-    if(err) {
-      ui_mf(report_to_main ? ui_main : NULL, 0, "Error loading %s: %s", tmp, err->message);
+static void ui_fl_loaddone(struct fl_list *fl, GError *err, void *dat) {
+  // If the tab has been closed, then we can ignore the result
+  if(!g_list_find(ui_tabs, dat)) {
+    if(fl)
+      fl_list_free(fl);
+    if(err)
       g_error_free(err);
-      g_free(tmp);
-      return NULL;
-    }
-    g_free(tmp);
+    return;
   }
+  // Otherwise, update state
+  struct ui_tab *tab = dat;
+  tab->fl_err = err;
+  tab->fl_list = fl;
+  tab->list = tab->fl_list && tab->fl_list->sub ? ui_listing_create(tab->fl_list->sub) : NULL;
+  tab->fl_loading = FALSE;
+  tab->prio = err ? UIP_HIGH : UIP_MED;
+}
 
+
+struct ui_tab *ui_fl_create(guint64 uid) {
   // get user
   struct hub_user *u = uid ? g_hash_table_lookup(hub_uids, &uid) : NULL;
 
   // create tab
   struct ui_tab *tab = g_new0(struct ui_tab, 1);
   tab->type = UIT_FL;
-  tab->prio = UIP_MED;
   tab->name = !uid ? g_strdup("/own") : u ? g_strdup_printf("/%s", u->name) : g_strdup_printf("/%016"G_GINT64_MODIFIER"x", uid);
-  tab->fl_list = fl;
   tab->fl_uname = u ? g_strdup(u->name) : NULL;
   tab->uid = uid;
-  tab->list = fl && fl->sub ? ui_listing_create(fl->sub) : NULL;
+
+  // get file list
+  if(!uid) {
+    tab->fl_list = fl_local_list ? fl_list_copy(fl_local_list) : NULL;
+    tab->list = tab->fl_list && tab->fl_list->sub ? ui_listing_create(tab->fl_list->sub) : NULL;
+    tab->prio = UIP_MED;
+  } else {
+    char *tmp = g_strdup_printf("%016"G_GINT64_MODIFIER"x.xml.bz2", uid);
+    char *fn = g_build_filename(conf_dir, "fl", tmp, NULL);
+    fl_load_async(fn, ui_fl_loaddone, tab);
+    g_free(tmp);
+    g_free(fn);
+    tab->prio = UIP_LOW;
+    tab->fl_loading = TRUE;
+  }
+
   return tab;
 }
 
@@ -1043,6 +1055,8 @@ void ui_fl_close(struct ui_tab *tab) {
     p = p->parent;
   if(p)
     fl_list_free(p);
+  if(tab->fl_err)
+    g_error_free(tab->fl_err);
   g_free(tab->name);
   g_free(tab->fl_uname);
   g_free(tab);
@@ -1090,7 +1104,11 @@ static void ui_fl_draw(struct ui_tab *tab) {
 
   // rows
   int pos = -1;
-  if(tab->fl_list && tab->fl_list->sub && g_sequence_iter_get_position(g_sequence_get_end_iter(tab->fl_list->sub)))
+  if(tab->fl_loading)
+    mvaddstr(3, 2, "Loading filelist...");
+  else if(tab->fl_err)
+    mvprintw(3, 2, "Error loading filelist: %s", tab->fl_err->message);
+  else if(tab->fl_list && tab->fl_list->sub && g_sequence_iter_get_position(g_sequence_get_end_iter(tab->fl_list->sub)))
     pos = ui_listing_draw(tab->list, 2, winrows-4, ui_fl_draw_row, NULL);
   else
     mvaddstr(3, 2, "Directory empty.");

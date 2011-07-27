@@ -170,6 +170,7 @@ struct cc {
   gboolean slot_granted : 1;
   gboolean dl : 1;
   gboolean candl : 1;  // if cc_download() has been called at least once
+  gboolean isdl : 1;   // if we're currently busy downloading something
   int dir;        // (NMDC) our direction. -1 = Upload, otherwise: Download $dir
   int state;      // (ADC)
   char cid[8];    // (ADC)
@@ -322,6 +323,7 @@ void cc_download(struct cc *cc) {
   cc->last_file = g_strdup(dl->islist ? "files.xml.bz2" : dl->dest);
   cc->last_offset = dl->have;
   cc->last_size = dl->size;
+  cc->isdl = TRUE;
 }
 
 
@@ -335,8 +337,10 @@ static void handle_recvfile(struct net *n, int read, char *buf, guint64 left) {
   if(!dl && left)
     cc_disconnect(cc);
   // check for more stuff to download
-  if(!left)
+  if(!left) {
+    cc->isdl = FALSE;
     cc_download(cc);
+  }
 }
 
 
@@ -979,6 +983,7 @@ void cc_disconnect(struct cc *cc) {
   cc->timeout_src = g_timeout_add_seconds(60, handle_timeout, cc);
   g_free(cc->token);
   cc->token = NULL;
+  cc->isdl = FALSE;
   if(cc->dl && cc->uid)
     dl_queue_userdisconnect(cc->uid);
 }

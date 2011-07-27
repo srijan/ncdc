@@ -410,8 +410,9 @@ static void fl_scan_dir(struct fl_list *parent, const char *path, gboolean inc_h
     }
     g_free(cpath);
     // and create the node
-    struct fl_list *cur = g_slice_new0(struct fl_list);
-    cur->name = confname;
+    struct fl_list *cur = g_malloc0(sizeof(struct fl_list)+strlen(confname)+1);
+    strcpy(cur->name, confname);
+    g_free(confname);
     if(S_ISREG(dat.st_mode)) {
       cur->isfile = TRUE;
       cur->size = dat.st_size;
@@ -442,7 +443,8 @@ static void fl_scan_thread(gpointer data, gpointer udata) {
 
   int i, len = g_strv_length(args->path);
   for(i=0; i<len; i++) {
-    struct fl_list *cur = g_slice_new0(struct fl_list);
+    struct fl_list *cur = g_malloc0(sizeof(struct fl_list)+1);
+    cur->name[0] = 0;
     char *tmp = g_filename_from_utf8(args->path[i], -1, NULL, NULL, NULL);
     cur->sub = g_sequence_new(fl_list_free);
     fl_scan_dir(cur, tmp, args->inc_hidden);
@@ -620,14 +622,15 @@ fl_hash_done_f:
 static struct fl_list *fl_refresh_getroot(const char *name) {
   // no root? create!
   if(!fl_local_list) {
-    fl_local_list = g_slice_new0(struct fl_list);
+    fl_local_list = g_malloc0(sizeof(struct fl_list)+1);
+    fl_local_list->name[0] = 0;
     fl_local_list->sub = g_sequence_new(fl_list_free);
   }
   struct fl_list *cur = fl_list_file(fl_local_list, name);
   // dir not present yet? create a stub
   if(!cur) {
-    cur = g_slice_new0(struct fl_list);
-    cur->name = g_strdup(name);
+    cur = g_malloc0(sizeof(struct fl_list)+strlen(name)+1);
+    strcpy(cur->name, name);
     cur->incomplete = TRUE;
     cur->sub = g_sequence_new(fl_list_free);
     fl_list_add(fl_local_list, cur);

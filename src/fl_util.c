@@ -39,8 +39,7 @@
 // file list
 
 struct fl_list {
-  char *name; // root = NULL
-  struct fl_list *parent;
+  struct fl_list *parent; // root = NULL
   GSequence *sub;
   guint64 size;   // including sub-items
   char tth[24];
@@ -48,6 +47,7 @@ struct fl_list {
   int hastth;     // for files: 1/0, directories: (number of directories) + (number of files with hastth==1)
   gboolean isfile : 1;
   gboolean incomplete : 1; // when a directory is missing files
+  char name[];
 };
 
 #endif
@@ -63,10 +63,9 @@ void fl_list_free(gpointer dat) {
   struct fl_list *fl = dat;
   if(!fl)
     return;
-  g_free(fl->name);
   if(fl->sub)
     g_sequence_free(fl->sub);
-  g_slice_free(struct fl_list, fl);
+  g_free(fl);
 }
 
 
@@ -120,8 +119,7 @@ void fl_list_remove(struct fl_list *fl) {
 
 
 struct fl_list *fl_list_copy(const struct fl_list *fl) {
-  struct fl_list *cur = g_slice_dup(struct fl_list, fl);
-  cur->name = g_strdup(fl->name);
+  struct fl_list *cur = g_memdup(fl, sizeof(struct fl_list)+strlen(fl->name)+1);
   cur->parent = NULL;
   if(fl->sub) {
     cur->sub = g_sequence_new(fl_list_free);
@@ -140,9 +138,9 @@ struct fl_list *fl_list_copy(const struct fl_list *fl) {
 
 // get a file by name in a directory
 struct fl_list *fl_list_file(const struct fl_list *dir, const char *name) {
-  struct fl_list cmp;
-  cmp.name = (char *)name;
-  GSequenceIter *iter = g_sequence_iter_prev(g_sequence_search(dir->sub, &cmp, fl_list_cmp, NULL));
+  struct fl_list *cmp = g_alloca(sizeof(struct fl_list)+strlen(name)+1);
+  strcpy(cmp->name, name);
+  GSequenceIter *iter = g_sequence_iter_prev(g_sequence_search(dir->sub, cmp, fl_list_cmp, NULL));
   return g_sequence_iter_is_end(iter)
     || strcmp(name, ((struct fl_list *)g_sequence_get(iter))->name) != 0 ? NULL : g_sequence_get(iter);
 }
@@ -296,7 +294,7 @@ int fl_search_rec(struct fl_list *parent, struct fl_search *s, struct fl_list **
   char *nand[o ? g_strv_length(o) : 0];
   int i = 0;
   for(; o&&*o; o++)
-    if(G_LIKELY(!parent->name || !str_casestr(parent->name, *o)))
+    if(G_LIKELY(!parent->parent || !str_casestr(parent->name, *o)))
       nand[i++] = *o;
   nand[i] = NULL;
   o = s->and;
@@ -324,7 +322,7 @@ gboolean fl_search_match_full(struct fl_list *fl, struct fl_search *s) {
   struct fl_list *p = fl->parent;
   int i;
   memcpy(nand, s->and, len*sizeof(char *));
-  for(; p && p->name; p=p->parent)
+  for(; p && p->parent; p=p->parent)
     for(i=0; i<len; i++)
       if(G_UNLIKELY(nand[i] && str_casestr(p->name, nand[i])))
         nand[i] = NULL;
@@ -440,8 +438,8 @@ static int fl_load_handle(xmlTextReaderPtr reader, gboolean *havefl, gboolean *n
         free(attr[0]);
         return -1;
       }
-      tmp = g_slice_new0(struct fl_list);
-      tmp->name = g_strdup(attr[0]);
+      tmp = g_malloc0(sizeof(struct fl_list)+strlen(attr[0])+1);
+      strcpy(tmp->name, attr[0]);
       tmp->isfile = FALSE;
       tmp->incomplete = attr[1] && attr[1][0] == '1';
       tmp->sub = g_sequence_new(fl_list_free);
@@ -467,8 +465,8 @@ static int fl_load_handle(xmlTextReaderPtr reader, gboolean *havefl, gboolean *n
         free(attr[1]);
         return -1;
       }
-      tmp = g_slice_new0(struct fl_list);
-      tmp->name = g_strdup(attr[0]);
+      tmp = g_malloc0(sizeof(struct fl_list)+strlen(attr[0])+1);
+      strcpy(tmp->name, attr[0]);
       tmp->isfile = TRUE;
       tmp->size = g_ascii_strtoull(attr[1], NULL, 10);
       tmp->hastth = 1;
@@ -554,7 +552,8 @@ struct fl_list *fl_load(const char *file, GError **err) {
   gboolean havefl = FALSE, newdir = TRUE;
   int ret;
 
-  root = g_slice_new0(struct fl_list);
+  root = g_malloc0(sizeof(struct fl_list)+1);
+  root->name[0] = 0;
   root->sub = g_sequence_new(fl_list_free);
   cur = root;
 

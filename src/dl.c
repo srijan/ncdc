@@ -40,7 +40,7 @@ struct dl_user {
   guint64 uid;
   struct cc_expect *expect;
   struct cc *cc;
-  GSList *queue; // ordered list of struct dl's. First item = active. (TODO: GSequence for performance?)
+  GSList *queue; // ordered list of struct dl's. (TODO: GSequence for performance?)
   gboolean active; // whether we're currently downloading or not. (i.e. whether this user is occupying a download slot)
 };
 
@@ -91,6 +91,10 @@ GHashTable *dl_queue = NULL;
 static GHashTable *queue_users = NULL;
 
 
+// Cached value. Should be equivalent to the number of items in the queue_users
+// table where active = TRUE.
+static int queue_users_active = 0;
+
 
 static gboolean dl_dat_sync_do(gpointer dat) {
   gdbm_sync(dl_dat);
@@ -99,24 +103,13 @@ static gboolean dl_dat_sync_do(gpointer dat) {
 }
 
 
-// Number of active downloads. (Can be cached to increase performance)
-static int dl_num_active() {
-  int n = 0;
-  struct dl_user *du;
-  GHashTableIter iter;
-  g_hash_table_iter_init(&iter, queue_users);
-  while(g_hash_table_iter_next(&iter, NULL, (gpointer *)&du))
-    if(du->active)
-      n++;
-  return n;
-}
-
-
 // Returns the first item in the download queue for this user, prepares the
 // item for downloading and sets this user as 'active'.
 struct dl *dl_queue_next(guint64 uid) {
   struct dl_user *du = g_hash_table_lookup(queue_users, &uid);
   if(!du || !du->queue) {
+    if(du->active)
+      queue_users_active--;
     du->active = FALSE;
     // Nothing more for this user, check for other users.
     dl_queue_startany();
@@ -126,8 +119,10 @@ struct dl *dl_queue_next(guint64 uid) {
   // If we weren't downloading from this user yet, check that we can start a
   // new download. If we can't, it means we accidentally connected to this
   // user... let the connection idle.
-  if(!du->active && dl_num_active() >= conf_download_slots())
+  if(!du->active && queue_users_active >= conf_download_slots())
     return NULL;
+  if(!du->active)
+    queue_users_active++;
   du->active = TRUE;
 
   // For filelists: Don't allow resuming of the download. It could happen that
@@ -152,7 +147,7 @@ struct dl *dl_queue_next(guint64 uid) {
 static void dl_queue_start(struct dl *dl) {
   g_return_if_fail(dl && dl->u);
   // If we don't have download slots, then just forget it.
-  if(dl_num_active() >= conf_download_slots())
+  if(queue_users_active >= conf_download_slots())
     return;
   // If we expect an incoming connection, then things will resolve itself automatically.
   if(dl->u->expect)
@@ -180,7 +175,7 @@ static void dl_queue_start(struct dl *dl) {
 // start a new download.
 // TODO: Prioritize downloads according do dl_user_queue_sort_func()?
 void dl_queue_startany() {
-  int n = conf_download_slots() - dl_num_active();
+  int n = conf_download_slots() - queue_users_active;
   if(n < 1)
     return;
   struct dl_user *du;
@@ -359,6 +354,8 @@ void dl_queue_useronline(guint64 uid) {
 void dl_queue_userdisconnect(guint64 uid) {
   struct dl_user *du = g_hash_table_lookup(queue_users, &uid);
   if(du) {
+    if(du->active)
+      queue_users_active--;
     du->active = FALSE;
     dl_queue_startany();
   }

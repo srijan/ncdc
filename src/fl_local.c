@@ -477,6 +477,27 @@ struct fl_hash_args {
   int resetnum;      // used by hash thread to validate that *file is still in the queue
 };
 
+// Maximum number of levels, including root (level 0).  The ADC docs specify
+// that this should be at least 7, and everyone else uses 10. Since keeping 10
+// levels of hash data does eat up more space than I'd be willing to spend on
+// it, let's use 8.
+#if INTERFACE
+#define fl_hash_keep_level 8
+#endif
+/* Space requirements per file for different levels (in bytes, min - max) and
+ * the block size of a 1GiB file.
+ *
+ * 10  6144 - 12288    2 MiB
+ *  9  3072 -  6144    4 MiB
+ *  8  1536 -  3072    8 MiB
+ *  7   768 -  1536   16 MiB
+ *  6   384 -   768   32 MiB
+ */
+
+// there's no need for better granularity than this
+#define fl_hash_max_granularity G_GUINT64_CONSTANT(64 * 1024)
+
+
 
 // adding/removing items from the files-to-be-hashed queue
 #define fl_hash_queue_append(fl) do {\
@@ -516,33 +537,61 @@ static void fl_hash_thread(gpointer data, gpointer udata) {
     goto fl_hash_finish;
   }
 
-  tth_init(&tth, args->filesize);
+  // Initialize some stuff
+  args->blocksize = tth_blocksize(args->filesize, 1<<(fl_hash_keep_level-1));
+  args->blocksize = MAX(args->blocksize, fl_hash_max_granularity);
+  int blocks_num = tth_num_blocks(args->filesize, args->blocksize);
+  args->blocks = g_malloc(24*blocks_num);
+  tth_init(&tth);
+
   int r;
+  guint64 read = 0;
+  int block_cur = 0;
+  guint64 block_len = 0;
+
   while((r = fread(buf, 1, 10240, f)) > 0) {
+    read += r;
     // no need to hash any further? quit!
     if(g_atomic_int_get(&fl_hash_reset) != args->resetnum)
       goto fl_hash_finish;
     // file has been modified. time to back out
-    if(tth.totalsize+(guint64)r > args->filesize) {
+    if(read > args->filesize) {
       g_set_error_literal(&(args->err), 1, 0, "File has been modified.");
       goto fl_hash_finish;
     }
-    tth_update(&tth, buf, r);
     ratecalc_add(&fl_hash_rate, r);
+    // and hash
+    char *b = buf;
+    while(r > 0) {
+      int w = MIN(r, args->blocksize-block_len);
+      tth_update(&tth, b, w);
+      block_len += w;
+      b += w;
+      r -= w;
+      if(block_len >= args->blocksize) {
+        tth_final(&tth, args->blocks+(block_cur*24));
+        tth_init(&tth);
+        block_cur++;
+        block_len = 0;
+      }
+    }
   }
   if(ferror(f)) {
     g_set_error(&(args->err), 1, 0, "Error reading file: %s", g_strerror(errno));
     goto fl_hash_finish;
   }
-  if(tth.totalsize != args->filesize) {
+  if(read != args->filesize) {
     g_set_error_literal(&(args->err), 1, 0, "File has been modified.");
     goto fl_hash_finish;
   }
-
-  tth_final(&tth, args->root);
-  args->blocksize = tth.blocksize;
-  g_warn_if_fail(tth.lastblock == tth_num_blocks(args->filesize, tth.blocksize));
-  args->blocks = g_memdup(tth.blocks, tth.lastblock*24);
+  // Calculate last block
+  if(!args->filesize || block_len) {
+    tth_final(&tth, args->blocks+(block_cur*24));
+    block_cur++;
+  }
+  g_return_if_fail(block_cur == blocks_num);
+  // Calculate root hash
+  tth_root(args->blocks, blocks_num, args->root);
 
 fl_hash_finish:
   if(f)
@@ -602,8 +651,7 @@ static gboolean fl_hash_done(gpointer dat) {
   fl_needflush = TRUE;
 
 fl_hash_done_f:
-  if(args->blocks)
-    g_free(args->blocks);
+  g_free(args->blocks);
   g_free(args->path);
   g_free(args);
   // Hash next file in the queue

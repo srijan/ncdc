@@ -270,50 +270,28 @@ void tiger_final(struct tiger_ctx *ctx, char result[24]) {
 
 #if INTERFACE
 
-// Maximum number of levels, including root (level 0).  The ADC docs specify
-// that this should be at least 7, and everyone else uses 10. Since keeping 10
-// levels of hash data does eat up more space than I'd be willing to spend on
-// it, let's use 8.
-#define tth_keep_level 8
-/* Space requirements per file for different levels (in bytes, min - max) and
- * the block size of a 1GiB file.
- *
- * 10  6144 - 12288    2 MiB
- *  9  3072 -  6144    4 MiB
- *  8  1536 -  3072    8 MiB
- *  7   768 -  1536   16 MiB
- *  6   384 -   768   32 MiB
- */
-
-
-// this struct is fairly large, be careful with allocation on the stack
 struct tth_ctx {
   struct tiger_ctx tiger;
-  guint64 totalsize;
-  guint64 blocksize;
-  guint64 leafnum;
-  // These arrays should be aligned to 64 bits (for performance)
-  // Blocks in the level we're interested in
-  char blocks[1 << (tth_keep_level-1)][24];
-  // Stack used to calculate the above blocks and the final root
-  //  Max. filesize = 2^(39+6) ~ 32 TiB
+  int leafnum; // There can be 2^29 leafs. Fits in an integer.
+  int gotfirst;
+  // Stack used to calculate the hash.
+  //  Max. size = 2^29 * 1024 = 512 GiB
   // When the stack starts with a leaf node, the position in the stack
   // determines the data size the hash represents:
   //   size = tth_base_block << pos
   // (pos being the index from 0)
-  char stack[39][24];
-  int lastblock;
+  char stack[29][24];
 };
 
+
+// Calculate the number of blocks when the filesize and blocksize are known.
+// = max(1, ceil(fs/bs))
 #define tth_num_blocks(fs, bs) MAX(((fs)+(bs)-1)/(bs), 1)
 
 #endif
 
 
-#define tth_base_block G_GUINT64_CONSTANT(1024)
-
-// there's no need for better granularity than this
-#define tth_max_granularity G_GUINT64_CONSTANT(64 * 1024)
+#define tth_base_block 1024
 
 
 #define tth_new_leaf(ctx) do {\
@@ -332,34 +310,16 @@ struct tth_ctx {
   } while(0)
 
 
-// the assertion can actually fail when tth_update() gets more data than
-// specified in tth_init(), which can actually happen when a file has grown
-// after stat()ing it...
-#define tth_add_block(ctx, msg) do {\
-    g_assert((ctx)->lastblock < (1<<(tth_keep_level-1)));\
-    memcpy((ctx)->blocks[(ctx)->lastblock++], msg, 24);\
-  } while(0)
-
-
-void tth_init(struct tth_ctx *ctx, guint64 filesize) {
+void tth_init(struct tth_ctx *ctx) {
   tth_new_leaf(ctx);
-  ctx->totalsize = 0;
-  ctx->lastblock = 0;
-  ctx->leafnum = 0;
-
-  // Calculate the requested block size. Based on MerkleTree::calcBlockSize()
-  // in DC++
-  ctx->blocksize = tth_base_block;
-  while((ctx->blocksize << (tth_keep_level-1)) < filesize)
-    ctx->blocksize <<= 1;
-  ctx->blocksize = MAX(ctx->blocksize, tth_max_granularity);
+  ctx->leafnum = ctx->gotfirst = 0;
 }
 
 
-static int tth_stack_leaf(struct tth_ctx *ctx, const char *leaf) {
+void tth_update_leaf(struct tth_ctx *ctx, const char *leaf) {
   int pos = 0;
   char tmp[24];
-  guint64 it;
+  int it;
   memcpy(tmp, leaf, 24);
   // This trick uses the leaf number to determine when it needs to combine
   // with a previous hash (idea borrowed from RHash)
@@ -369,40 +329,25 @@ static int tth_stack_leaf(struct tth_ctx *ctx, const char *leaf) {
   }
   memcpy(ctx->stack[pos], tmp, 24);
   ctx->leafnum++;
-  return pos;
-}
-
-
-static void tth_add_leaf(struct tth_ctx *ctx, char *leaf) {
-  // leaf size = block size? add it as a block
-  if(ctx->blocksize == tth_base_block)
-    tth_add_block(ctx, leaf);
-  // otherwise, use the stack to generate a block of the correct size
-  else {
-    int pos = tth_stack_leaf(ctx, leaf);
-    // if we have enough base leaves for a new block, copy block and reset stack
-    if((tth_base_block << pos) == ctx->blocksize) {
-      tth_add_block(ctx, ctx->stack[pos]);
-      ctx->leafnum = 0;
-    }
-  }
+  ctx->gotfirst = 1;
 }
 
 
 void tth_update(struct tth_ctx *ctx, const char *msg, size_t len) {
   char leaf[24];
   int left;
-  ctx->totalsize += len;
+  if(len > 0)
+    ctx->gotfirst = 1;
   while(len > 0) {
     left = MIN(tth_base_block - (ctx->tiger.length-1), len);
-    tiger_update(&(ctx->tiger), msg, left);
+    tiger_update(&ctx->tiger, msg, left);
     len -= left;
     msg += left;
     g_assert(ctx->tiger.length-1 <= tth_base_block);
     // we've got a new base leaf
     if(ctx->tiger.length-1 == tth_base_block) {
-      tiger_final(&(ctx->tiger), leaf);
-      tth_add_leaf(ctx, leaf);
+      tiger_final(&ctx->tiger, leaf);
+      tth_update_leaf(ctx, leaf);
       tth_new_leaf(ctx);
     }
   }
@@ -427,34 +372,42 @@ static void tth_stack_final(struct tth_ctx *ctx, char *result) {
   }
   if(last != result)
     memcpy(result, last, 24);
-  ctx->leafnum = 0;
 }
 
 
-/* The root hash will be written to result (24 bytes). The block hashes can be
- * fetched from ctx->blocks, containing ctx->lastblock hashes. */
 void tth_final(struct tth_ctx *ctx, char *result) {
-  char msg[24];
-
   // finish up last leaf
-  if(!ctx->totalsize || ctx->tiger.length > 1) {
-    tiger_final(&(ctx->tiger), msg);
-    tth_add_leaf(ctx, msg);
+  if(!ctx->gotfirst || ctx->tiger.length > 1) {
+    tiger_final(&ctx->tiger, result);
+    tth_update_leaf(ctx, result);
   }
 
-  // finish up last block
-  if(ctx->leafnum) {
-    tth_stack_final(ctx, msg);
-    tth_add_block(ctx, msg);
-  }
-
-  // calculate root hash
-  int i;
-  for(i=0; i<ctx->lastblock; i++)
-    tth_stack_leaf(ctx, ctx->blocks[i]);
+  // calculate final hash
   tth_stack_final(ctx, result);
 }
 
+
+
+// Calculate the root from a list of leaf/intermetiate hashes. All hashes must
+// be at the same level.
+void tth_root(char *blocks, int num, char *result) {
+  struct tth_ctx t;
+  tth_init(&t);
+  int i;
+  for(i=0; i<num; i++)
+    tth_update_leaf(&t, blocks+(24*i));
+  tth_final(&t, result);
+}
+
+
+// Calculate the blocksize when the filesize and number of blocks are known.
+// To get the block size at a particular level, call with blocks = 1<<(level-1).
+guint64 tth_blocksize(guint64 fs, int blocks) {
+  guint64 r = tth_base_block;
+  while((r * blocks) < fs)
+    r <<= 1;
+  return r;
+}
 
 
 

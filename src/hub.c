@@ -663,11 +663,11 @@ static void adc_sch(struct hub *hub, struct adc_cmd *cmd) {
     return;
 
   // Actually matching the tree depth is rather resouce-intensive, since we
-  // don't store it in struct fl_list. Instead, just assume tth_keep_level for
-  // everything. This may be wrong, but if it is, it's most likely to be a
+  // don't store it in struct fl_list. Instead, just assume fl_hash_keep_level
+  // for everything. This may be wrong, but if it is, it's most likely to be a
   // pessimistic estimate, which happens in the case TTH data is converted from
   // a DC++ client to ncdc.
-  if(td && strtoll(td, NULL, 10) > tth_keep_level)
+  if(td && strtoll(td, NULL, 10) > fl_hash_keep_level)
     return;
 
   if(tr && strlen(tr) != 39)

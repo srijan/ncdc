@@ -1284,8 +1284,15 @@ static void ui_dl_draw_row(struct ui_listing *list, GSequenceIter *iter, int row
   if(dl->size)
     g_snprintf(tmp, 99, "%3d%%", (int) ((dl->have*100)/dl->size));
   else
-    strcpy(tmp, "  -");
+    strcpy(tmp, " -");
   mvaddstr(row, 47, tmp);
+
+  if(dl->prio == DLP_ERR)
+    mvaddstr(row, 53, " ERR");
+  else if(dl->prio == DLP_OFF)
+    mvaddstr(row, 53, " OFF");
+  else
+    mvprintw(row, 53, "%3d", dl->prio);
 
   if(dl->islist)
     mvaddstr(row, 59, "files.xml.bz2");
@@ -1305,7 +1312,8 @@ static void ui_dl_draw() {
   mvaddstr(1, 2,  "User");
   mvaddstr(1, 22, "Hub");
   mvaddstr(1, 36, "Size");
-  mvaddstr(1, 47, "Progress");
+  mvaddstr(1, 47, "Done");
+  mvaddstr(1, 53, "Prio");
   mvaddstr(1, 59, "File");
   attroff(A_BOLD);
 
@@ -1362,6 +1370,23 @@ static void ui_dl_key(guint64 key) {
       // cc->iter should be valid at this point
       ui_conn->list->sel = sel->u->cc->iter;
     }
+    break;
+  case INPT_CHAR('+'): // +
+  case INPT_CHAR('='): // = - increase priority
+    if(!sel)
+      ui_m(NULL, 0, "Nothing selected.");
+    else if(sel->prio >= 2)
+      ui_m(NULL, 0, "Already set to highest priority.");
+    else
+      dl_queue_setprio(sel, sel->prio == DLP_ERR ? 0 : sel->prio == DLP_OFF ? -2 : sel->prio+1);
+    break;
+  case INPT_CHAR('-'): // - - decrease priority
+    if(!sel)
+      ui_m(NULL, 0, "Nothing selected.");
+    else if(sel->prio <= DLP_OFF)
+      ui_m(NULL, 0, "Item already disabled.");
+    else
+      dl_queue_setprio(sel, sel->prio == -2 ? DLP_OFF : sel->prio-1);
     break;
   }
 }

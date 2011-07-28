@@ -151,9 +151,10 @@ struct dl *dl_queue_next(guint64 uid) {
 }
 
 
-// Try to start the download for a specific dl item. Called from
-// dl_queue_uchange() (when we're not connected to a user, yet have something
-// queued) or dl_queue_insert() (when a new item has been inserted).
+// Try to start the download for a specific dl item. Called from:
+// - dl_queue_uchange() when we're not connected to a user, yet have something queued
+// - dl_queue_insert()  when a new item has been inserted
+// - dl_queue_setprio() when an item has been enabled
 static void dl_queue_start(struct dl *dl) {
   g_return_if_fail(dl && dl->u);
   // Don't even try if it is marked as disabled
@@ -245,11 +246,15 @@ static void dl_dat_saveinfo(struct dl *dl) {
 
 
 void dl_queue_setprio(struct dl *dl, char prio) {
+  gboolean enabled = dl->prio <= DLP_OFF && prio > DLP_OFF;
   dl->prio = prio;
   dl_dat_saveinfo(dl);
   // Make sure dl->u->queue is still in the correct order
   dl->u->queue = g_slist_remove(dl->u->queue, dl);
   dl->u->queue = g_slist_insert_sorted(dl->u->queue, dl, dl_user_queue_sort_func);
+  // Start the download if it is enabled
+  if(enabled)
+    dl_queue_start(dl);
 }
 
 

@@ -576,7 +576,6 @@ void dl_received(struct dl *dl, int length, char *buf) {
 
 // Called when we've received TTHL data. For now we'll just store it dl.dat
 // without modifications.
-// TODO: verify correctness with root hash.
 // TODO: combine hashes to remove uneeded granularity. (512kB is probably enough)
 void dl_settthl(struct dl *dl, char *tthl, int len) {
   g_return_if_fail(!dl->islist);
@@ -585,9 +584,18 @@ void dl_settthl(struct dl *dl, char *tthl, int len) {
   // can't happen, but it may be possible with multisource downloading.
   g_return_if_fail(!dl->hastthl);
 
-  g_debug("dl:%016"G_GINT64_MODIFIER"x: Received TTHL data for %s (len = %d)", dl->u->uid, dl->dest, len);
-  dl->hastthl = TRUE;
+  g_debug("dl:%016"G_GINT64_MODIFIER"x: Received TTHL data for %s (len = %d, bs = %"G_GUINT64_FORMAT")", dl->u->uid, dl->dest, len, tth_blocksize(dl->size, len/24));
 
+  // Validate correctness with the root hash
+  char root[24];
+  tth_root(tthl, len/24, root);
+  if(memcmp(root, dl->hash, 24) != 0) {
+    dl_queue_setprio(dl, DLP_ERR);
+    g_warning("dl:%016"G_GINT64_MODIFIER"x: Incorrect TTHL for %s.", dl->u->uid, dl->dest);
+    return;
+  }
+
+  dl->hastthl = TRUE;
   // save to dl.dat
   char key[25];
   key[0] = DLDAT_TTHL;

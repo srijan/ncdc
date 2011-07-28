@@ -56,6 +56,7 @@ struct dl_user {
 
 struct dl {
   gboolean islist : 1;
+  gboolean hastthl : 1;
   char prio;    // DLP_*
   int incfd;    // file descriptor for this file in <conf_dir>/inc/
   char hash[24]; // TTH for files, tiger(uid) for filelists
@@ -79,6 +80,7 @@ static GDBM_FILE dl_dat;
 // have been TTH-checked, etc.
 #define DLDAT_INFO  0 // <8 bytes: size><1 byte: prio><7 bytes: reserved><zero-terminated-string: destination>
 #define DLDAT_USERS 1 // <8 bytes: amount(=1)><8 bytes: uid>
+#define DLDAT_TTHL  2 // <24 bytes: hash1>..
 
 static int dl_dat_needsync = FALSE;
 
@@ -259,7 +261,11 @@ void dl_queue_setprio(struct dl *dl, char prio) {
 
 
 // Adds a dl item to the queue. dl->inc will be determined and opened here.
+// dl->hastthl will be set if the file is small enough to not need TTHL data.
 static void dl_queue_insert(struct dl *dl, guint64 uid, gboolean init) {
+  // Set dl->hastthl for files smaller than 512kB.
+  if(!dl->islist && !dl->hastthl && dl->size <= 512*1024)
+    dl->hastthl = TRUE;
   // figure out dl->inc
   char hash[40] = {};
   base32_encode(dl->hash, hash);
@@ -331,6 +337,8 @@ void dl_queue_rm(struct dl *dl) {
     key[0] = DLDAT_INFO;
     gdbm_delete(dl_dat, keydat);
     key[0] = DLDAT_USERS;
+    gdbm_delete(dl_dat, keydat);
+    key[0] = DLDAT_TTHL;
     gdbm_delete(dl_dat, keydat);
     dl_dat_sync();
   }
@@ -566,6 +574,31 @@ void dl_received(struct dl *dl, int length, char *buf) {
 }
 
 
+// Called when we've received TTHL data. For now we'll just store it dl.dat
+// without modifications.
+// TODO: verify correctness with root hash.
+// TODO: combine hashes to remove uneeded granularity. (512kB is probably enough)
+void dl_settthl(struct dl *dl, char *tthl, int len) {
+  g_return_if_fail(!dl->islist);
+  g_return_if_fail(!dl->have);
+  // Ignore this if we already have the TTHL data. Currently, this situation
+  // can't happen, but it may be possible with multisource downloading.
+  g_return_if_fail(!dl->hastthl);
+
+  g_debug("dl:%016"G_GINT64_MODIFIER"x: Received TTHL data for %s (len = %d)", dl->u->uid, dl->dest, len);
+  dl->hastthl = TRUE;
+
+  // save to dl.dat
+  char key[25];
+  key[0] = DLDAT_TTHL;
+  memcpy(key+1, dl->hash, 24);
+  datum keydat = { key, 25 };
+  datum val = { tthl, len };
+  gdbm_store(dl_dat, keydat, val, GDBM_REPLACE);
+  dl_dat_sync();
+}
+
+
 
 
 // loads a single item from the data file
@@ -580,6 +613,8 @@ static void dl_queue_loaditem(char *hash) {
   key[0] = DLDAT_USERS;
   datum users = gdbm_fetch(dl_dat, keydat);
   g_return_if_fail(users.dsize >= 16);
+  key[0] = DLDAT_TTHL;
+  gboolean hastthl = !!gdbm_exists(dl_dat, keydat);
 
   struct dl *dl = g_slice_new0(struct dl);
   memcpy(dl->hash, hash, 24);
@@ -587,6 +622,7 @@ static void dl_queue_loaditem(char *hash) {
   dl->size = GINT64_FROM_LE(dl->size);
   dl->prio = nfo.dptr[8];
   dl->dest = g_strdup(nfo.dptr+16);
+  dl->hastthl = hastthl;
 
   // get size of the incomplete file
   char tth[40] = {};

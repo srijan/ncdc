@@ -180,6 +180,7 @@ struct cc {
   char dl_hash[24];
   char *token;    // (ADC)
   char *last_file;
+  char *tthl_dat;
   guint64 uid;
   guint64 last_size;
   guint64 last_length;
@@ -314,11 +315,20 @@ void cc_download(struct cc *cc) {
     strcpy(fn, "TTH/");
     base32_encode(dl->hash, fn+4);
   }
-  // send GET request
-  if(cc->adc)
-    net_sendf(cc->net, "CGET file %s %"G_GUINT64_FORMAT" -1", fn, dl->have);
-  else
-    net_sendf(cc->net, "$ADCGET file %s %"G_GUINT64_FORMAT" -1", fn, dl->have);
+
+  // if we have not received TTHL data yet, request it
+  if(!dl->islist && !dl->hastthl) {
+    if(cc->adc)
+      net_sendf(cc->net, "CGET tthl %s 0 -1", fn);
+    else
+      net_sendf(cc->net, "$ADCGET tthl %s 0 -1", fn);
+  // otherwise, send GET request
+  } else {
+    if(cc->adc)
+      net_sendf(cc->net, "CGET file %s %"G_GUINT64_FORMAT" -1", fn, dl->have);
+    else
+      net_sendf(cc->net, "$ADCGET file %s %"G_GUINT64_FORMAT" -1", fn, dl->have);
+  }
   g_free(cc->last_file);
   cc->last_file = g_strdup(dl->islist ? "files.xml.bz2" : dl->dest);
   cc->last_offset = dl->have;
@@ -344,17 +354,41 @@ static void handle_recvfile(struct net *n, int read, char *buf, guint64 left) {
 }
 
 
-static void handle_adcsnd(struct cc *cc, guint64 start, guint64 bytes) {
+static void handle_recvtth(struct net *n, int read, char *buf, guint64 left) {
+  struct cc *cc = n->handle;
+  struct dl *dl = g_hash_table_lookup(dl_queue, cc->dl_hash);
+  if(dl) {
+    g_return_if_fail(read + left <= cc->last_length);
+    memcpy(cc->tthl_dat+(cc->last_length-(left+read)), buf, read);
+    if(!left)
+      dl_settthl(dl, cc->tthl_dat, cc->last_length);
+  }
+  if(!left) {
+    g_free(cc->tthl_dat);
+    cc->tthl_dat = NULL;
+    cc->isdl = FALSE;
+    cc_download(cc);
+  }
+}
+
+
+static void handle_adcsnd(struct cc *cc, gboolean tthl, guint64 start, guint64 bytes) {
   struct dl *dl = g_hash_table_lookup(dl_queue, cc->dl_hash);
   if(!dl) {
     cc_disconnect(cc);
     return;
   }
-  g_return_if_fail(dl->have == start);
-  if(!dl->size)
-    cc->last_size = dl->size = bytes;
   cc->last_length = bytes;
-  net_recvfile(cc->net, bytes, handle_recvfile);
+  if(!tthl) {
+    g_return_if_fail(dl->have == start);
+    if(!dl->size)
+      cc->last_size = dl->size = bytes;
+    net_recvfile(cc->net, bytes, handle_recvfile);
+  } else {
+    g_return_if_fail(start == 0 && bytes > 0 && (bytes%24) == 0 && bytes < 48*1024);
+    cc->tthl_dat = g_malloc(bytes);
+    net_recvfile(cc->net, bytes, handle_recvtth);
+  }
 }
 
 
@@ -603,7 +637,7 @@ static void adc_handle(struct cc *cc, char *msg) {
 
   case ADCC_SND:
     if(cc->state == ADC_S_NORMAL && cmd.argc >= 4)
-      handle_adcsnd(cc, g_ascii_strtoull(cmd.argv[2], NULL, 0), g_ascii_strtoull(cmd.argv[3], NULL, 0));
+      handle_adcsnd(cc, strcmp(cmd.argv[0], "tthl") == 0, g_ascii_strtoull(cmd.argv[2], NULL, 0), g_ascii_strtoull(cmd.argv[3], NULL, 0));
     break;
 
   case ADCC_STA:
@@ -747,7 +781,7 @@ static void nmdc_handle(struct cc *cc, char *cmd) {
   CMDREGEX(supports, "Supports (.+)");
   CMDREGEX(direction, "Direction (Download|Upload) ([0-9]+)");
   CMDREGEX(adcget, "ADCGET ([^ ]+) (.+) ([0-9]+) (-?[0-9]+)");
-  CMDREGEX(adcsnd, "ADCSND file .+ ([0-9]+) (-?[0-9]+)");
+  CMDREGEX(adcsnd, "ADCSND (file|tthl) .+ ([0-9]+) (-?[0-9]+)");
   CMDREGEX(error, "Error (.+)");
   CMDREGEX(maxedout, "MaxedOut");
 
@@ -835,10 +869,12 @@ static void nmdc_handle(struct cc *cc, char *cmd) {
   g_match_info_free(nfo);
 
   // $ADCSND
-  if(g_regex_match(adcsnd, cmd, 0, &nfo)) { // 1 = start_pos, 2 = bytes
-    char *start = g_match_info_fetch(nfo, 1);
-    char *bytes = g_match_info_fetch(nfo, 2);
-    handle_adcsnd(cc, g_ascii_strtoull(start, NULL, 10), g_ascii_strtoull(bytes, NULL, 10));
+  if(g_regex_match(adcsnd, cmd, 0, &nfo)) { // 1 = file/tthl, 2 = start_pos, 3 = bytes
+    char *type = g_match_info_fetch(nfo, 1);
+    char *start = g_match_info_fetch(nfo, 2);
+    char *bytes = g_match_info_fetch(nfo, 3);
+    handle_adcsnd(cc, strcmp(type, "tthl") == 0, g_ascii_strtoull(start, NULL, 10), g_ascii_strtoull(bytes, NULL, 10));
+    g_free(type);
     g_free(start);
     g_free(bytes);
   }
@@ -1002,6 +1038,7 @@ void cc_free(struct cc *cc) {
   net_unref(cc->net);
   if(cc->err)
     g_error_free(cc->err);
+  g_free(cc->tthl_dat);
   g_free(cc->nick_raw);
   g_free(cc->nick);
   g_free(cc->last_file);

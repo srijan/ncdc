@@ -1267,7 +1267,7 @@ static void c_browse(char *args) {
 // definition of the command list
 static struct cmd cmds[] = {
   { "browse", c_browse, c_msg_sug,
-    "[-f] [<user>]", "Browse own file list.",
+    "[[-f] <user>]", "Download and browse someone's file list.",
     "Without arguments, this opens a new tab where you can browse your own file list.\n"
     "Note that changes to your list are not immediately visible in the browser."
     " You need to re-open the tab to get the latest version of your list.\n\n"
@@ -1430,7 +1430,7 @@ static struct cmd cmds[] = {
     ""
   },
   { "whois", c_whois, c_msg_sug,
-    "[<user>]", "Locate a user in the user list.",
+    "<user>", "Locate a user in the user list.",
     "This will open the user list and select the given user."
   },
   { "", NULL }

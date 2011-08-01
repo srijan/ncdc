@@ -134,6 +134,27 @@ static gboolean dl_dat_sync_do(gpointer dat) {
 }
 
 
+// Utility function that returns an error string for DLE_* errors.
+char *dl_strerror(char err, unsigned short sub) {
+  static char buf[200];
+  switch(err) {
+    case DLE_NONE:    strcpy(buf, "No error."); break;
+    case DLE_INVTTHL: strcpy(buf, "TTHL data does not match TTH root."); break;
+    case DLE_NOFILE:  strcpy(buf, "File not available from this user."); break;
+    case DLE_IO_INC:  g_snprintf(buf, 200, "Error writing to temporary file: %s", g_strerror(sub)); break;
+    case DLE_IO_DEST:
+      if(!sub)
+        strcpy(buf, "Error moving file to destination.");
+      else
+        g_snprintf(buf, 200, "Error moving file to destination: %s", g_strerror(sub));
+      break;
+    case DLE_HASH:    g_snprintf(buf, 200, "Hash chunk %d does not match downloaded data.", sub); break;
+    default:          strcpy(buf, "Unknown error.");
+  }
+  return buf;
+}
+
+
 // Returns the first item in the download queue for this user, prepares the
 // item for downloading and sets this user as 'active'.
 struct dl *dl_queue_next(guint64 uid) {
@@ -284,11 +305,11 @@ void dl_queue_setprio(struct dl *dl, char prio) {
 
 #if INTERFACE
 
-// TODO: report error using ui_m()
 #define dl_queue_seterr(dl, e, sub) do {\
-    (dl)->error = (e) < 0 ? -(e) : (e);\
+    (dl)->error = e;\
     (dl)->error_sub = sub;\
     dl_queue_setprio(dl, DLP_ERR);\
+    ui_mf(ui_main, 0, "Download of `%s' failed: %s", (dl)->dest, dl_strerror(e, sub));\
   } while(0)
 
 #endif
@@ -563,7 +584,7 @@ static void dl_finished(struct dl *dl) {
     g_object_unref(src);
     g_object_unref(dest);
     if(err) {
-      ui_mf(ui_main, UIP_MED, "Error moving `%s' to `%s': %s", dl->inc, dl->dest, err->message);
+      g_warning("Error moving `%s' to `%s': %s", dl->inc, dl->dest, err->message);
       dl_queue_seterr(dl, DLE_IO_DEST, 0); // g_file_move does not give the value of errno :(
       g_error_free(err);
     }

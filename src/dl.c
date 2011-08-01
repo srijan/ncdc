@@ -894,7 +894,7 @@ void dl_gc() {
     // created. Unknown keys are left untouched as a later version could have
     // made these and there is no way to tell whether these need to be cleaned
     // up or not.
-    if(key.dsize == 25 && (str[0] == DLDAT_INFO || str[0] == DLDAT_USERS)
+    if(key.dsize == 25 && (str[0] == DLDAT_INFO || str[0] == DLDAT_USERS || str[0] == DLDAT_TTHL)
         && !g_hash_table_lookup(dl_queue, str+1)) {
       base32_encode(str+1, hash);
       g_message("Removing unused key in dl.dat: type = %d, hash = %s", str[0], hash);

@@ -54,11 +54,10 @@ struct cc_expect {
   guint64 uid;
   char cid[8];  // ADC
   char *token;  // ADC
-  int sid;      // ADC (prevents a user-by-CID lookup table, but does not allow a user to reconnect the hub while connecting here)
-  gboolean adc : 1;
-  gboolean dl : 1;  // if we were the one starting the connection (i.e. we want to download)
   time_t added;
   int timeout_src;
+  gboolean adc : 1;
+  gboolean dl : 1;  // if we were the one starting the connection (i.e. we want to download)
 };
 
 
@@ -97,7 +96,6 @@ void cc_expect_add(struct hub *hub, struct hub_user *u, char *t, gboolean dl) {
   e->dl = dl;
   e->uid = u->uid;
   if(e->adc) {
-    e->sid = u->sid;
     e->nick = g_strdup(u->name);
     memcpy(e->cid, u->cid, 8);
   } else
@@ -112,16 +110,15 @@ void cc_expect_add(struct hub *hub, struct hub_user *u, char *t, gboolean dl) {
 }
 
 
-// Checks the expects list for the current connection, sets *sid, cc->dl,
-// cc->uid and cc->hub and removes it from the expects list. cc->cid and
-// cc->token must be known.
-static gboolean cc_expect_adc_rm(struct cc *cc, int *sid) {
+// Checks the expects list for the current connection, cc->dl, cc->uid and
+// cc->hub and removes it from the expects list. cc->cid and cc->token must be
+// known.
+static gboolean cc_expect_adc_rm(struct cc *cc) {
   GList *n;
   for(n=cc_expected->head; n; n=n->next) {
     struct cc_expect *e = n->data;
     if(e->adc && memcmp(cc->cid, e->cid, 8) == 0 && strcmp(cc->token, e->token) == 0) {
-      if(sid)
-        *sid = e->sid;
+      cc->uid = e->uid;
       cc->hub = e->hub;
       cc_expect_rm(n, cc);
       return TRUE;
@@ -605,11 +602,10 @@ static void adc_handle(struct cc *cc, char *msg) {
         g_warning("Incorrect CID. (%s): %s", net_remoteaddr(cc->net), msg);
         cc_disconnect(cc);
       } else if(cc->active) {
-        int sid;
         cc->token = g_strdup(token);
         memcpy(cc->cid, cid, 8);
-        cc_expect_adc_rm(cc, &sid);
-        struct hub_user *u = cc->hub ? g_hash_table_lookup(cc->hub->sessions, GINT_TO_POINTER(sid)) : NULL;
+        cc_expect_adc_rm(cc);
+        struct hub_user *u = cc->uid ? g_hash_table_lookup(hub_uids, &cc->uid) : NULL;
         if(!u) {
           g_warning("Unexpected ADC connection. (%s): %s", net_remoteaddr(cc->net), msg);
           cc_disconnect(cc);
@@ -976,7 +972,7 @@ void cc_adc_connect(struct cc *cc, struct hub_user *u, unsigned short port, char
   strncat(cc->remoteaddr, ":", 23-strlen(cc->remoteaddr));
   strncat(cc->remoteaddr, tmp, 23-strlen(cc->remoteaddr));
   // check whether this was as a reply to a RCM from us
-  cc_expect_adc_rm(cc, NULL);
+  cc_expect_adc_rm(cc);
   // check / update user info
   handle_id(cc, u);
   // handle_id() can do a cc_disconnect() when it discovers a duplicate

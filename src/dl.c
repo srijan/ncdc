@@ -57,19 +57,24 @@ struct dl_user {
 struct dl {
   gboolean islist : 1;
   gboolean hastthl : 1;
-  char prio;    // DLP_*
-  int incfd;    // file descriptor for this file in <conf_dir>/inc/
-  char hash[24]; // TTH for files, tiger(uid) for filelists
-  struct dl_user *u; // user who has this file (should be a list for multi-source downloading)
-  guint64 size; // total size of the file
-  guint64 have; // what we have so far
-  char *inc;    // path to the incomplete file (/inc/<base32-hash>)
-  char *dest;   // destination path (must be on same filesystem as the incomplete file)
-  GSequenceIter *iter; // used by UIT_DL
+  char prio;                // DLP_*
+  int incfd;                // file descriptor for this file in <conf_dir>/inc/
+  char hash[24];            // TTH for files, tiger(uid) for filelists
+  struct dl_user *u;        // user who has this file (should be a list for multi-source downloading)
+  guint64 size;             // total size of the file
+  guint64 have;             // what we have so far
+  char *inc;                // path to the incomplete file (/inc/<base32-hash>)
+  char *dest;               // destination path (must be on same filesystem as the incomplete file)
+  guint64 hash_block;       // number of bytes that each block represents
+  struct tth_ctx *hash_tth; // TTH state of the last block that we have
+  GSequenceIter *iter;      // used by UIT_DL
 };
 
 #endif
 
+// Minimum filesize for which we request TTHL data. If a file is smaller than
+// this, the TTHL data would simply add more overhead than it is worth.
+#define DL_MINTTHLSIZE (512*1024)
 
 // GDBM data file.
 static GDBM_FILE dl_dat;
@@ -263,9 +268,11 @@ void dl_queue_setprio(struct dl *dl, char prio) {
 // Adds a dl item to the queue. dl->inc will be determined and opened here.
 // dl->hastthl will be set if the file is small enough to not need TTHL data.
 static void dl_queue_insert(struct dl *dl, guint64 uid, gboolean init) {
-  // Set dl->hastthl for files smaller than 512kB.
-  if(!dl->islist && !dl->hastthl && dl->size <= 512*1024)
+  // Set dl->hastthl for files smaller than MINTTHLSIZE.
+  if(!dl->islist && !dl->hastthl && dl->size <= DL_MINTTHLSIZE) {
     dl->hastthl = TRUE;
+    dl->hash_block = DL_MINTTHLSIZE;
+  }
   // figure out dl->inc
   char hash[40] = {};
   base32_encode(dl->hash, hash);
@@ -346,6 +353,8 @@ void dl_queue_rm(struct dl *dl) {
   if(ui_dl)
     ui_dl_listchange(dl, UIDL_DEL);
   g_hash_table_remove(dl_queue, dl->hash);
+  if(dl->hash_tth)
+    g_slice_free(struct tth_ctx, dl->hash_tth);
   g_free(dl->inc);
   g_free(dl->dest);
   g_slice_free(struct dl, dl);
@@ -499,6 +508,9 @@ void dl_queue_add_fl(guint64 uid, struct fl_list *fl, char *base) {
 }
 
 
+
+
+
 // Called when we've got a complete file
 static void dl_finished(struct dl *dl) {
   g_debug("dl:%016"G_GINT64_MODIFIER"x: download of `%s' finished, removing from queue", dl->u->uid, dl->dest);
@@ -537,31 +549,113 @@ static void dl_finished(struct dl *dl) {
 }
 
 
-// Called when we've received some file data.
-// TODO: hash checking
+static gboolean dl_hash_check(struct dl *dl, int num, char *tth) {
+  // We don't have TTHL data for small files, so check against the root hash instead.
+  if(dl->size < dl->hash_block) {
+    g_return_val_if_fail(num == 0, FALSE);
+    return memcmp(tth, dl->hash, 24) == 0 ? TRUE : FALSE;
+  }
+  // Otherwise, fetch the TTHL data and check against the right block hash.
+  // It is probably faster to keep the TTHL data in memory, but since this data
+  // may be around 200KiB and we can have a large number of dl structs, let's
+  // just hope GDBM has a sensible caching mechanism.
+  char key[25] = { DLDAT_TTHL };
+  memcpy(key+1, dl->hash, 24);
+  datum keydat = { key, 25 };
+  datum val = gdbm_fetch(dl_dat, keydat);
+  g_return_val_if_fail(val.dsize >= (num+1)*24, FALSE);
+  gboolean r = memcmp(tth, val.dptr+(num*24), 24) == 0 ? TRUE : FALSE;
+  free(val.dptr);
+  return r;
+}
+
+
+// (Incrementally) hashes the incoming data and checks that what we have is
+// still correct. When this function is called, dl->length should refer to the
+// point where the newly received data will be written to.
+// Returns -1 if nothing went wrong, any other number to indicate which block
+// failed the hash check.
+static int dl_hash_update(struct dl *dl, int length, char *buf) {
+  g_return_val_if_fail(dl->hastthl, 0);
+
+  int block = dl->have / dl->hash_block;
+  guint64 cur = dl->have % dl->hash_block;
+
+  if(!dl->hash_tth) {
+    g_return_val_if_fail(!cur, FALSE);
+    dl->hash_tth = g_slice_new(struct tth_ctx);
+    tth_init(dl->hash_tth);
+  }
+
+  char tth[24];
+  while(length > 0) {
+    int w = MIN(dl->hash_block - cur, length);
+    tth_update(dl->hash_tth, buf, w);
+    length -= w;
+    cur += w;
+    buf += w;
+    // we have a complete block, validate it.
+    if(cur == dl->hash_block || (!length && dl->size == (block*dl->hash_block)+cur)) {
+      tth_final(dl->hash_tth, tth);
+      tth_init(dl->hash_tth);
+      if(!dl_hash_check(dl, block, tth))
+        return block;
+      cur = 0;
+      block++;
+    }
+  }
+
+  return -1;
+}
+
+
+// Called when we've received some file data. Returns TRUE to continue the
+// download, FALSE when something went wrong and the transfer should be
+// aborted.
 // TODO: do this in a separate thread to avoid blocking on HDD writes.
 // TODO: improved error handling
-void dl_received(struct dl *dl, int length, char *buf) {
+gboolean dl_received(struct dl *dl, int length, char *buf) {
   //g_debug("dl:%016"G_GINT64_MODIFIER"x: Received %d bytes for %s (size = %"G_GUINT64_FORMAT", have = %"G_GUINT64_FORMAT")", dl->u->uid, length, dl->dest, dl->size, dl->have+length);
-  g_return_if_fail(dl->have + length <= dl->size);
+  g_return_val_if_fail(dl->have + length <= dl->size, FALSE);
   g_warn_if_fail(dl->u->active);
 
   // open dl->incfd, if it's not open yet
   if(dl->incfd <= 0) {
-    dl->incfd = open(dl->inc, O_WRONLY|O_CREAT|O_APPEND, 0666);
-    if(dl->incfd < 0) {
+    dl->incfd = open(dl->inc, O_WRONLY|O_CREAT, 0666);
+    if(dl->incfd < 0 || lseek(dl->incfd, dl->have, SEEK_SET) == (off_t)-1) {
       g_warning("Error opening %s: %s", dl->inc, g_strerror(errno));
-      return;
+      return FALSE;
     }
   }
 
   // save to the file and update dl->have
   while(length > 0) {
+    // write
     int r = write(dl->incfd, buf, length);
     if(r < 0) {
       g_warning("Error writing to %s: %s", dl->inc, g_strerror(errno));
-      return;
+      dl_queue_setprio(dl, DLP_ERR);
+      return FALSE;
     }
+
+    // check hash
+    int fail = dl->islist ? -1 : dl_hash_update(dl, r, buf);
+    if(fail >= 0) {
+      g_warning("Hash failed for %s (block %d)", dl->inc, fail);
+      dl_queue_setprio(dl, DLP_ERR);
+      // Delete the failed block and everything after it, so that a resume is possible.
+      dl->have = fail*dl->hash_block;
+      // I have no idea what to do when these functions fail. Resuming the
+      // download without an ncdc restart won't work if lseek() fails, resuming
+      // the download after an ncdc restart may result in a corrupted download
+      // if the ftruncate() fails. Either way, resuming isn't possible in a
+      // reliable fashion, so perhaps we should throw away the entire inc file?
+      lseek(dl->incfd, dl->have, SEEK_SET);
+      ftruncate(dl->incfd, dl->have);
+      return FALSE;
+    }
+
+    // update vars
     length -= r;
     buf += r;
     dl->have += r;
@@ -571,12 +665,13 @@ void dl_received(struct dl *dl, int length, char *buf) {
     g_warn_if_fail(dl->have == dl->size);
     dl_finished(dl);
   }
+  return TRUE;
 }
 
 
 // Called when we've received TTHL data. For now we'll just store it dl.dat
 // without modifications.
-// TODO: combine hashes to remove uneeded granularity. (512kB is probably enough)
+// TODO: combine hashes to remove uneeded granularity? (512kB is probably enough)
 void dl_settthl(struct dl *dl, char *tthl, int len) {
   g_return_if_fail(!dl->islist);
   g_return_if_fail(!dl->have);
@@ -596,6 +691,8 @@ void dl_settthl(struct dl *dl, char *tthl, int len) {
   }
 
   dl->hastthl = TRUE;
+  dl->hash_block = tth_blocksize(dl->size, len/24);
+
   // save to dl.dat
   char key[25];
   key[0] = DLDAT_TTHL;
@@ -607,6 +704,69 @@ void dl_settthl(struct dl *dl, char *tthl, int len) {
 }
 
 
+
+
+// Calculates dl->hash_block, dl->have and if necessary updates dl->hash_tth
+// for the last block that we have.
+static void dl_queue_loadpartial(struct dl *dl) {
+  // get size of the incomplete file
+  char tth[40] = {};
+  base32_encode(dl->hash, tth);
+  char *fn = g_build_filename(conf_dir, "inc", tth, NULL);
+  struct stat st;
+  if(stat(fn, &st) >= 0)
+    dl->have = st.st_size;
+
+  // get TTHL info
+  if(dl->size < DL_MINTTHLSIZE) {
+    dl->hastthl = TRUE;
+    dl->hash_block = DL_MINTTHLSIZE;
+  } else {
+    char key[25] = { DLDAT_TTHL };
+    memcpy(key+1, dl->hash, 24);
+    datum keydat = { key, 25 };
+    datum val = gdbm_fetch(dl_dat, keydat);
+    if(!val.dptr) {
+      // No TTHL data found? Make sure to redownload the entire file
+      dl->have = 0;
+      unlink(fn);
+    } else {
+      dl->hastthl = TRUE;
+      dl->hash_block = tth_blocksize(dl->size, val.dsize/24);
+      free(val.dptr);
+    }
+  }
+
+  // If we have already downloaded some data, hash the last block and update
+  // dl->hash_tth.
+  guint64 left = dl->hash_block ? dl->have % dl->hash_block : 0;
+  if(left > 0) {
+    dl->have -= left;
+    int fd = open(fn, O_RDONLY);
+    if(fd < 0 || lseek(fd, dl->have, SEEK_SET) == (off_t)-1) {
+      g_warning("Error opening %s: %s. Throwing away last block.", fn, g_strerror(errno));
+      left = 0;
+      if(fd >= 0)
+        close(fd);
+    }
+    while(left > 0) {
+      char buf[1024];
+      int r = read(fd, buf, MIN(left, 1024));
+      if(r < 0) {
+        g_warning("Error reading from %s: %s. Throwing away unreadable data.", fn, g_strerror(errno));
+        left = 0;
+        break;
+      }
+      dl_hash_update(dl, r, buf);
+      dl->have += r;
+      left -= r;
+    }
+    if(fd >= 0)
+      close(fd);
+  }
+
+  g_free(fn);
+}
 
 
 // loads a single item from the data file
@@ -621,8 +781,6 @@ static void dl_queue_loaditem(char *hash) {
   key[0] = DLDAT_USERS;
   datum users = gdbm_fetch(dl_dat, keydat);
   g_return_if_fail(users.dsize >= 16);
-  key[0] = DLDAT_TTHL;
-  gboolean hastthl = !!gdbm_exists(dl_dat, keydat);
 
   struct dl *dl = g_slice_new0(struct dl);
   memcpy(dl->hash, hash, 24);
@@ -630,23 +788,16 @@ static void dl_queue_loaditem(char *hash) {
   dl->size = GINT64_FROM_LE(dl->size);
   dl->prio = nfo.dptr[8];
   dl->dest = g_strdup(nfo.dptr+16);
-  dl->hastthl = hastthl;
 
-  // get size of the incomplete file
-  char tth[40] = {};
-  base32_encode(dl->hash, tth);
-  char *fn = g_build_filename(conf_dir, "inc", tth, NULL);
-  struct stat st;
-  if(stat(fn, &st) >= 0)
-    dl->have = st.st_size;
-  g_free(fn);
+  // check what we already have
+  dl_queue_loadpartial(dl);
 
   // and insert in the hash tables
   guint64 uid;
   memcpy(&uid, users.dptr+8, 8);
   uid = GINT64_FROM_LE(uid);
   dl_queue_insert(dl, uid, TRUE);
-  g_debug("dl:%016"G_GINT64_MODIFIER"x: load `%s' from data file (size = %"G_GUINT64_FORMAT", have = %"G_GUINT64_FORMAT")", uid, dl->dest, dl->size, dl->have);
+  g_debug("dl:%016"G_GINT64_MODIFIER"x: load `%s' from data file (size = %"G_GUINT64_FORMAT", have = %"G_GUINT64_FORMAT", bs = %"G_GUINT64_FORMAT")", uid, dl->dest, dl->size, dl->have, dl->hash_block);
 
   free(nfo.dptr);
   free(users.dptr);

@@ -340,8 +340,11 @@ void cc_download(struct cc *cc) {
 static void handle_recvfile(struct net *n, int read, char *buf, guint64 left) {
   struct cc *cc = n->handle;
   struct dl *dl = g_hash_table_lookup(dl_queue, cc->dl_hash);
-  if(dl)
-    dl_received(dl, read, buf);
+  if(dl && !dl_received(dl, read, buf)) {
+    g_set_error_literal(&cc->err, 1, 0, "Download error.");
+    cc_disconnect(cc);
+    return;
+  }
   // If the item has been removed from the queue while there is still data left
   // to download, interrupt the download by forcing a disconnect.
   if(!dl && left)

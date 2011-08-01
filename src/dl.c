@@ -45,6 +45,9 @@ struct dl_user {
 };
 
 
+// Note: The following numbers are also stored in dl.dat. Keep this in mind
+// when changing or extending. (Both DLP_ and DLE_)
+
 #define DLP_ERR   -65 // disabled due to (permanent) error
 #define DLP_OFF   -64 // disabled by user
 #define DLP_VLOW   -2
@@ -54,10 +57,20 @@ struct dl_user {
 #define DLP_VHIGH   2
 
 
+#define DLE_NONE    0 // No error
+#define DLE_INVTTHL 1 // TTHL data does not match the file root
+#define DLE_NOFILE  2 // User does not have the file at all
+#define DLE_IO_INC  3 // I/O error with incoming file, error_sub = errno
+#define DLE_IO_DEST 4 // I/O error when moving to destination file/dir
+#define DLE_HASH    5 // Hash check failed, error_sub = block index of failed hash
+
+
 struct dl {
   gboolean islist : 1;
   gboolean hastthl : 1;
   char prio;                // DLP_*
+  char error;               // DLE_*
+  unsigned short error_sub; // errno or block number (it is assumed that 0 <= errno <= USHRT_MAX)
   int incfd;                // file descriptor for this file in <conf_dir>/inc/
   char hash[24];            // TTH for files, tiger(uid) for filelists
   struct dl_user *u;        // user who has this file (should be a list for multi-source downloading)
@@ -83,7 +96,8 @@ static GDBM_FILE dl_dat;
 // startup on the incomplete file to get this information. We'd still need some
 // progress indication in the data file in the future, to indicate which parts
 // have been TTH-checked, etc.
-#define DLDAT_INFO  0 // <8 bytes: size><1 byte: prio><7 bytes: reserved><zero-terminated-string: destination>
+#define DLDAT_INFO  0 // <8 bytes: size><1 byte: prio><1 byte: error><2 bytes: error_sub>
+                      // <4 bytes: reserved><zero-terminated-string: destination>
 #define DLDAT_USERS 1 // <8 bytes: amount(=1)><8 bytes: uid>
 #define DLDAT_TTHL  2 // <24 bytes: hash1>..
 
@@ -243,7 +257,10 @@ static void dl_dat_saveinfo(struct dl *dl) {
   memset(nfo, 0, len);
   memcpy(nfo, &size, 8);
   nfo[8] = dl->prio;
-  // bytes 9-15 are reserved, and initialized to zero
+  nfo[9] = dl->error;
+  guint16 err_sub = GINT16_TO_LE(dl->error_sub);
+  memcpy(nfo+10, &err_sub, 2);
+  // bytes 12-15 are reserved, and initialized to zero
   strcpy(nfo+16, dl->dest);
   datum val = { nfo, len };
 
@@ -263,6 +280,18 @@ void dl_queue_setprio(struct dl *dl, char prio) {
   if(enabled)
     dl_queue_start(dl);
 }
+
+
+#if INTERFACE
+
+// TODO: report error using ui_m()
+#define dl_queue_seterr(dl, e, sub) do {\
+    (dl)->error = (e) < 0 ? -(e) : (e);\
+    (dl)->error_sub = sub;\
+    dl_queue_setprio(dl, DLP_ERR);\
+  } while(0)
+
+#endif
 
 
 // Adds a dl item to the queue. dl->inc will be determined and opened here.
@@ -520,29 +549,27 @@ static void dl_finished(struct dl *dl) {
   dl->incfd = 0;
   // Create destination directory, if it does not exist yet.
   char *parent = g_path_get_dirname(dl->dest);
-  GError *err = NULL;
-  if(!g_file_test(parent, G_FILE_TEST_IS_DIR)) {
-    GFile *p = g_file_new_for_path(parent);
-    g_file_make_directory_with_parents(p, NULL, &err);
-    g_object_unref(p);
-  }
+  if(g_mkdir_with_parents(parent, 0755) < 0)
+    dl_queue_seterr(dl, DLE_IO_DEST, errno);
   g_free(parent);
   // Move the file to the destination.
   // TODO: this may block for a while if they are not on the same filesystem,
   // do this in a separate thread?
-  if(!err) {
+  GError *err = NULL;
+  if(dl->prio != DLP_ERR) {
     GFile *src = g_file_new_for_path(dl->inc);
     GFile *dest = g_file_new_for_path(dl->dest);
     g_file_move(src, dest, dl->islist ? G_FILE_COPY_OVERWRITE : G_FILE_COPY_BACKUP, NULL, NULL, NULL, &err);
     g_object_unref(src);
     g_object_unref(dest);
-  }
-  if(err) {
-    ui_mf(ui_main, UIP_MED, "Error moving `%s' to `%s': %s", dl->inc, dl->dest, err->message);
-    g_error_free(err);
+    if(err) {
+      ui_mf(ui_main, UIP_MED, "Error moving `%s' to `%s': %s", dl->inc, dl->dest, err->message);
+      dl_queue_seterr(dl, DLE_IO_DEST, 0); // g_file_move does not give the value of errno :(
+      g_error_free(err);
+    }
   }
   // open the file list
-  if(!err && dl->islist)
+  if(dl->prio != DLP_ERR && dl->islist)
     ui_tab_open(ui_fl_create(dl->u->uid), FALSE);
   // and remove from the queue
   dl_queue_rm(dl);
@@ -613,7 +640,6 @@ static int dl_hash_update(struct dl *dl, int length, char *buf) {
 // download, FALSE when something went wrong and the transfer should be
 // aborted.
 // TODO: do this in a separate thread to avoid blocking on HDD writes.
-// TODO: improved error handling
 gboolean dl_received(struct dl *dl, int length, char *buf) {
   //g_debug("dl:%016"G_GINT64_MODIFIER"x: Received %d bytes for %s (size = %"G_GUINT64_FORMAT", have = %"G_GUINT64_FORMAT")", dl->u->uid, length, dl->dest, dl->size, dl->have+length);
   g_return_val_if_fail(dl->have + length <= dl->size, FALSE);
@@ -624,6 +650,7 @@ gboolean dl_received(struct dl *dl, int length, char *buf) {
     dl->incfd = open(dl->inc, O_WRONLY|O_CREAT, 0666);
     if(dl->incfd < 0 || lseek(dl->incfd, dl->have, SEEK_SET) == (off_t)-1) {
       g_warning("Error opening %s: %s", dl->inc, g_strerror(errno));
+      dl_queue_seterr(dl, DLE_IO_INC, errno);
       return FALSE;
     }
   }
@@ -634,7 +661,7 @@ gboolean dl_received(struct dl *dl, int length, char *buf) {
     int r = write(dl->incfd, buf, length);
     if(r < 0) {
       g_warning("Error writing to %s: %s", dl->inc, g_strerror(errno));
-      dl_queue_setprio(dl, DLP_ERR);
+      dl_queue_seterr(dl, DLE_IO_INC, errno);
       return FALSE;
     }
 
@@ -642,7 +669,7 @@ gboolean dl_received(struct dl *dl, int length, char *buf) {
     int fail = dl->islist ? -1 : dl_hash_update(dl, r, buf);
     if(fail >= 0) {
       g_warning("Hash failed for %s (block %d)", dl->inc, fail);
-      dl_queue_setprio(dl, DLP_ERR);
+      dl_queue_seterr(dl, DLE_HASH, fail);
       // Delete the failed block and everything after it, so that a resume is possible.
       dl->have = fail*dl->hash_block;
       // I have no idea what to do when these functions fail. Resuming the
@@ -685,8 +712,8 @@ void dl_settthl(struct dl *dl, char *tthl, int len) {
   char root[24];
   tth_root(tthl, len/24, root);
   if(memcmp(root, dl->hash, 24) != 0) {
-    dl_queue_setprio(dl, DLP_ERR);
     g_warning("dl:%016"G_GINT64_MODIFIER"x: Incorrect TTHL for %s.", dl->u->uid, dl->dest);
+    dl_queue_seterr(dl, DLE_INVTTHL, 0);
     return;
   }
 
@@ -787,6 +814,9 @@ static void dl_queue_loaditem(char *hash) {
   memcpy(&dl->size, nfo.dptr, 8);
   dl->size = GINT64_FROM_LE(dl->size);
   dl->prio = nfo.dptr[8];
+  dl->error = nfo.dptr[9];
+  memcpy(&dl->error_sub, nfo.dptr+10, 2);
+  dl->error_sub = GINT16_FROM_LE(dl->error_sub);
   dl->dest = g_strdup(nfo.dptr+16);
 
   // check what we already have

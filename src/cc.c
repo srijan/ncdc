@@ -650,7 +650,7 @@ static void adc_handle(struct cc *cc, char *msg) {
       // File (Part) Not Available: notify dl.c
       struct dl *dl = g_hash_table_lookup(dl_queue, cc->dl_hash);
       if(dl)
-        dl_queue_setprio(dl, DLP_ERR);
+        dl_queue_seterr(dl, DLE_NOFILE, 0);
       if(cmd.argv[0][0] == '2')
         cc_disconnect(cc);
       else
@@ -887,7 +887,7 @@ static void nmdc_handle(struct cc *cc, char *cmd) {
     if(cc->candl && (str_casestr(msg, "file not available") || str_casestr(msg, "no more exists"))) {
       struct dl *dl = g_hash_table_lookup(dl_queue, cc->dl_hash);
       if(dl)
-        dl_queue_setprio(dl, DLP_ERR);
+        dl_queue_seterr(dl, DLE_NOFILE, 0);
       cc_download(cc);
     }
     g_free(msg);

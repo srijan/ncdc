@@ -1326,17 +1326,27 @@ static void ui_dl_draw() {
   mvaddstr(1, 59, "File");
   attroff(A_BOLD);
 
-  int bottom = winrows-3;
+  struct dl *sel = g_sequence_iter_is_end(ui_dl->list->sel) ? NULL : g_sequence_get(ui_dl->list->sel);
+
+  int bottom = sel && sel->prio == DLP_ERR ? winrows-4 : winrows-3;
   int pos = ui_listing_draw(ui_dl->list, 2, bottom-1, ui_dl_draw_row, NULL);
 
   // footer
   attron(A_REVERSE);
   mvhline(bottom, 0, ' ', wincols);
+  if(sel) {
+    char hash[40] = {};
+    base32_encode(sel->hash, hash);
+    mvprintw(bottom, 0, hash);
+  } else
+    mvaddstr(bottom, 0, "Nothing selected.");
   g_snprintf(tmp, 99, "%5d files - %3d%%", g_hash_table_size(dl_queue), pos);
   mvaddstr(bottom, wincols-19, tmp);
   attroff(A_REVERSE);
 
-  // TODO: detailed info
+  // error info
+  if(sel && sel->prio == DLP_ERR)
+    mvprintw(bottom+1, 0, "Error: %s", dl_strerror(sel->error, sel->error_sub));
 }
 
 

@@ -791,7 +791,7 @@ static void fl_refresh_process() {
   } else {
     time(&fl_refresh_last);
     char **names = g_key_file_get_keys(conf_file, "share", NULL, NULL);
-    int i, len = g_strv_length(names);
+    int i, len = names ? g_strv_length(names) : 0;
     args->file = g_new0(struct fl_list *, len+1);
     args->res  = g_new0(struct fl_list *, len+1);
     args->path = g_new0(char *, len+1);

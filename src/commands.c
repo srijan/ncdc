@@ -156,7 +156,9 @@ static void set_userinfo(char *group, char *key, char *val) {
 
 
 static void get_encoding(char *group, char *key) {
-  ui_mf(NULL, 0, "%s.%s = %s", group, key, conf_encoding(group));
+  char *enc = conf_encoding(group);
+  ui_mf(NULL, 0, "%s.%s = %s", group, key, enc);
+  g_free(enc);
 }
 
 

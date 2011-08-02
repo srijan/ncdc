@@ -424,7 +424,7 @@ static int fl_load_handle(xmlTextReaderPtr reader, gboolean *havefl, gboolean *n
     // <FileListing ..>
     // We ignore its attributes (for now)
     if(strcmp(name, "FileListing") == 0) {
-      if(*havefl || xmlTextReaderIsEmptyElement(reader))
+      if(*havefl)
         return -1;
       *havefl = TRUE;
     // <Directory ..>
@@ -561,9 +561,9 @@ struct fl_list *fl_load(const char *file, GError **err) {
     if((ret = fl_load_handle(reader, &havefl, &newdir, &cur)) <= 0)
       break;
 
-  if(ret < 0) {
+  if(ret < 0 || !havefl) {
     if(err && !*err) // rather uninformative error message as fallback
-      g_set_error_literal(err, 1, 0, "Error parsing or validating XML.");
+      g_set_error_literal(err, 1, 0, !havefl ? "No <FileListing> tag found." : "Error parsing or validating XML.");
     fl_list_free(root);
     root = NULL;
   }

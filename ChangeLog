@@ -1,3 +1,17 @@
+0.5 - 2011-08-02
+	- Downloaded files are now TTH-checked
+	- Added download queue priorities
+	- Download queue items are automatically disabled on error
+	- Improved error handling and reporting for downloads
+	- Added download_slots setting
+	- Use a separate thread to load other users' file list
+	- Improved /gc to also clean up download queue related data
+	- Decreased memory usage for large file lists
+	- Improved error handling with sendfile()
+	- Fixed downloading in passive mode on ADC hubs
+	- Fixed adding a dir to the download queue while connected to the user
+	- Fixed segfault when the userlist is open while disconnecting from a hub
+
 0.4 - 2011-07-23
 	- Added file downloading support
 	  WARNING: Downloaded files are not TTH checked at this moment.

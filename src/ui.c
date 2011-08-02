@@ -501,7 +501,6 @@ static void ui_userlist_draw_row(struct ui_listing *list, GSequenceIter *iter, i
 
 // TODO: some way of letting the user know what keys can be pressed
 static void ui_userlist_draw(struct ui_tab *tab) {
-  char tmp[201];
   // column widths (this is a trial-and-error-whatever-looks-right algorithm)
   struct ui_userlist_draw_opts o;
   int num = 2 + (tab->user_hide_conn?0:1) + (tab->user_hide_desc?0:1) + (tab->user_hide_tag?0:1) + (tab->user_hide_mail?0:1);
@@ -534,11 +533,9 @@ static void ui_userlist_draw(struct ui_tab *tab) {
   mvhline(bottom, 0, ' ', wincols);
   int count = g_hash_table_size(tab->hub->users);
   mvaddstr(bottom, 0, "Totals:");
-  g_snprintf(tmp, 200, "%s%c   %d users",
+  mvprintw(bottom, o.cw_user+5, "%s%c   %d users",
     str_formatsize(tab->hub->sharesize), tab->hub->sharecount == count ? ' ' : '+', count);
-  mvaddstr(bottom, o.cw_user+5, tmp);
-  g_snprintf(tmp, 200, "%3d%%", pos);
-  mvaddstr(bottom, wincols-6, tmp);
+  mvprintw(bottom, wincols-6, "%3d%%", pos);
   attroff(A_REVERSE);
 
   // detailed info box
@@ -557,19 +554,17 @@ static void ui_userlist_draw(struct ui_tab *tab) {
     attroff(A_BOLD);
     mvaddstr(bottom+1, 18, u->name);
     if(u->hasinfo)
-      g_snprintf(tmp, 200, "%s (%s bytes)", str_formatsize(u->sharesize), str_fullsize(u->sharesize));
+      mvprintw(bottom+1, 52, "%s (%s bytes)", str_formatsize(u->sharesize), str_fullsize(u->sharesize));
     else
-      strcpy(tmp, "-");
-    mvaddstr(bottom+1, 52, tmp);
+      mvaddstr(bottom+1, 52, "-");
     mvaddstr(bottom+2, 18, u->hasinfo ? u->conn : "-");
     mvaddstr(bottom+2, 52, u->hasinfo ? u->mail : "-");
     char *tag = hub_user_tag(u);
     if(u->hasinfo)
-      g_snprintf(tmp, 200, "%s %s", u->desc?u->desc:"", tag?tag:"");
+      mvprintw(bottom+3, 18, "%s %s", u->desc?u->desc:"", tag?tag:"");
     else
-      strcpy(tmp, "-");
+      mvaddstr(bottom+3, 19, "-");
     g_free(tag);
-    mvaddstr(bottom+3, 18, tmp);
     // TODO: CID & IP, when available
   }
 }
@@ -752,7 +747,6 @@ static char *ui_conn_title() {
 
 static void ui_conn_draw_row(struct ui_listing *list, GSequenceIter *iter, int row, void *dat) {
   struct cc *cc = g_sequence_get(iter);
-  char tmp[100];
   if(iter == list->sel) {
     attron(A_BOLD);
     mvaddch(row, 0, '>');
@@ -769,10 +763,11 @@ static void ui_conn_draw_row(struct ui_listing *list, GSequenceIter *iter, int r
   if(cc->nick)
     mvaddnstr(row, 4, cc->nick, str_offset_from_columns(cc->nick, 15));
   else {
+    char tmp[30];
     strcpy(tmp, "IP:");
     strcat(tmp, cc->remoteaddr);
-    /*if(index(tmp+3, ':'))
-      *(index(tmp)) = 0;*/
+    if(index(tmp+3, ':'))
+      *(index(tmp+3, ':')) = 0;
     mvaddstr(row, 4, tmp);
   }
 
@@ -784,16 +779,14 @@ static void ui_conn_draw_row(struct ui_listing *list, GSequenceIter *iter, int r
 
   guint64 left = cc->dl ? cc->net->recv_left : cc->net->file_left;
   if(cc->last_length && !cc->timeout_src)
-    g_snprintf(tmp, 99, "%3d%%", (int)(((cc->last_length-left)*100)/cc->last_length));
+    mvprintw(row, 44, "%3d%%", (int)(((cc->last_length-left)*100)/cc->last_length));
   else
-    strcpy(tmp, "  -");
-  mvaddstr(row, 44, tmp);
+    mvaddstr(row, 44, " -");
 
   if(cc->timeout_src)
-    strcpy(tmp, "     -");
+    mvaddstr(row, 49, "     -");
   else
-    g_snprintf(tmp, 99, "%6d", ratecalc_get(cc->dl ? cc->net->rate_in : cc->net->rate_out)/1024);
-  mvaddstr(row, 49, tmp);
+    mvprintw(row, 49, "%6d", ratecalc_get(cc->dl ? cc->net->rate_in : cc->net->rate_out)/1024);
 
   if(cc->err) {
     mvaddstr(row, 57, "Disconnected: ");
@@ -810,7 +803,6 @@ static void ui_conn_draw_row(struct ui_listing *list, GSequenceIter *iter, int r
 
 
 static void ui_conn_draw_details(int l) {
-  char tmp[100];
   struct cc *cc = g_sequence_iter_is_end(ui_conn->list->sel) ? NULL : g_sequence_get(ui_conn->list->sel);
   if(!cc) {
     mvaddstr(l+1, 0, "Nothing selected.");
@@ -846,10 +838,8 @@ static void ui_conn_draw_details(int l) {
     cc->net->file_left ? "Uploading" :
     cc->net->recv_left ? "Downloading" : "Idle");
   // line 3
-  g_snprintf(tmp, 99, "%d KiB/s (%s)", ratecalc_get(cc->net->rate_out)/1024, str_formatsize(cc->net->rate_out->total));
-  mvaddstr(l+3, 13, tmp);
-  g_snprintf(tmp, 99, "%d KiB/s (%s)", ratecalc_get(cc->net->rate_in)/1024, str_formatsize(cc->net->rate_in->total));
-  mvaddstr(l+3, 47, tmp);
+  mvprintw(l+3, 13, "%d KiB/s (%s)", ratecalc_get(cc->net->rate_out)/1024, str_formatsize(cc->net->rate_out->total));
+  mvprintw(l+3, 47, "%d KiB/s (%s)", ratecalc_get(cc->net->rate_in)/1024, str_formatsize(cc->net->rate_in->total));
   // size / offset / chunk (line 4/5/6)
   mvaddstr(l+4, 13, cc->last_size ? str_formatsize(cc->last_size) : "-");
   mvaddstr(l+5, 13, cc->last_size ? str_formatsize(cc->last_offset) : "-");
@@ -857,16 +847,14 @@ static void ui_conn_draw_details(int l) {
   // progress / eta / idle (line 4/5/6)
   guint64 left = cc->dl ? cc->net->recv_left : cc->net->file_left;
   if(cc->last_length && !cc->timeout_src)
-    g_snprintf(tmp, 99, "%3d%%", (int)(((cc->last_length-left)*100)/cc->last_length));
+    mvprintw(l+4, 47, "%3d%%", (int)(((cc->last_length-left)*100)/cc->last_length));
   else
-    strcpy(tmp, "-");
-  mvaddstr(l+4, 47, tmp);
+    mvaddstr(l+4, 47, "-");
   if(cc->last_length && !cc->timeout_src)
     mvaddstr(l+5, 47, ratecalc_eta(cc->dl ? cc->net->rate_in : cc->net->rate_out, left));
   else
     mvaddstr(l+5, 47, "-");
-  g_snprintf(tmp, 99, "%ds", (int)(time(NULL)-cc->net->timeout_last));
-  mvaddstr(l+6, 47, tmp);
+  mvprintw(l+6, 47, "%ds", (int)(time(NULL)-cc->net->timeout_last));
   // line 7
   if(cc->last_file)
     mvaddnstr(l+7, 13, cc->last_file, str_offset_from_columns(cc->last_file, wincols-13));
@@ -881,7 +869,6 @@ static void ui_conn_draw_details(int l) {
 
 
 static void ui_conn_draw() {
-  char tmp[100];
   attron(A_BOLD);
   mvaddstr(1, 2,  "S Username");
   mvaddstr(1, 20, "Hub");
@@ -896,8 +883,7 @@ static void ui_conn_draw() {
   // footer
   attron(A_REVERSE);
   mvhline(bottom, 0, ' ', wincols);
-  g_snprintf(tmp, 99, "%3d connections    %3d%%", g_sequence_iter_get_position(g_sequence_get_end_iter(ui_conn->list->list)), pos);
-  mvaddstr(bottom, wincols-24, tmp);
+  mvprintw(bottom, wincols-24, "%3d connections    %3d%%", g_sequence_iter_get_position(g_sequence_get_end_iter(ui_conn->list->list)), pos);
   attroff(A_REVERSE);
 
   // detailed info
@@ -1100,8 +1086,6 @@ static void ui_fl_draw_row(struct ui_listing *list, GSequenceIter *iter, int row
 
 
 static void ui_fl_draw(struct ui_tab *tab) {
-  char tmp[100];
-
   // first line
   mvhline(1, 0, ACS_HLINE, wincols);
   mvaddch(1, 3, ' ');
@@ -1126,31 +1110,26 @@ static void ui_fl_draw(struct ui_tab *tab) {
   struct fl_list *sel = pos >= 0 && !g_sequence_iter_is_end(tab->list->sel) ? g_sequence_get(tab->list->sel) : NULL;
   attron(A_REVERSE);
   mvhline(winrows-3, 0, ' ', wincols);
-  if(pos >= 0) {
-    g_snprintf(tmp, 99, "%6d items   %s%c  %3d%%",
+  if(pos >= 0)
+    mvprintw(winrows-3, wincols-34, "%6d items   %s%c  %3d%%",
       g_sequence_iter_get_position(g_sequence_get_end_iter(tab->fl_list->sub)),
       str_formatsize(tab->fl_list->size), tab->fl_list->incomplete ? '+' : ' ', pos);
-    mvaddstr(winrows-3, wincols-34, tmp);
-  }
   if(sel && sel->isfile) {
     if(!sel->hastth)
       mvaddstr(winrows-3, 0, "Not hashed yet, this file is not visible to others.");
     else {
-      base32_encode(sel->tth, tmp);
-      tmp[39] = 0;
-      mvaddstr(winrows-3, 0, tmp);
-      g_snprintf(tmp, 99, "(%s bytes)", str_fullsize(sel->size));
-      mvaddstr(winrows-3, 40, tmp);
+      char hash[40] = {};
+      base32_encode(sel->tth, hash);
+      mvaddstr(winrows-3, 0, hash);
+      mvprintw(winrows-3, 40, "(%s bytes)", str_fullsize(sel->size));
     }
   }
   if(sel && !sel->isfile) {
     int num = sel->sub ? g_sequence_iter_get_position(g_sequence_get_end_iter(sel->sub)) : 0;
     if(!num)
       mvaddstr(winrows-3, 0, " Selected directory is empty.");
-    else {
-      g_snprintf(tmp, 99, " %d items, %s bytes", num, str_fullsize(sel->size));
-      mvaddstr(winrows-3, 0, tmp);
-    }
+    else
+      mvprintw(winrows-3, 0, " %d items, %s bytes", num, str_fullsize(sel->size));
   }
   attroff(A_REVERSE);
 }
@@ -1273,7 +1252,6 @@ static char *ui_dl_title() {
 
 static void ui_dl_draw_row(struct ui_listing *list, GSequenceIter *iter, int row, void *dat) {
   struct dl *dl = g_sequence_get(iter);
-  char tmp[100];
   if(iter == list->sel) {
     attron(A_BOLD);
     mvaddch(row, 0, '>');
@@ -1284,17 +1262,14 @@ static void ui_dl_draw_row(struct ui_listing *list, GSequenceIter *iter, int row
   if(u) {
     mvaddnstr(row, 2, u->name, str_offset_from_columns(u->name, 19));
     mvaddnstr(row, 22, u->hub->tab->name, str_offset_from_columns(u->name, 13));
-  } else {
-    g_snprintf(tmp, 99, "ID:%016"G_GINT64_MODIFIER"x (offline)", dl->u->uid);
-    mvaddstr(row, 2, tmp);
-  }
+  } else
+    mvprintw(row, 2, "ID:%016"G_GINT64_MODIFIER"x (offline)", dl->u->uid);
 
   mvaddstr(row, 36, str_formatsize(dl->size));
   if(dl->size)
-    g_snprintf(tmp, 99, "%3d%%", (int) ((dl->have*100)/dl->size));
+    mvprintw(row, 47, "%3d%%", (int) ((dl->have*100)/dl->size));
   else
-    strcpy(tmp, " -");
-  mvaddstr(row, 47, tmp);
+    mvaddstr(row, 47, " -");
 
   if(dl->prio == DLP_ERR)
     mvaddstr(row, 53, " ERR");
@@ -1316,7 +1291,6 @@ static void ui_dl_draw_row(struct ui_listing *list, GSequenceIter *iter, int row
 
 
 static void ui_dl_draw() {
-  char tmp[100];
   attron(A_BOLD);
   mvaddstr(1, 2,  "User");
   mvaddstr(1, 22, "Hub");
@@ -1340,8 +1314,7 @@ static void ui_dl_draw() {
     mvprintw(bottom, 0, hash);
   } else
     mvaddstr(bottom, 0, "Nothing selected.");
-  g_snprintf(tmp, 99, "%5d files - %3d%%", g_hash_table_size(dl_queue), pos);
-  mvaddstr(bottom, wincols-19, tmp);
+  mvprintw(bottom, wincols-19, "%5d files - %3d%%", g_hash_table_size(dl_queue), pos);
   attroff(A_REVERSE);
 
   // error info
@@ -1632,19 +1605,13 @@ void ui_init() {
 
 
 static void ui_draw_status() {
-  char buf[100];
-
   if(fl_refresh_queue && fl_refresh_queue->head)
     mvaddstr(winrows-1, 0, "[Refreshing share]");
-  else if(fl_hash_queue && g_hash_table_size(fl_hash_queue)) {
-    g_snprintf(buf, 100, "[Hashing: %d / %s / %.2f MiB/s]",
+  else if(fl_hash_queue && g_hash_table_size(fl_hash_queue))
+    mvprintw(winrows-1, 0, "[Hashing: %d / %s / %.2f MiB/s]",
       g_hash_table_size(fl_hash_queue), str_formatsize(fl_hash_queue_size), ((float)ratecalc_get(&fl_hash_rate))/(1024.0f*1024.0f));
-    mvaddstr(winrows-1, 0, buf);
-  }
-  g_snprintf(buf, 100, "[U/D:%6d/%6d KiB/s]", ratecalc_get(&net_out)/1024, ratecalc_get(&net_in)/1024);
-  mvaddstr(winrows-1, wincols-37, buf);
-  g_snprintf(buf, 100, "[S:%3d/%3d]", cc_slots_in_use(NULL), conf_slots());
-  mvaddstr(winrows-1, wincols-11, buf);
+  mvprintw(winrows-1, wincols-37, "[U/D:%6d/%6d KiB/s]", ratecalc_get(&net_out)/1024, ratecalc_get(&net_in)/1024);
+  mvprintw(winrows-1, wincols-11, "[S:%3d/%3d]", cc_slots_in_use(NULL), conf_slots());
 
   ui_m_updated = FALSE;
   if(ui_m_text) {
@@ -1721,7 +1688,6 @@ static void ui_draw_tablist() {
 
   // print the tab list
   w = maxw;
-  char num[10];
   for(; n; n=n->next) {
     w -= tabcol(n, ++i);
     if(w < 0)
@@ -1730,8 +1696,7 @@ static void ui_draw_tablist() {
     addch(' ');
     if(n == ui_tab_cur)
       attron(A_BOLD);
-    g_snprintf(num, 10, "%d", i);
-    addstr(num);
+    printw("%d", i);
     if(n == ui_tab_cur || !t->prio)
       addch(':');
     else {

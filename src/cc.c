@@ -906,6 +906,14 @@ static void nmdc_handle(struct cc *cc, char *cmd) {
 static void handle_cmd(struct net *n, char *cmd) {
   struct cc *cc = n->handle;
 
+  // No input is allowed while we're sending file data.
+  if(cc->net->file_left) {
+    g_message("Received message from %s while we're sending a file.", net_remoteaddr(cc->net));
+    g_set_error_literal(&cc->err, 1, 0, "Received message in upload state.");
+    cc_disconnect(cc);
+    return;
+  }
+
   if(cc->adc)
     adc_handle(cc, cmd);
   else

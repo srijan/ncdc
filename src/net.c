@@ -303,8 +303,17 @@ static gboolean handle_sendfile(struct net *n) {
   } else if(errno == EAGAIN || errno == EINTR)
     return TRUE;
 
+  else if(errno == EPIPE || errno == ECONNRESET) {
+    n->out_src = 0;
+    GError *err = NULL;
+    g_set_error_literal(&err, 1, 0, "Remote disconnected.");
+    n->cb_err(n, NETERR_SEND, err);
+    g_error_free(err);
+    return FALSE;
+
   // non-sendfile() fallback
-  else if(errno == ENOTSUP || errno == ENOSYS || errno == EINVAL) {
+  } else if(errno == ENOTSUP || errno == ENOSYS || errno == EINVAL) {
+    g_message("sendfile() failed with `%s', using fallback.", g_strerror(errno));
 #endif // HAVE_SENDFILE
     GError *err = NULL;
     char buf[10240];

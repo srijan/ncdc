@@ -1480,6 +1480,8 @@ void hub_disconnect(struct hub *hub, gboolean recon) {
   hub->nick_valid = hub->isreg = hub->isop = hub->received_first =
     hub->joincomplete =  hub->sharecount = hub->sharesize =
     hub->supports_nogetinfo = hub->state = 0;
+  if(hub->tab->userlist_tab)
+    ui_userlist_disconnect(hub->tab->userlist_tab);
   if(!recon) {
     ui_m(hub->tab, 0, "Disconnected.");
     if(hub->reconnect_timer) {

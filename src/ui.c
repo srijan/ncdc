@@ -657,6 +657,15 @@ static void ui_userlist_key(struct ui_tab *tab, guint64 key) {
 }
 
 
+// Called when the hub is disconnected. All users should be removed in one go,
+// this is faster than a _userchange() for every user.
+void ui_userlist_disconnect(struct ui_tab *tab) {
+  g_sequence_free(tab->list->list);
+  ui_listing_free(tab->list);
+  tab->list = ui_listing_create(g_sequence_new(NULL));
+}
+
+
 void ui_userlist_userchange(struct ui_tab *tab, int change, struct hub_user *user) {
   if(change == UIHUB_UC_JOIN) {
     user->iter = g_sequence_insert_sorted(tab->list->list, user, ui_userlist_sort_func, tab);

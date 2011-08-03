@@ -784,49 +784,6 @@ static void c_help_sug(char *args, char **sug) {
 }
 
 
-static void c_open(char *args) {
-  gboolean conn = TRUE;
-  if(strncmp(args, "-n ", 3) == 0) {
-    conn = FALSE;
-    args += 3;
-    g_strstrip(args);
-  }
-  if(!args[0]) {
-    ui_m(NULL, 0, "No hub name given.");
-    return;
-  }
-  GList *n;
-  if(args[0] == '#')
-    args++;
-  if(!is_valid_hubname(args))
-    ui_m(NULL, 0, "Sorry, tab name may only consist of alphanumeric characters, and must not exceed 25 characters.");
-  else {
-    for(n=ui_tabs; n; n=n->next) {
-      char *tmp = ((struct ui_tab *)n->data)->name;
-      if(tmp[0] == '#' && strcmp(tmp+1, args) == 0)
-        break;
-    }
-    if(!n)
-      ui_tab_open(ui_hub_create(args, conn), TRUE);
-    else if(n != ui_tab_cur)
-      ui_tab_cur = n;
-    else
-      ui_m(NULL, 0, "Tab already selected.");
-  }
-}
-
-
-static void c_open_sug(char *args, char **sug) {
-  int len = strlen(args);
-  int i = 0;
-  char **group, **groups = g_key_file_get_groups(conf_file, NULL);
-  for(group=groups; i<20 && *group; group++)
-    if(**group == '#' && (strncmp(args, *group, len) == 0 || strncmp(args, *group+1, len) == 0) && strlen(*group) != len)
-      sug[i++] = g_strdup(*group);
-  g_strfreev(groups);
-}
-
-
 static void c_connect_set_hubaddr(char *addr) {
   // make sure it's a full address in the form of "dchub://hostname:port/"
   // (doesn't check for validness)
@@ -901,6 +858,64 @@ static void c_reconnect(char *args) {
       hub_disconnect(tab->hub, FALSE);
     c_connect(""); // also checks for the existence of "hubaddr"
   }
+}
+
+
+static void c_open(char *args) {
+  gboolean conn = TRUE;
+  if(strncmp(args, "-n ", 3) == 0) {
+    conn = FALSE;
+    args += 3;
+    g_strstrip(args);
+  }
+  char *name = args, *addr = index(args, ' ');
+  if(name[0] == '#')
+    name++;
+  if(addr)
+    *(addr++) = 0;
+  if(!name[0]) {
+    ui_m(NULL, 0, "No hub name given.");
+    return;
+  }
+  if(!is_valid_hubname(args))
+    ui_m(NULL, 0, "Sorry, tab name may only consist of alphanumeric characters, and must not exceed 25 characters.");
+  else {
+    // Look for existing tab
+    GList *n;
+    for(n=ui_tabs; n; n=n->next) {
+      char *tmp = ((struct ui_tab *)n->data)->name;
+      if(tmp[0] == '#' && strcmp(tmp+1, name) == 0)
+        break;
+    }
+    // Open or select tab
+    if(!n) {
+      tab = ui_hub_create(name, addr ? FALSE : conn);
+      ui_tab_open(tab, TRUE);
+    } else if(n != ui_tab_cur) {
+      ui_tab_cur = n;
+      tab = n->data;
+    } else {
+      ui_m(NULL, 0, addr ? "Tab already selected, saving new address instead." : "Tab already selected.");
+      tab = n->data;
+    }
+    // Save address and (re)connect when necessary
+    if(addr) {
+      c_connect_set_hubaddr(addr);
+      if(conn)
+        c_reconnect("");
+    }
+  }
+}
+
+
+static void c_open_sug(char *args, char **sug) {
+  int len = strlen(args);
+  int i = 0;
+  char **group, **groups = g_key_file_get_groups(conf_file, NULL);
+  for(group=groups; i<20 && *group; group++)
+    if(**group == '#' && (strncmp(args, *group, len) == 0 || strncmp(args, *group+1, len) == 0) && strlen(*group) != len)
+      sug[i++] = g_strdup(*group);
+  g_strfreev(groups);
 }
 
 
@@ -1350,13 +1365,14 @@ static struct cmd cmds[] = {
     ""
   },
   { "open", c_open, c_open_sug,
-    "[-n] <name>", "Open a new hub tab.",
+    "[-n] <name> [<address>]", "Open a new hub tab and connect to the hub.",
     "Opens a new tab to use for a hub. The name is a (short) personal name you"
     " use to identify the hub, and will be used for storing hub-specific"
     " configuration.\n\n"
-    "If you have previously connected to a hub from a tab with the same name,"
-    " /open will automatically connect to the same hub again. Use the `-n' flag"
-    " to disable this behaviour."
+    "If you have specified an address or have previously connected to a hub"
+    " from a tab with the same name, /open will automatically connect to"
+    " the hub. Use the `-n' flag to disable this behaviour.\n\n"
+    "See `/help connect' for more information on connecting to a hub."
   },
   { "password", c_password, NULL,
     "<password>", "Send your password to the hub.",

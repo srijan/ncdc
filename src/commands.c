@@ -706,10 +706,13 @@ static void sayme(char *args, gboolean me) {
     ui_m(NULL, 0, "Message empty.");
   else if(tab->type == UIT_HUB)
     hub_say(tab->hub, args, me);
-  else if(!tab->msg_user)
-    ui_m(NULL, 0, "User is not online.");
-  else
-    hub_msg(tab->hub, tab->msg_user, args, me);
+  else {
+    struct hub_user *u = g_hash_table_lookup(hub_uids, &tab->uid);
+    if(!u)
+      ui_m(NULL, 0, "User is not online.");
+    else
+      hub_msg(tab->hub, u, args, me);
+  }
 }
 
 
@@ -742,14 +745,13 @@ static void c_msg(char *args) {
     else {
       // get or open tab and make sure it's selected
       struct ui_tab *t = ui_hub_getmsg(tab, u);
-      if(!t) {
-        t = ui_msg_create(tab->hub, u);
-        ui_tab_open(t, TRUE);
-      } else
+      if(!t)
+        ui_tab_open(ui_msg_create(tab->hub, u), TRUE);
+      else
         ui_tab_cur = g_list_find(ui_tabs, t);
       // if we need to send something, do so
       if(sep && *sep)
-        hub_msg(tab->hub, t->msg_user, sep, FALSE);
+        hub_msg(tab->hub, u, sep, FALSE);
     }
   }
 }
@@ -1174,6 +1176,7 @@ static void c_gc(char *args) {
 static void c_whois(char *args) {
   struct ui_tab *h = tab;
   char *u = NULL;
+  guint64 uid = 0;
   gboolean utf8 = TRUE;
   if(tab->type != UIT_HUB && tab->type != UIT_MSG)
     ui_m(NULL, 0, "This command can only be used on hub and message tabs.");
@@ -1183,14 +1186,11 @@ static void c_whois(char *args) {
     h = tab->hub->tab;
     if(args[0])
       u = args;
-    else if(!tab->hub->adc && tab->msg_user) {
-      utf8 = FALSE;
-      u = tab->msg_user->name_hub;
-    } else
-      u = tab->msg_uname;
+    else
+      uid = tab->uid;
   } else
     u = args;
-  if(u && !ui_hub_finduser(h, 0, u, utf8))
+  if((u || uid) && !ui_hub_finduser(h, uid, u, utf8))
     ui_m(NULL, 0, "No user found with that name.");
 }
 
@@ -1201,14 +1201,17 @@ static void c_grant(char *args) {
     ui_m(NULL, 0, "This command can only be used on hub and message tabs.");
   else if(!args[0] && tab->type != UIT_MSG)
     ui_m(NULL, 0, "No user specified. See `/help grant' for more information.");
-  else if(args[0])
+  else if(args[0]) {
     u = hub_user_get(tab->hub, args);
-  else
-    u = tab->msg_user;
+    if(!u)
+      ui_m(NULL, 0, "No user found with that name.");
+  } else {
+    u = g_hash_table_lookup(hub_uids, &tab->uid);
+    if(!u)
+      ui_m(NULL, 0, "User not line.");
+  }
 
-  if(!u)
-    ui_m(NULL, 0, "No user found with that name.");
-  else {
+  if(u) {
     cc_grant(u);
     ui_m(NULL, 0, "Slot granted.");
   }

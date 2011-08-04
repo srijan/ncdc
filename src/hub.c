@@ -873,13 +873,13 @@ static void adc_handle(struct hub *hub, char *msg) {
     else {
       int code = (cmd.argv[0][1]-'0')*10 + (cmd.argv[0][2]-'0');
       if(!code)
-        ui_mf(hub->tab, UIP_MED, "(status-%02d) %s", code, cmd.argv[1]);
+        ui_mf(hub->tab, UIP_LOW, "(status-%02d) %s", code, cmd.argv[1]);
       if(cmd.argv[0][0] == '1')
-        ui_mf(hub->tab, UIP_MED, "(warning-%02d) %s", code, cmd.argv[1]);
+        ui_mf(hub->tab, UIP_LOW, "(warning-%02d) %s", code, cmd.argv[1]);
       if(cmd.argv[0][0] == '2') {
-        ui_mf(hub->tab, UIP_MED, "(error-%02d) %s", code, cmd.argv[1]);
+        ui_mf(hub->tab, UIP_LOW, "(error-%02d) %s", code, cmd.argv[1]);
         if(cmd.type == 'I')
-          hub_disconnect(hub, FALSE); // TODO: whether we should reconnect or not depends on the error code
+          hub_disconnect(hub, code == 11 || code == 24 || code == 25 || code == 30 || code == 32 || code == 44);
       }
     }
     break;

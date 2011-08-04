@@ -659,7 +659,6 @@ static void adc_handle(struct cc *cc, char *msg) {
       g_set_error(&cc->err, 1, 0, "(%s) %s", cmd.argv[0], cmd.argv[1]);
       if(cmd.argv[0][0] == '2')
         cc_disconnect(cc);
-      // TODO: communicate 51/52 (file (part) not available) with the DL queue
     } else if(!adc_getparam(cmd.argv, "RF", NULL))
       g_message("Status: %s: (%s) %s", net_remoteaddr(cc->net), cmd.argv[0], cmd.argv[1]);
     break;

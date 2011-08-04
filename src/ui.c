@@ -766,8 +766,8 @@ static void ui_conn_draw_row(struct ui_listing *list, GSequenceIter *iter, int r
     char tmp[30];
     strcpy(tmp, "IP:");
     strcat(tmp, cc->remoteaddr);
-    if(index(tmp+3, ':'))
-      *(index(tmp+3, ':')) = 0;
+    if(strchr(tmp+3, ':'))
+      *(strchr(tmp+3, ':')) = 0;
     mvaddstr(row, 4, tmp);
   }
 
@@ -792,7 +792,7 @@ static void ui_conn_draw_row(struct ui_listing *list, GSequenceIter *iter, int r
     mvaddstr(row, 57, "Disconnected: ");
     addnstr(cc->err->message, str_offset_from_columns(cc->err->message, wincols-(57+14)));
   } else if(cc->last_file) {
-    char *file = rindex(cc->last_file, '/');
+    char *file = strrchr(cc->last_file, '/');
     if(file)
       file++;
     else

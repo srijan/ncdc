@@ -989,7 +989,7 @@ void adc_parse(const char *str, struct adc_cmd *c, int *feats, GError **err) {
   // to make sure it's correct. Some hubs broadcast F messages without actually
   // checking the listed features. :-/
   if(c->type == 'F') {
-    int l = index(off, ' ') ? index(off, ' ')-off : strlen(off);
+    int l = strchr(off, ' ') ? strchr(off, ' ')-off : strlen(off);
     if((l % 5) != 0) {
       g_set_error_literal(err, 1, 0, "Message too short");
       return;

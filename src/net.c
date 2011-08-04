@@ -437,7 +437,7 @@ void net_connect(struct net *n, const char *addr, unsigned short defport, void (
   // From g_socket_client_connect_to_host() documentation:
   //   "In general, host_and_port is expected to be provided by the user"
   // But it doesn't properly give an error when the URL contains a space.
-  if(index(addr, ' ')) {
+  if(strchr(addr, ' ')) {
     GError *err = NULL;
     g_set_error_literal(&err, 1, G_IO_ERROR_INVALID_ARGUMENT, "Address may not contain a space.");
     n->cb_err(n, NETERR_CONN, err);
@@ -591,7 +591,7 @@ static gboolean udp_handle_out(GSocket *sock, GIOCondition cond, gpointer dat) {
 // dest is assumed to be a valid IPv4 address with an optional port ("x.x.x.x" or "x.x.x.x:p")
 void net_udp_send_raw(const char *dest, const char *msg, int len) {
   char *destc = g_strdup(dest);
-  char *port_str = index(destc, ':');
+  char *port_str = strchr(destc, ':');
   long port = 412;
   if(port_str) {
     *port_str = 0;

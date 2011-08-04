@@ -271,7 +271,7 @@ gboolean fl_search_match_name(struct fl_list *fl, struct fl_search *s) {
   if(!tmp || !*tmp)
     return TRUE;
 
-  char *l = rindex(fl->name, '.');
+  char *l = strrchr(fl->name, '.');
   if(G_UNLIKELY(!l || !l[1]))
     return FALSE;
   l++;

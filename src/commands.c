@@ -870,7 +870,7 @@ static void c_open(char *args) {
     args += 3;
     g_strstrip(args);
   }
-  char *name = args, *addr = index(args, ' ');
+  char *name = args, *addr = strchr(args, ' ');
   if(name[0] == '#')
     name++;
   if(addr)

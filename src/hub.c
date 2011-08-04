@@ -231,12 +231,12 @@ static void user_nmdc_nfo(struct hub *hub, struct hub_user *u, char *str) {
   unsigned int as = 0;
   guint64 share = 0;
 
-  if(!(next = index(str, '$')) || strlen(next) < 3 || next[2] != '$')
+  if(!(next = strchr(str, '$')) || strlen(next) < 3 || next[2] != '$')
     return;
   *next = 0; next += 3;
 
   // tag
-  if(str[0] && str[strlen(str)-1] == '>' && (tmp = rindex(str, '<'))) {
+  if(str[0] && str[strlen(str)-1] == '>' && (tmp = strrchr(str, '<'))) {
     *tmp = 0;
     tmp++;
     tmp[strlen(tmp)-1] = 0;
@@ -254,7 +254,7 @@ static void user_nmdc_nfo(struct hub *hub, struct hub_user *u, char *str) {
       || sscanf(tmp, "O:%u", &as));\
   } while(0)
 
-    while((t = index(tmp, ','))) {
+    while((t = strchr(tmp, ','))) {
       *t = 0;
       L(tmp);
       tmp = t+1;
@@ -270,7 +270,7 @@ static void user_nmdc_nfo(struct hub *hub, struct hub_user *u, char *str) {
 
   // connection and flag
   str = next;
-  if(!(next = index(str, '$')))
+  if(!(next = strchr(str, '$')))
     return;
   *next = 0; next++;
 
@@ -282,7 +282,7 @@ static void user_nmdc_nfo(struct hub *hub, struct hub_user *u, char *str) {
 
   // email
   str = next;
-  if(!(next = index(str, '$')))
+  if(!(next = strchr(str, '$')))
     return;
   *next = 0; next++;
 
@@ -291,7 +291,7 @@ static void user_nmdc_nfo(struct hub *hub, struct hub_user *u, char *str) {
 
   // share
   str = next;
-  if(!(next = index(str, '$')))
+  if(!(next = strchr(str, '$')))
     return;
   *next = 0;
   share = g_ascii_strtoull(str, NULL, 10);

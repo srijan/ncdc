@@ -1284,6 +1284,123 @@ static void c_browse(char *args) {
 }
 
 
+static void c_search(char *args) {
+  // Split arguments
+  char **argv;
+  int argc;
+  GError *err = NULL;
+  if(!g_shell_parse_argv(args, &argc, &argv, &err)) {
+    ui_mf(NULL, 0, "Error parsing arguments: %s", err->message);
+    g_error_free(err);
+    return;
+  }
+  if(!argc) {
+    ui_m(NULL, 0, "No search options specified.");
+    return;
+  }
+
+  // Create basic query
+  gboolean allhubs = FALSE;
+  gboolean stoparg = FALSE;
+  int qlen = 0;
+  struct search_q *q = g_slice_new0(struct search_q);
+  q->query = g_new0(char *, argc+1);
+  q->type = 1;
+
+  // Loop through arguments. (Later arguments overwrite earlier ones)
+  int i;
+  for(i=0; i<argc; i++) {
+    // query
+    if(stoparg || argv[i][0] != '-')
+      q->query[qlen++] = g_strdup(argv[i]);
+    // --
+    else if(strcmp(argv[i], "--") == 0)
+      stoparg = TRUE;
+    // -hub, -all
+    else if(strcmp(argv[i], "-hub") == 0)
+      allhubs = FALSE;
+    else if(strcmp(argv[i], "-all") == 0)
+      allhubs = TRUE;
+    // -le, -ge
+    else if(strcmp(argv[i], "-le") == 0 || strcmp(argv[i], "-ge") == 0) {
+      q->ge = strcmp(argv[i], "-ge") == 0;
+      if(++i >= argc) {
+        ui_mf(NULL, 0, "Option `%s' expects an argument.", argv[i-1]);
+        goto c_search_clean;
+      }
+      q->size = str_parsesize(argv[i]);
+      if(q->size == G_MAXUINT64) {
+        ui_mf(NULL, 0, "Invalid size argument for option `%s'.", argv[i-1]);
+        goto c_search_clean;
+      }
+    // -t
+    } else if(strcmp(argv[i], "-t") == 0) {
+      if(++i >= argc) {
+        ui_mf(NULL, 0, "Option `%s' expects an argument.", argv[i-1]);
+        goto c_search_clean;
+      }
+      if('1' <= argv[i][0] && argv[i][0] <= '8' && !argv[i][1])
+        q->type = argv[i][0]-'0';
+      else if(strcmp(argv[i], "any") == 0)      q->type = 1;
+      else if(strcmp(argv[i], "audio") == 0)    q->type = 2;
+      else if(strcmp(argv[i], "archive") == 0)  q->type = 3;
+      else if(strcmp(argv[i], "doc") == 0)      q->type = 4;
+      else if(strcmp(argv[i], "exe") == 0)      q->type = 5;
+      else if(strcmp(argv[i], "img") == 0)      q->type = 6;
+      else if(strcmp(argv[i], "video") == 0)    q->type = 7;
+      else if(strcmp(argv[i], "dir") == 0)      q->type = 8;
+      else {
+        ui_mf(NULL, 0, "Unknown argument for option `%s'.", argv[i-1]);
+        goto c_search_clean;
+      }
+    // -tth
+    } else if(strcmp(argv[i], "-tth") == 0) {
+      if(++i >= argc) {
+        ui_mf(NULL, 0, "Option `%s' expects an argument.", argv[i-1]);
+        goto c_search_clean;
+      }
+      if(strlen(argv[i]) != 39 || strspn(argv[i], "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ234567") != 39) {
+        ui_m(NULL, 0, "Invalid TTH root.");
+        goto c_search_clean;
+      }
+      q->type = 9;
+      base32_decode(argv[i], q->tth);
+    // oops
+    } else {
+      ui_mf(NULL, 0, "Unknown option: %s", argv[i]);
+      goto c_search_clean;
+    }
+  }
+
+  // validate
+  if(!allhubs && tab->type != UIT_HUB && tab->type != UIT_MSG) {
+    ui_m(NULL, 0, "This command can only be used on hub tabs. Use the `-all' option to search on all connected hubs.");
+    goto c_search_clean;
+  }
+  if(allhubs) {
+    GList *n;
+    for(n=ui_tabs; n; n=n->next) {
+      struct ui_tab *t = n->data;
+      if(t->type == UIT_HUB && t->hub->nick_valid)
+        break;
+    }
+    if(!n) {
+      ui_m(NULL, 0, "Not connected to any hubs.");
+      goto c_search_clean;
+    }
+  }
+
+  // temporary
+  ui_m(NULL, 0, "Sorry, searching is not implemented yet.");
+
+c_search_clean:
+  g_strfreev(argv);
+  search_q_free(q);
+}
+
+
+
+
 // definition of the command list
 static struct cmd cmds[] = {
   { "browse", c_browse, c_msg_sug,
@@ -1412,6 +1529,28 @@ static struct cmd cmds[] = {
     " in the command line is equivalent to `/say hello.'.\n\n"
     "Using the /say command explicitly may be useful to send message starting with '/' to"
     " the chat, for example `/say /help is what you are looking for'."
+  },
+  { "search", c_search, NULL,
+    "[options] <query>", "Search for files.",
+    "Performs a file search, opening a new tab with the results.\n\n"
+    "Available options:\n"
+    "  -hub      Search the current hub only. (default)\n"
+    "  -all      Search all connected hubs.\n"
+    "  -le  <s>  Size of the file must be less than <s>.\n"
+    "  -ge  <s>  Size of the file must be larger than <s>.\n"
+    "  -t   <t>  File must be of type <t>. (see below)\n"
+    "  -tth <h>  TTH root of this file must match <h>.\n\n"
+    "File sizes (<s> above) accept the following suffixes: G (GiB), M (MiB) and K (KiB).\n\n"
+    "The following file types can be used with the -t option:\n"
+    "  1  any      Any file or directory. (default)\n"
+    "  2  audio    Audio files.\n"
+    "  3  archive  (Compressed) archives.\n"
+    "  4  doc      Text documents.\n"
+    "  5  exe      Windows executables.\n"
+    "  6  img      Image files.\n"
+    "  7  video    Videos files.\n"
+    "  8  dir      Directories.\n"
+    "Note that file type matching is done using the file extension, and is not very reliable."
   },
   { "set", c_set, c_set_sug,
     "[<key> [<value>]]", "Get or set configuration variables.",

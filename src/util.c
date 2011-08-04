@@ -433,6 +433,29 @@ char *str_casestr(const char *haystack, const char *needle) {
 }
 
 
+// Parses a size string. ('<num>[GMK](iB)?'). Returns G_MAXUINT64 on error.
+guint64 str_parsesize(const char *str) {
+  char *e = NULL;
+  guint64 num = strtoull(str, &e, 10);
+  if(e == str)
+    return G_MAXUINT64;
+  if(!*e)
+    return num;
+  if(*e == 'G' || *e == 'g')
+    num *= 1024*1024*1024;
+  else if(*e == 'M' || *e == 'm')
+    num *= 1024*1024;
+  else if(*e == 'K' || *e == 'K')
+    num *= 1024;
+  else
+    return G_MAXUINT64;
+  if(!e[1] || g_strcasecmp(e+1, "b") == 0 || g_strcasecmp(e+1, "ib") == 0)
+    return num;
+  else
+    return G_MAXUINT64;
+}
+
+
 // Prefixes all strings in the array-of-strings with a string, obtained by
 // concatenating all arguments together. Last argument must be NULL.
 void strv_prefix(char **arr, const char *str, ...) {
@@ -1100,4 +1123,28 @@ void adc_append(GString *c, const char *name, const char *arg) {
   g_string_append(c, enc);
   g_free(enc);
 }
+
+
+
+
+
+// Search related helper functions
+
+#if INTERFACE
+
+struct search_q {
+  char type;    // NMDC search type (if 9, ignore all fields except tth)
+  gboolean ge;  // TRUE -> match >= size; FALSE -> match <= size
+  guint64 size; // 0 = disabled.
+  char **query; // list of patterns to include
+  char tth[24]; // only used when type = 9
+};
+
+
+#define search_q_free(q) do {\
+    g_strfreev(q->query);\
+    g_slice_free(struct search_q, q);\
+  } while(0)
+
+#endif
 

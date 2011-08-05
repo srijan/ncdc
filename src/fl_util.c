@@ -26,7 +26,6 @@
 
 #include "ncdc.h"
 #include <errno.h>
-#include <string.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <libxml/xmlreader.h>
@@ -460,7 +459,7 @@ static int fl_load_handle(xmlTextReaderPtr reader, gboolean *havefl, gboolean *n
         return -1;
       }
       attr[2] = (char *)xmlTextReaderGetAttribute(reader, (xmlChar *)"TTH");
-      if(!attr[2] || strlen(attr[2]) != 39 || strspn(attr[2], "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567") != 39) {
+      if(!attr[2] || !istth(attr[2])) {
         free(attr[0]);
         free(attr[1]);
         return -1;

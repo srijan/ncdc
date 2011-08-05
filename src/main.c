@@ -30,7 +30,6 @@
 #include <signal.h>
 #include <wchar.h>
 #include <errno.h>
-#include <string.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <gdbm.h>

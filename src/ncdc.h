@@ -29,6 +29,7 @@
 #include <gio/gio.h>
 #include <sys/types.h>
 #include <time.h>
+#include <string.h>
 
 #define _XOPEN_SOURCE_EXTENDED
 #ifdef HAVE_NCURSESW_NCURSES_H

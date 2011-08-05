@@ -27,7 +27,6 @@
 #include "ncdc.h"
 #include <unistd.h>
 #include <errno.h>
-#include <string.h>
 #include <limits.h>
 #include <stdlib.h>
 #include <sys/stat.h>

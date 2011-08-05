@@ -27,7 +27,6 @@
 #include "ncdc.h"
 #include <unistd.h>
 #include <errno.h>
-#include <string.h>
 #include <stdlib.h>
 #include <glib/gstdio.h>
 #include <sys/file.h>
@@ -604,6 +603,15 @@ path_suggest_f:
 }
 
 
+
+
+#if INTERFACE
+
+// Test whether a string is a valid TTH hash. I.e., whether it is a
+// base32-encoded 39-character string.
+#define istth(s) (strlen(s) == 39 && strspn(s, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ234567") == 39)
+
+#endif
 
 
 // from[24] (binary) -> to[39] (ascii - no padding zero will be added)

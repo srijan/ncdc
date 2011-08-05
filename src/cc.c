@@ -26,7 +26,6 @@
 
 #include "ncdc.h"
 #include <stdlib.h>
-#include <string.h>
 #include <sys/stat.h>
 
 
@@ -401,7 +400,7 @@ static void handle_adcsnd(struct cc *cc, gboolean tthl, guint64 start, guint64 b
 static void handle_adcget(struct cc *cc, char *type, char *id, guint64 start, gint64 bytes, GError **err) {
   // tthl
   if(strcmp(type, "tthl") == 0) {
-    if(strncmp(id, "TTH/", 4) != 0 || strlen(id) != 4+39 || start != 0 || bytes != -1) {
+    if(strncmp(id, "TTH/", 4) != 0 || !istth(id+4) || start != 0 || bytes != -1) {
       g_set_error_literal(err, 1, 40, "Invalid arguments");
       return;
     }
@@ -470,7 +469,7 @@ static void handle_adcget(struct cc *cc, char *type, char *id, guint64 start, gi
   } else if(id[0] == '/' && fl_local_list) {
     f = fl_list_from_path(fl_local_list, id);
   // TTH/
-  } else if(strncmp(id, "TTH/", 4) == 0 && strlen(id) == 4+39) {
+  } else if(strncmp(id, "TTH/", 4) == 0 && istth(id+4)) {
     char root[24];
     base32_decode(id+4, root);
     GSList *l = fl_local_from_tth(root);
@@ -593,12 +592,12 @@ static void adc_handle(struct cc *cc, char *msg) {
       char *id = adc_getparam(cmd.argv, "ID", NULL);
       char *token = adc_getparam(cmd.argv, "TO", NULL);
       char cid[24];
-      if(strlen(id) == 39)
+      if(istth(id))
         base32_decode(id, cid);
       if(!id || (cc->active && !token)) {
         g_warning("User did not sent a CID or token. (%s): %s", net_remoteaddr(cc->net), msg);
         cc_disconnect(cc);
-      } else if(strlen(id) != 39 || (!cc->active && memcmp(cid, cc->cid, 8) != 0)) {
+      } else if(!istth(id) || (!cc->active && memcmp(cid, cc->cid, 8) != 0)) {
         g_warning("Incorrect CID. (%s): %s", net_remoteaddr(cc->net), msg);
         cc_disconnect(cc);
       } else if(cc->active) {

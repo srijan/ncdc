@@ -26,7 +26,6 @@
 
 #include "ncdc.h"
 #include <stdlib.h>
-#include <string.h>
 #include <errno.h>
 
 #include <sys/stat.h>
@@ -911,7 +910,7 @@ static void dl_inc_clean() {
   while((n = g_dir_read_name(d))) {
     // Only consider files that we have created, which always happen to have a
     // base32-encoded hash as filename.
-    if(strlen(n) != 39 || strspn(n, "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567") != 39)
+    if(!istth(n))
       continue;
     base32_decode(n, hash);
     if(g_hash_table_lookup(dl_queue, hash))

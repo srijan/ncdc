@@ -25,7 +25,6 @@
 
 
 #include "ncdc.h"
-#include <string.h>
 #include <stdlib.h>
 
 
@@ -670,7 +669,7 @@ static void adc_sch(struct hub *hub, struct adc_cmd *cmd) {
   if(td && strtoll(td, NULL, 10) > fl_hash_keep_level)
     return;
 
-  if(tr && strlen(tr) != 39)
+  if(tr && !istth(tr))
     return;
 
   struct hub_user *u = g_hash_table_lookup(hub->sessions, GINT_TO_POINTER(cmd->source));
@@ -813,8 +812,8 @@ static void adc_handle(struct hub *hub, char *msg) {
         char *nick = adc_getparam(cmd.argv, "NI", NULL);
         char *cid = adc_getparam(cmd.argv, "ID", NULL);
         // Note that the ADC spec allows hashes of varying length. I'm limiting
-        // myself to 39 here since that is more memory-efficient.
-        if(nick && cid && strlen(cid) == 39)
+        // myself to TTH hashes here since that is more memory-efficient.
+        if(nick && cid && istth(cid))
           u = user_add(hub, nick, cid);
       }
       if(!u)
@@ -1020,7 +1019,7 @@ static void nmdc_search(struct hub *hub, char *from, int size_m, guint64 size, i
 
   // TTH lookup (YAY! this is fast!)
   if(type == 9) {
-    if(strncmp(query, "TTH:", 4) != 0 || strlen(query) != 4+39) {
+    if(strncmp(query, "TTH:", 4) != 0 || !istth(query+4)) {
       g_message("Invalid TTH $Search for %s", from);
       return;
     }

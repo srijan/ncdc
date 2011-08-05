@@ -25,7 +25,6 @@
 
 
 #include "ncdc.h"
-#include <string.h>
 #include <limits.h>
 #include <stdlib.h>
 #include <errno.h>
@@ -1294,10 +1293,6 @@ static void c_search(char *args) {
     g_error_free(err);
     return;
   }
-  if(!argc) {
-    ui_m(NULL, 0, "No search options specified.");
-    return;
-  }
 
   // Create basic query
   gboolean allhubs = FALSE;
@@ -1359,7 +1354,7 @@ static void c_search(char *args) {
         ui_mf(NULL, 0, "Option `%s' expects an argument.", argv[i-1]);
         goto c_search_clean;
       }
-      if(strlen(argv[i]) != 39 || strspn(argv[i], "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ234567") != 39) {
+      if(!istth(argv[i])) {
         ui_m(NULL, 0, "Invalid TTH root.");
         goto c_search_clean;
       }
@@ -1388,6 +1383,10 @@ static void c_search(char *args) {
       ui_m(NULL, 0, "Not connected to any hubs.");
       goto c_search_clean;
     }
+  }
+  if(!qlen && q->type != 9) {
+    ui_m(NULL, 0, "No search query given.");
+    goto c_search_clean;
   }
 
   // temporary

@@ -1040,6 +1040,19 @@ static void adc_handle(struct hub *hub, char *msg) {
     }
     break;
 
+  case ADCC_RES:
+    if(cmd.type != 'D' || cmd.argc < 3)
+      g_warning("Invalid message from %s: %s", net_remoteaddr(hub->net), msg);
+    else {
+      struct search_r *r = search_parse_adc(hub, &cmd);
+      if(r) {
+        // TODO: notify tab
+        search_r_free(r);
+      } else
+        g_warning("Invalid message from %s: %s", net_remoteaddr(hub->net), msg);
+    }
+    break;
+
   default:
     g_message("Unknown command from %s: %s", net_remoteaddr(hub->net), msg);
   }
@@ -1107,7 +1120,6 @@ static void nmdc_search(struct hub *hub, char *from, int size_m, guint64 size, i
     for(; *tmp; tmp++)
       if(*tmp == '/')
         *tmp = '\\';
-    // TODO: In what encoding should the path really be? UTF-8 or hub?
     tmp = nmdc_encode_and_escape(hub, fl);
     if(res[i]->isfile) {
       base32_encode(res[i]->tth, tth+4);
@@ -1393,6 +1405,16 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
   if(strncmp(cmd, "$HubIsFull", 10) == 0) {
     ui_m(hub->tab, 0, "Hub is full.");
     hub_disconnect(hub, TRUE);
+  }
+
+  // $SR
+  if(strncmp(cmd, "$SR", 3) == 0) {
+    struct search_r *r = search_parse_nmdc(hub, cmd);
+    if(r) {
+      // TODO: notify search tab
+      search_r_free(r);
+    } else
+      g_message("Received invalid $SR: %s", cmd);
   }
 
   // global hub message

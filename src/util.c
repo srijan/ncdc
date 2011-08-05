@@ -1148,6 +1148,15 @@ struct search_q {
   char tth[24]; // only used when type = 9
 };
 
+// Represents a search result, coming from either NMDC $SR or ADC RES.
+struct search_r {
+  guint64 uid;
+  char *file;     // full path + filename. Slashes as path saparator, no trailing slash
+  guint64 size;   // file size, G_MAXUINT64 = directory
+  int slots;      // free slots
+  char tth[24];   // TTH root (for regular files)
+}
+
 struct search_type {
   char *name;
   char *exts[10];
@@ -1174,5 +1183,143 @@ void search_q_free(struct search_q *q) {
     return;
   g_strfreev(q->query);
   g_slice_free(struct search_q, q);
+}
+
+
+void search_r_free(struct search_r *r) {
+  if(!r)
+    return;
+  g_free(r->file);
+  g_slice_free(struct search_r, r);
+}
+
+
+// Currently requires hub to be valid. Modifies msg in-place for temporary stuff.
+// TODO: Handle active responses (hub=NULL)
+struct search_r *search_parse_nmdc(struct hub *hub, char *msg) {
+  struct search_r r = {};
+  char *tmp, *tmp2;
+  gboolean hastth = FALSE;
+
+  // forward search to get the username and offset to the filename
+  if(strncmp(msg, "$SR ", 4) != 0)
+    return NULL;
+  msg += 4;
+  char *user = msg;
+  msg = strchr(msg, ' ');
+  if(!msg)
+    return NULL;
+  *(msg++) = 0;
+  r.file = msg;
+
+  // msg is now searched backwards, because we can't reliably determine the end
+  // of the filename otherwise.
+
+  // <space>(hub_ip:hub_port). Also ignored since we only support passive results for now.
+  tmp = strrchr(msg, ' ');
+  if(!tmp)
+    return NULL;
+  *tmp = 0;
+
+  // <0x05>TTH:stuff
+  tmp = strrchr(msg, 5);
+  if(!tmp)
+    return NULL;
+  *(tmp++) = 0;
+  if(strncmp(tmp, "TTH:", 4) == 0) {
+    if(!istth(tmp+4))
+      return NULL;
+    base32_decode(tmp+4, r.tth);
+    hastth = TRUE;
+  }
+
+  // <space>free_slots/total_slots. We only care about the free slots.
+  tmp = strrchr(msg, ' ');
+  if(!tmp)
+    return NULL;
+  *(tmp++) = 0;
+  r.slots = g_ascii_strtoull(tmp, &tmp2, 10);
+  if(tmp == tmp2 || !tmp2 || *tmp2 != '/')
+    return NULL;
+
+  // At this point, msg contains either "filename<0x05>size" in the case of a
+  // file or "path" in the case of a directory.
+  tmp = strrchr(msg, 5);
+  if(tmp) {
+    // files must have a TTH
+    if(!hastth)
+      return NULL;
+    *(tmp++) = 0;
+    r.size = g_ascii_strtoull(tmp, &tmp2, 10);
+    if(tmp == tmp2 || !tmp2 || *tmp2)
+      return NULL;
+  } else
+    r.size = G_MAXUINT64;
+
+  // \ -> /, and remove trailing slashes
+  for(tmp = r.file; *tmp; tmp++)
+    if(*tmp == '\\')
+      *tmp = '/';
+  while(--tmp > r.file && *tmp == '/')
+    *tmp = 0;
+
+  // Figure out r.uid
+  struct hub_user *u = g_hash_table_lookup(hub->users, user);
+  if(!u)
+    return NULL;
+  r.uid = u->uid;
+
+  // If we're here, then we can safely copy and return the result.
+  struct search_r *res = g_slice_dup(struct search_r, &r);
+  res->file = nmdc_unescape_and_decode(hub, r.file);
+  return res;
+}
+
+
+// TODO: active responses
+struct search_r *search_parse_adc(struct hub *hub, struct adc_cmd *cmd) {
+  struct search_r r = {};
+  char *tmp, *tmp2;
+
+  // file
+  r.file = adc_getparam(cmd->argv, "FN", NULL);
+  if(!r.file)
+    return NULL;
+  while(strlen(r.file) > 1 && r.file[strlen(r.file)-1] == '/')
+    r.file[strlen(r.file)-1] = 0;
+
+  // tth & size
+  tmp = adc_getparam(cmd->argv, "TR", NULL);
+  if(tmp) {
+    if(!istth(tmp))
+      return NULL;
+    base32_decode(tmp, r.tth);
+    tmp = adc_getparam(cmd->argv, "SI", NULL);
+    if(!tmp)
+      return NULL;
+    r.size = g_ascii_strtoull(tmp, &tmp2, 10);
+    if(tmp == tmp2 || !tmp2 || *tmp2)
+      return NULL;
+  } else
+    r.size = G_MAXUINT64;
+
+  // slots
+  tmp = adc_getparam(cmd->argv, "SL", NULL);
+  if(tmp) {
+    r.slots = g_ascii_strtoull(tmp, &tmp2, 10);
+    if(tmp == tmp2 || !tmp2 || *tmp2)
+      return NULL;
+  }
+
+  // uid
+  struct hub_user *u = g_hash_table_lookup(hub->sessions, GINT_TO_POINTER(cmd->source));
+  if(!u)
+    return NULL;
+  r.uid = u->uid;
+
+  // If we're here, then we can safely copy and return the result.
+  struct search_r *res = g_slice_dup(struct search_r, &r);
+  res->file = g_strdup(r.file);
+  return res;
 }
 

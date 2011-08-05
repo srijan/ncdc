@@ -37,40 +37,43 @@
 #define UIP_HIGH  3 // direct messages to you (PM or name mentioned)
 
 #define UIT_MAIN     0
-#define UIT_HUB      1
-#define UIT_USERLIST 2
-#define UIT_MSG      3
+#define UIT_HUB      1 // #hubname
+#define UIT_USERLIST 2 // @hubname
+#define UIT_MSG      3 // ~username
 #define UIT_CONN     4
-#define UIT_FL       5
+#define UIT_FL       5 // /username
 #define UIT_DL       6
+#define UIT_SEARCH   7 // ?query
 
 struct ui_tab {
   int type; // UIT_ type
   int prio; // UIP_ type
   char *name;
   struct ui_logwindow *log;    // MAIN, HUB, MSG
-  struct hub *hub;             // HUB, USERLIST, MSG
-  struct ui_listing *list;     // USERLIST, CONN, FL, DL
+  struct hub *hub;             // HUB, USERLIST, MSG, SEARCH
+  struct ui_listing *list;     // USERLIST, CONN, FL, DL, SEARCH
   guint64 uid;                 // FL, MSG
-  gboolean details;            // USERLIST, CONN
-  // HUB
-  struct ui_tab *userlist_tab;
-  gboolean hub_joincomplete;
+  gboolean details : 1;        // USERLIST, CONN
   // MSG
-  gboolean msg_online;
+  gboolean msg_online : 1;
   // USERLIST
-  gboolean user_reverse;
-  gboolean user_sort_share;
-  gboolean user_opfirst;
-  gboolean user_hide_desc;
-  gboolean user_hide_tag;
-  gboolean user_hide_mail;
-  gboolean user_hide_conn;
+  gboolean user_reverse : 1;
+  gboolean user_sort_share : 1;
+  gboolean user_opfirst : 1;
+  gboolean user_hide_desc : 1;
+  gboolean user_hide_tag : 1;
+  gboolean user_hide_mail : 1;
+  gboolean user_hide_conn : 1;
+  // HUB
+  gboolean hub_joincomplete : 1;
+  struct ui_tab *userlist_tab;
   // FL
   struct fl_list *fl_list;
   char *fl_uname;
   gboolean fl_loading;
   GError *fl_err;
+  // SEARCH
+  struct search_q *search_q;
 };
 
 #endif
@@ -258,15 +261,17 @@ void ui_hub_close(struct ui_tab *tab) {
   // close the userlist tab
   if(tab->userlist_tab)
     ui_userlist_close(tab->userlist_tab);
-  // close msg tabs
-  GList *t;
-  for(t=ui_tabs; t;) {
-    if(((struct ui_tab *)t->data)->type == UIT_MSG && ((struct ui_tab *)t->data)->hub == tab->hub) {
-      GList *n = t->next;
-      ui_msg_close(t->data);
-      t = n;
-    } else
-      t = t->next;
+  // close msg and search tabs
+  GList *n;
+  for(n=ui_tabs; n;) {
+    struct ui_tab *t = n->data;
+    n = n->next;
+    if((t->type == UIT_MSG || t->type == UIT_SEARCH) && t->hub == tab->hub) {
+      if(t->type == UIT_MSG)
+        ui_msg_close(t);
+      else
+        ui_search_close(t);
+    }
   }
   // remove ourself from the list
   ui_tab_remove(tab);
@@ -1385,6 +1390,73 @@ static void ui_dl_key(guint64 key) {
 
 
 
+// Search results tab (UIT_SEARCH)
+
+// Ownership of q is passed to the tab, and will be freed on close.
+struct ui_tab *ui_search_create(struct hub *hub, struct search_q *q) {
+  struct ui_tab *tab = g_new0(struct ui_tab, 1);
+  tab->type = UIT_SEARCH;
+  tab->search_q = q;
+  tab->hub = hub;
+
+  // figure out a suitable tab->name
+  if(q->type == 9) {
+    tab->name = g_new0(char, 41);
+    tab->name[0] = '?';
+    base32_encode(q->tth, tab->name+1);
+  } else {
+    char *s = g_strjoinv(" ", q->query);
+    tab->name = g_strdup_printf("?%s", s);
+    g_free(s);
+  }
+  if(strlen(tab->name) > 15)
+    tab->name[15] = 0;
+  while(tab->name[strlen(tab->name)-1] == ' ')
+    tab->name[strlen(tab->name)-1] = 0;
+
+  // Create an empty list
+  tab->list = ui_listing_create(g_sequence_new(NULL));
+  return tab;
+}
+
+
+void ui_search_close(struct ui_tab *tab) {
+  search_q_free(tab->search_q);
+  g_sequence_free(tab->list->list);
+  ui_listing_free(tab->list);
+  ui_tab_remove(tab);
+  g_free(tab->name);
+  g_free(tab);
+}
+
+
+static char *ui_search_title(struct ui_tab *tab) {
+  struct search_q *q = tab->search_q;
+  if(q->type == 9) {
+    char tth[40] = {};
+    base32_encode(q->tth, tth);
+    return g_strdup_printf("Searching for TTH:%s", tth);
+  } else {
+    char *s = g_strjoinv(" ", q->query);
+    char *r = g_strdup_printf("Searching for: %s", s);
+    g_free(r);
+    return s;
+  }
+}
+
+
+static void ui_search_key(struct ui_tab *tab, guint64 key) {
+  if(ui_listing_key(tab->list, key, (winrows-4)/2))
+    return;
+}
+
+
+static void ui_search_draw(struct ui_tab *tab) {
+  // TODO
+}
+
+
+
 
 
 // Generic message displaying thing.
@@ -1752,7 +1824,8 @@ void ui_draw() {
     curtab->type == UIT_MSG      ? ui_msg_title(curtab) :
     curtab->type == UIT_CONN     ? ui_conn_title() :
     curtab->type == UIT_FL       ? ui_fl_title(curtab) :
-    curtab->type == UIT_DL       ? ui_dl_title() : g_strdup("");
+    curtab->type == UIT_DL       ? ui_dl_title() :
+    curtab->type == UIT_SEARCH   ? ui_search_title(curtab) : g_strdup("");
   attron(A_REVERSE);
   mvhline(0, 0, ' ', wincols);
   mvaddstr(0, 0, title);
@@ -1780,6 +1853,7 @@ void ui_draw() {
   case UIT_CONN:     ui_conn_draw(); break;
   case UIT_FL:       ui_fl_draw(curtab); break;
   case UIT_DL:       ui_dl_draw(); break;
+  case UIT_SEARCH:   ui_search_draw(curtab); break;
   }
 
   refresh();
@@ -1865,6 +1939,7 @@ void ui_input(guint64 key) {
       case UIT_CONN:     ui_conn_key(key); break;
       case UIT_FL:       ui_fl_key(curtab, key); break;
       case UIT_DL:       ui_dl_key(key); break;
+      case UIT_SEARCH:   ui_search_key(curtab, key); break;
       }
     }
     // TODO: some user feedback on invalid key

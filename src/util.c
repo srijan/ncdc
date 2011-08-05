@@ -1148,13 +1148,6 @@ struct search_q {
   char tth[24]; // only used when type = 9
 };
 
-
-#define search_q_free(q) do {\
-    g_strfreev(q->query);\
-    g_slice_free(struct search_q, q);\
-  } while(0)
-
-
 struct search_type {
   char *name;
   char *exts[10];
@@ -1174,4 +1167,12 @@ struct search_type search_types[] = { {},
   { "dir"      }, // 8
   {}              // 9
 };
+
+
+void search_q_free(struct search_q *q) {
+  if(!q)
+    return;
+  g_strfreev(q->query);
+  g_slice_free(struct search_q, q);
+}
 

@@ -937,6 +937,8 @@ static void c_close(char *args) {
     ui_fl_close(tab);
   else if(tab->type == UIT_DL)
     ui_dl_close(tab);
+  else if(tab->type == UIT_SEARCH)
+    ui_search_close(tab);
 }
 
 
@@ -1399,8 +1401,9 @@ static void c_search(char *args) {
     }
   }
 
-  // temporary
-  ui_m(NULL, 0, "Sorry, searching is not implemented yet.");
+  // No errors? Then open a search tab and wait for the results.
+  ui_tab_open(ui_search_create(allhubs ? NULL : tab->hub, q), TRUE);
+  q = NULL; // make sure to not free it
 
 c_search_clean:
   g_strfreev(argv);

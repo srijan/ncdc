@@ -1154,5 +1154,24 @@ struct search_q {
     g_slice_free(struct search_q, q);\
   } while(0)
 
+
+struct search_type {
+  char *name;
+  char *exts[10];
+};
+
 #endif
+
+// NMDC search types and their extensions.
+struct search_type search_types[] = { {},
+  { "any"      }, // 1
+  { "audio",   { "mp3",  "mp2",  "wav",  "au",  "rm", "mid",  "sm"        } },
+  { "archive", { "zip",  "arj",  "rar", "lzh",  "gz",   "z", "arc", "pak" } },
+  { "doc",     { "doc",  "txt",  "wri", "pdf",  "ps", "tex"               } },
+  { "exe",     {  "pm",  "exe",  "bat", "com"                             } },
+  { "img",     { "gif",  "jpg", "jpeg", "bmp", "pcx", "png", "wmf", "psd" } },
+  { "video",   { "mpg", "mpeg",  "avi", "asf", "mov"                      } },
+  { "dir"      }, // 8
+  {}              // 9
+};
 

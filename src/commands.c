@@ -1367,26 +1367,36 @@ static void c_search(char *args) {
     }
   }
 
-  // validate
-  if(!allhubs && tab->type != UIT_HUB && tab->type != UIT_MSG) {
-    ui_m(NULL, 0, "This command can only be used on hub tabs. Use the `-all' option to search on all connected hubs.");
-    goto c_search_clean;
-  }
-  if(allhubs) {
-    GList *n;
-    for(n=ui_tabs; n; n=n->next) {
-      struct ui_tab *t = n->data;
-      if(t->type == UIT_HUB && t->hub->nick_valid)
-        break;
-    }
-    if(!n) {
-      ui_m(NULL, 0, "Not connected to any hubs.");
-      goto c_search_clean;
-    }
-  }
+  // validate & send
   if(!qlen && q->type != 9) {
     ui_m(NULL, 0, "No search query given.");
     goto c_search_clean;
+  }
+  if(!allhubs) {
+    if(tab->type != UIT_HUB && tab->type != UIT_MSG) {
+      ui_m(NULL, 0, "This command can only be used on hub tabs. Use the `-all' option to search on all connected hubs.");
+      goto c_search_clean;
+    }
+    if(!tab->hub->nick_valid) {
+      ui_m(NULL, 0, "Not connected");
+      goto c_search_clean;
+    }
+    hub_search(tab->hub, q);
+  }
+  if(allhubs) {
+    GList *n;
+    gboolean one = FALSE;
+    for(n=ui_tabs; n; n=n->next) {
+      struct ui_tab *t = n->data;
+      if(t->type == UIT_HUB && t->hub->nick_valid) {
+        hub_search(t->hub, q);
+        one = TRUE;
+      }
+    }
+    if(!one) {
+      ui_m(NULL, 0, "Not connected to any hubs.");
+      goto c_search_clean;
+    }
   }
 
   // temporary

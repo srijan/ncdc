@@ -484,6 +484,56 @@ void hub_opencc(struct hub *hub, struct hub_user *u) {
 }
 
 
+// Send a search request
+// TODO: active searches
+void hub_search(struct hub *hub, struct search_q *q) {
+  // ADC
+  if(hub->adc) {
+    // TODO: use FSCH to only get results from active users when we are passive?
+    GString *cmd = adc_generate('B', ADCC_SCH, hub->sid, 0);
+    if(q->type == 9) {
+      char tth[40] = {};
+      base32_encode(q->tth, tth);
+      g_string_append_printf(cmd, " TR%s", tth);
+    } else {
+      if(q->size)
+        g_string_append_printf(cmd, " %s%"G_GUINT64_FORMAT, q->ge ? "GE" : "LE", q->size);
+      if(q->type == 8)
+        g_string_append(cmd, " TY2");
+      else if(q->type != 1) {
+        char **e = search_types[(int)q->type].exts;
+        for(; *e; e++)
+          g_string_append_printf(cmd, " EX%s", *e);
+        g_string_append(cmd, " TY1");
+      }
+      char **s = q->query;
+      for(; *s; s++)
+        g_string_append_printf(cmd, " AN%s", *s);
+    }
+    net_send(hub->net, cmd->str);
+    g_string_free(cmd, TRUE);
+
+  // NMDC
+  } else {
+    if(q->type == 9) {
+      char tth[40] = {};
+      base32_encode(q->tth, tth);
+      net_sendf(hub->net, "$Search Hub:%s F?T?0?9?TTH:%s", hub->nick_hub, tth);
+    } else {
+      char *str = g_strjoinv(" ", q->query);
+      char *enc = nmdc_encode_and_escape(hub, str);
+      g_free(str);
+      for(str=enc; *str; str++)
+        if(*str == ' ')
+          *str = '$';
+      net_sendf(hub->net, "$Search Hub:%s %c?%c?%"G_GUINT64_FORMAT"?%d?%s",
+        hub->nick_hub, q->size ? 'T' : 'F', q->ge ? 'F' : 'T', q->size, q->type, enc);
+      g_free(enc);
+    }
+  }
+}
+
+
 #define streq(a) ((!a && !hub->nfo_##a) || (a && hub->nfo_##a && strcmp(a, hub->nfo_##a) == 0))
 #define eq(a) (a == hub->nfo_##a)
 
@@ -999,20 +1049,11 @@ static void adc_handle(struct hub *hub, char *msg) {
 
 
 static void nmdc_search(struct hub *hub, char *from, int size_m, guint64 size, int type, char *query) {
-  static char *exts[][10] = { { },
-    { "mp3", "mp2", "wav", "au", "rm", "mid", "sm" },
-    { "zip", "arj", "rar", "lzh", "gz", "z", "arc", "pak" },
-    { "doc", "txt", "wri", "pdf", "ps", "tex" },
-    { "pm", "exe", "bat", "com" },
-    { "gif", "jpg", "jpeg", "bmp", "pcx", "png", "wmf", "psd" },
-    { "mpg", "mpeg", "avi", "asf", "mov" },
-    { }, { }, { }
-  };
   int max = from[0] == 'H' ? 5 : 10;
   struct fl_list *res[max];
   struct fl_search s = {};
   s.filedir = type == 1 ? 3 : type == 8 ? 2 : 1;
-  s.ext = exts[type-1];
+  s.ext = search_types[type].exts;
   s.size = size;
   s.sizem = size_m;
   int i = 0;
@@ -1318,7 +1359,8 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
     char *size = g_match_info_fetch(nfo, 4);
     char *type = g_match_info_fetch(nfo, 5);
     char *query = g_match_info_fetch(nfo, 6);
-    nmdc_search(hub, from, sizerestrict[0] == 'F' ? -2 : ismax[0] == 'T' ? -1 : 1, g_ascii_strtoull(size, NULL, 10), type[0]-'0', query);
+    if(strcmp(from, hub->nick_hub) != 0)
+      nmdc_search(hub, from, sizerestrict[0] == 'F' ? -2 : ismax[0] == 'T' ? -1 : 1, g_ascii_strtoull(size, NULL, 10), type[0]-'0', query);
     g_free(from);
     g_free(sizerestrict);
     g_free(ismax);

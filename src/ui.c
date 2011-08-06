@@ -76,6 +76,8 @@ struct ui_tab {
   struct search_q *search_q;
   time_t search_t;
   gboolean search_hide_hub : 1;
+  gboolean search_reverse : 1;
+  int search_order : 3;
 };
 
 #endif
@@ -1395,6 +1397,69 @@ static void ui_dl_key(guint64 key) {
 // Search results tab (UIT_SEARCH)
 
 
+// Columns to sort on
+#define UISCH_USER  0
+#define UISCH_SIZE  1
+#define UISCH_SLOTS 2
+#define UISCH_FILE  3
+
+
+// Note: The ordering of the results partly depends on whether the user is
+// online or not (i.e. whether we know its name and hub). However, we do not
+// get notified when a user or hub changes state and can therefore not keep the
+// ordering of the list correct. This isn't a huge problem, though.
+
+
+// Compares users, uses a hub comparison as fallback
+static int ui_search_cmp_user(guint64 ua, guint64 ub) {
+  struct hub_user *a = g_hash_table_lookup(hub_uids, &ua);
+  struct hub_user *b = g_hash_table_lookup(hub_uids, &ub);
+  int o =
+    !a && !b ? (ua > ub ? 1 : ua < ub ? -1 : 0) :
+     a && !b ? 1 : !a && b ? -1 : strcmp(a->name, b->name);
+  if(!o && a && b)
+    return strcmp(a->hub->tab->name, b->hub->tab->name);
+  return o;
+}
+
+
+static int ui_search_cmp_file(const char *fa, const char *fb) {
+  const char *a = strrchr(fa, '/');
+  const char *b = strrchr(fb, '/');
+  return strcmp(a?a+1:fa, b?b+1:fb);
+}
+
+
+static gint ui_search_sort_func(gconstpointer da, gconstpointer db, gpointer dat) {
+  const struct search_r *a = da;
+  const struct search_r *b = db;
+  struct ui_tab *tab = dat;
+  int p = tab->search_order;
+
+  /* Sort columns and their alternatives:
+   * USER:  user/hub  -> file name -> file size
+   * SIZE:  size      -> TTH       -> file name
+   * SLOTS: slots     -> user/hub  -> file name
+   * FILE:  file name -> size      -> TTH
+   */
+#define CMP_USER  ui_search_cmp_user(a->uid, b->uid)
+#define CMP_SIZE  (a->size == b->size ? 0 : (a->size == G_MAXUINT64 ? 0 : a->size) > (b->size == G_MAXUINT64 ? 0 : b->size) ? 1 : -1)
+#define CMP_SLOTS (a->slots > b->slots ? 1 : a->slots < b->slots ? -1 : 0)
+#define CMP_FILE  ui_search_cmp_file(a->file, b->file)
+#define CMP_TTH   memcmp(a->tth, b->tth, 24)
+
+  // Try 1
+  int o = p == UISCH_USER ? CMP_USER : p == UISCH_SIZE ? CMP_SIZE : p == UISCH_SLOTS ? CMP_SLOTS : CMP_FILE;
+  // Try 2
+  if(!o)
+    o = p == UISCH_USER ? CMP_FILE : p == UISCH_SIZE ? CMP_TTH : p == UISCH_SLOTS ? CMP_USER : CMP_SIZE;
+  // Try 3
+  if(!o)
+    o = p == UISCH_USER ? CMP_SIZE : p == UISCH_SIZE ? CMP_FILE : p == UISCH_SLOTS ? CMP_FILE : CMP_TTH;
+  return tab->search_reverse ? -o : o;
+}
+
+
 // Called when a new search result has been received. Looks through the opened
 // search tabs and adds the result to the list if it matches the query.
 void ui_search_global_result(struct search_r *r) {
@@ -1402,7 +1467,7 @@ void ui_search_global_result(struct search_r *r) {
   for(n=ui_tabs; n; n=n->next) {
     struct ui_tab *t = n->data;
     if(t->type == UIT_SEARCH && search_match(t->search_q, r)) {
-      g_sequence_insert_before(g_sequence_get_end_iter(t->list->list), search_r_copy(r));
+      g_sequence_insert_sorted(t->list->list, search_r_copy(r), ui_search_sort_func, t);
       ui_listing_inserted(t->list);
     }
   }
@@ -1416,6 +1481,7 @@ struct ui_tab *ui_search_create(struct hub *hub, struct search_q *q) {
   tab->search_q = q;
   tab->hub = hub;
   tab->search_hide_hub = hub ? TRUE : FALSE;
+  tab->search_order = UISCH_FILE;
   time(&tab->search_t);
 
   // figure out a suitable tab->name
@@ -1555,6 +1621,7 @@ static void ui_search_key(struct ui_tab *tab, guint64 key) {
     return;
 
   struct search_r *sel = g_sequence_iter_is_end(tab->list->sel) ? NULL : g_sequence_get(tab->list->sel);
+  gboolean sort = FALSE;
 
   switch(key) {
   case INPT_CHAR('f'): // f - find user
@@ -1592,9 +1659,37 @@ static void ui_search_key(struct ui_tab *tab, guint64 key) {
   case INPT_CHAR('h'): // h - show/hide hub column
     tab->search_hide_hub = !tab->search_hide_hub;
     break;
+  case INPT_CHAR('u'): // u - sort on username
+    tab->search_reverse = tab->search_order == UISCH_USER ? !tab->search_reverse : FALSE;
+    tab->search_order = UISCH_USER;
+    sort = TRUE;
+    break;
+  case INPT_CHAR('s'): // s - sort on size
+    tab->search_reverse = tab->search_order == UISCH_SIZE ? !tab->search_reverse : FALSE;
+    tab->search_order = UISCH_SIZE;
+    sort = TRUE;
+    break;
+  case INPT_CHAR('l'): // l - sort on slots
+    tab->search_reverse = tab->search_order == UISCH_SLOTS ? !tab->search_reverse : FALSE;
+    tab->search_order = UISCH_SLOTS;
+    sort = TRUE;
+    break;
+  case INPT_CHAR('n'): // n - sort on filename
+    tab->search_reverse = tab->search_order == UISCH_FILE ? !tab->search_reverse : FALSE;
+    tab->search_order = UISCH_FILE;
+    sort = TRUE;
+    break;
   }
 
-  // TODO: sorting (and filtering?)
+  if(sort) {
+    g_sequence_sort(tab->list->list, ui_search_sort_func, tab);
+    ui_listing_sorted(tab->list);
+    ui_mf(NULL, 0, "Ordering by %s (%s)",
+      tab->search_order == UISCH_USER  ? "user name" :
+      tab->search_order == UISCH_SIZE  ? "file size" :
+      tab->search_order == UISCH_SLOTS ? "free slots" : "filename",
+      tab->search_reverse ? "descending" : "ascending");
+  }
 }
 
 

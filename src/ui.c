@@ -75,6 +75,7 @@ struct ui_tab {
   // SEARCH
   struct search_q *search_q;
   time_t search_t;
+  gboolean search_hide_hub : 1;
 };
 
 #endif
@@ -1414,6 +1415,7 @@ struct ui_tab *ui_search_create(struct hub *hub, struct search_q *q) {
   tab->type = UIT_SEARCH;
   tab->search_q = q;
   tab->hub = hub;
+  tab->search_hide_hub = hub ? TRUE : FALSE;
   time(&tab->search_t);
 
   // figure out a suitable tab->name
@@ -1465,6 +1467,8 @@ static char *ui_search_title(struct ui_tab *tab) {
 // TODO: mark already shared and queued files?
 static void ui_search_draw_row(struct ui_listing *list, GSequenceIter *iter, int row, void *dat) {
   struct search_r *r = g_sequence_get(iter);
+  struct ui_tab *tab = dat;
+
   if(iter == list->sel) {
     attron(A_BOLD);
     mvaddch(row, 0, '>');
@@ -1474,37 +1478,41 @@ static void ui_search_draw_row(struct ui_listing *list, GSequenceIter *iter, int
   struct hub_user *u = g_hash_table_lookup(hub_uids, &r->uid);
   if(u) {
     mvaddnstr(row, 2, u->name, str_offset_from_columns(u->name, 19));
-    mvaddnstr(row, 22, u->hub->tab->name, str_offset_from_columns(u->hub->tab->name, 13));
+    if(!tab->search_hide_hub)
+      mvaddnstr(row, 22, u->hub->tab->name, str_offset_from_columns(u->hub->tab->name, 13));
   } else
-    mvprintw(row, 2, "ID:%016"G_GINT64_MODIFIER"x (offline)", r->uid);
+    mvprintw(row, 2, "ID:%016"G_GINT64_MODIFIER"x%s", r->uid, !tab->search_hide_hub ? " (offline)" : "");
 
+  int i = tab->search_hide_hub ? 22 : 36;
   if(r->size == G_MAXUINT64)
-    mvaddstr(row, 36, "   DIR");
+    mvaddstr(row, i, "   DIR");
   else
-    mvaddstr(row, 36, str_formatsize(r->size));
+    mvaddstr(row, i, str_formatsize(r->size));
 
-  mvprintw(row, 48, "%3d/", r->slots);
+  mvprintw(row, i+12, "%3d/", r->slots);
   if(u)
-    mvprintw(row, 52, "%3d", u->slots);
+    mvprintw(row, i+16, "%3d", u->slots);
   else
-    mvaddstr(row, 52, "  -");
+    mvaddstr(row, i+16, "  -");
 
   char *fn = strrchr(r->file, '/');
   if(fn)
     fn++;
   else
     fn = r->file;
-  mvaddnstr(row, 57, fn, str_offset_from_columns(fn, wincols-57));
+  mvaddnstr(row, i+21, fn, str_offset_from_columns(fn, wincols-i-21));
 }
 
 
 static void ui_search_draw(struct ui_tab *tab) {
   attron(A_BOLD);
-  mvaddstr(1, 2,  "User");
-  mvaddstr(1, 22, "Hub");
-  mvaddstr(1, 36, "Size");
-  mvaddstr(1, 48, "Slots");
-  mvaddstr(1, 57, "File");
+  mvaddstr(1,    2, "User");
+  if(!tab->search_hide_hub)
+    mvaddstr(1, 22, "Hub");
+  int i = tab->search_hide_hub ? 22 : 36;
+  mvaddstr(1, i,    "Size");
+  mvaddstr(1, i+12, "Slots");
+  mvaddstr(1, i+21, "File");
   attroff(A_BOLD);
 
   int bottom = winrows-5;
@@ -1580,6 +1588,9 @@ static void ui_search_key(struct ui_tab *tab, guint64 key) {
       ui_m(NULL, 0, "Can't download directories from the search. Use 'b' to browse the file list instead.");
     else
       dl_queue_add_res(sel);
+    break;
+  case INPT_CHAR('h'): // h - show/hide hub column
+    tab->search_hide_hub = !tab->search_hide_hub;
     break;
   }
 

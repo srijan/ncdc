@@ -1159,20 +1159,20 @@ struct search_r {
 
 struct search_type {
   char *name;
-  char *exts[10];
+  char *exts[25];
 };
 
 #endif
 
-// NMDC search types and their extensions.
+// NMDC search types and the relevant ADC SEGA extensions.
 struct search_type search_types[] = { {},
   { "any"      }, // 1
-  { "audio",   { "mp3",  "mp2",  "wav",  "au",  "rm", "mid",  "sm"        } },
-  { "archive", { "zip",  "arj",  "rar", "lzh",  "gz",   "z", "arc", "pak" } },
-  { "doc",     { "doc",  "txt",  "wri", "pdf",  "ps", "tex"               } },
-  { "exe",     {  "pm",  "exe",  "bat", "com"                             } },
-  { "img",     { "gif",  "jpg", "jpeg", "bmp", "pcx", "png", "wmf", "psd" } },
-  { "video",   { "mpg", "mpeg",  "avi", "asf", "mov"                      } },
+  { "audio",   { "ape", "flac", "m4a",  "mid",  "mp3", "mpc",  "ogg",  "ra", "wav",  "wma"                                                                           } },
+  { "archive", {  "7z",  "ace", "arj",  "bz2",   "gz", "lha",  "lzh", "rar", "tar",   "tz",   "z",  "zip"                                                            } },
+  { "doc",     { "doc", "docx", "htm", "html",  "nfo", "odf",  "odp", "ods", "odt",  "pdf", "ppt", "pptx", "rtf", "txt",  "xls", "xlsx", "xml", "xps"                } },
+  { "exe",     { "app",  "bat", "cmd",  "com",  "dll", "exe",  "jar", "msi", "ps1",  "vbs", "wsf"                                                                    } },
+  { "img",     { "bmp",  "cdr", "eps",  "gif",  "ico", "img", "jpeg", "jpg", "png",   "ps", "psd",  "sfw", "tga", "tif", "webp"                                      } },
+  { "video",   { "3gp",  "asf", "asx",  "avi", "divx", "flv",  "mkv", "mov", "mp4", "mpeg", "mpg",  "ogm", "pxp",  "qt",   "rm", "rmvb", "swf", "vob", "webm", "wmv" } },
   { "dir"      }, // 8
   {}              // 9
 };

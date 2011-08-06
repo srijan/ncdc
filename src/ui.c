@@ -74,6 +74,7 @@ struct ui_tab {
   GError *fl_err;
   // SEARCH
   struct search_q *search_q;
+  time_t search_t;
 };
 
 #endif
@@ -1413,6 +1414,7 @@ struct ui_tab *ui_search_create(struct hub *hub, struct search_q *q) {
   tab->type = UIT_SEARCH;
   tab->search_q = q;
   tab->hub = hub;
+  time(&tab->search_t);
 
   // figure out a suitable tab->name
   if(q->type == 9) {
@@ -1475,7 +1477,10 @@ static void ui_search_draw_row(struct ui_listing *list, GSequenceIter *iter, int
   } else
     mvprintw(row, 2, "ID:%016"G_GINT64_MODIFIER"x (offline)", r->uid);
 
-  mvaddstr(row, 36, str_formatsize(r->size));
+  if(r->size == G_MAXUINT64)
+    mvaddstr(row, 36, "   DIR");
+  else
+    mvaddstr(row, 36, str_formatsize(r->size));
 
   mvprintw(row, 48, "%3d/", r->slots);
   if(u)
@@ -1501,21 +1506,35 @@ static void ui_search_draw(struct ui_tab *tab) {
   mvaddstr(1, 57, "File");
   attroff(A_BOLD);
 
-  int bottom = winrows-4;
+  int bottom = winrows-5;
   int pos = ui_listing_draw(tab->list, 2, bottom-1, ui_search_draw_row, tab);
+
+  struct search_r *sel = g_sequence_iter_is_end(tab->list->sel) ? NULL : g_sequence_get(tab->list->sel);
 
   // footer
   attron(A_REVERSE);
-  mvhline(bottom, 0, ' ', wincols);
-  mvprintw(bottom, wincols-21, "%5d results - %3d%%", g_sequence_get_length(tab->list->list), pos);
+  mvhline(bottom,   0, ' ', wincols);
+  mvhline(bottom+1, 0, ' ', wincols);
+  if(!sel)
+    mvaddstr(bottom, 0, "Nothing selected.");
+  else if(sel->size == G_MAXUINT64)
+    mvaddstr(bottom, 0, "Directory.");
+  else {
+    char tth[40] = {};
+    base32_encode(sel->tth, tth);
+    mvprintw(bottom, 0, "%s (%s bytes)", tth, str_fullsize(sel->size));
+  }
+  mvprintw(bottom, wincols-29, "%5d results in%4ds - %3d%%",
+    g_sequence_get_length(tab->list->list), time(NULL)-tab->search_t, pos);
+  if(sel)
+    mvaddnstr(bottom+1, 3, sel->file, str_offset_from_columns(sel->file, wincols));
   attroff(A_REVERSE);
-  // TODO: Display TTH, exact size and full path
 
   // What are we searching for?
   if(tab->hub)
-    mvprintw(bottom+1, 0, "Searching %s for: ", tab->hub->tab->name);
+    mvprintw(bottom+2, 0, "Searching %s for: ", tab->hub->tab->name);
   else
-    mvaddstr(bottom+1, 0, "Searching all hubs for: ");
+    mvaddstr(bottom+2, 0, "Searching for: ");
   char *sq = search_command(tab->search_q, tab->hub?TRUE:FALSE);
   addstr(sq);
   g_free(sq);

@@ -1516,17 +1516,12 @@ void ui_search_close(struct ui_tab *tab) {
 
 
 static char *ui_search_title(struct ui_tab *tab) {
-  struct search_q *q = tab->search_q;
-  if(q->type == 9) {
-    char tth[40] = {};
-    base32_encode(q->tth, tth);
-    return g_strdup_printf("Searching for TTH:%s", tth);
-  } else {
-    char *s = g_strjoinv(" ", q->query);
-    char *r = g_strdup_printf("Searching for: %s", s);
-    g_free(r);
-    return s;
-  }
+  char *sq = search_command(tab->search_q, tab->hub?TRUE:FALSE);
+  char *r = tab->hub
+    ? g_strdup_printf("Results on %s for: %s", tab->hub->tab->name, sq)
+    : g_strdup_printf("Results for: %s", sq);
+  g_free(sq);
+  return r;
 }
 
 
@@ -1581,7 +1576,7 @@ static void ui_search_draw(struct ui_tab *tab) {
   mvaddstr(1, i+21, "File");
   attroff(A_BOLD);
 
-  int bottom = winrows-5;
+  int bottom = winrows-4;
   int pos = ui_listing_draw(tab->list, 2, bottom-1, ui_search_draw_row, tab);
 
   struct search_r *sel = g_sequence_iter_is_end(tab->list->sel) ? NULL : g_sequence_get(tab->list->sel);
@@ -1589,7 +1584,6 @@ static void ui_search_draw(struct ui_tab *tab) {
   // footer
   attron(A_REVERSE);
   mvhline(bottom,   0, ' ', wincols);
-  mvhline(bottom+1, 0, ' ', wincols);
   if(!sel)
     mvaddstr(bottom, 0, "Nothing selected.");
   else if(sel->size == G_MAXUINT64)
@@ -1601,18 +1595,9 @@ static void ui_search_draw(struct ui_tab *tab) {
   }
   mvprintw(bottom, wincols-29, "%5d results in%4ds - %3d%%",
     g_sequence_get_length(tab->list->list), time(NULL)-tab->search_t, pos);
-  if(sel)
-    mvaddnstr(bottom+1, 3, sel->file, str_offset_from_columns(sel->file, wincols));
   attroff(A_REVERSE);
-
-  // What are we searching for?
-  if(tab->hub)
-    mvprintw(bottom+2, 0, "Searching %s for: ", tab->hub->tab->name);
-  else
-    mvaddstr(bottom+2, 0, "Searching for: ");
-  char *sq = search_command(tab->search_q, tab->hub?TRUE:FALSE);
-  addstr(sq);
-  g_free(sq);
+  if(sel)
+    mvaddnstr(bottom+1, 3, sel->file, str_offset_from_columns(sel->file, wincols-3));
 }
 
 

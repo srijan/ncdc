@@ -1371,7 +1371,10 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
     char *size = g_match_info_fetch(nfo, 4);
     char *type = g_match_info_fetch(nfo, 5);
     char *query = g_match_info_fetch(nfo, 6);
-    if(strcmp(from, hub->nick_hub) != 0)
+    char test[40] = {};
+    if(cc_listen)
+      g_snprintf(test, 40, "%s:%d", cc_listen_ip, cc_listen_port);
+    if(strncmp(from, "Hub:", 4) == 0 ? strcmp(from+4, hub->nick_hub) != 0 : strcmp(from, test) != 0)
       nmdc_search(hub, from, sizerestrict[0] == 'F' ? -2 : ismax[0] == 'T' ? -1 : 1, g_ascii_strtoull(size, NULL, 10), type[0]-'0', query);
     g_free(from);
     g_free(sizerestrict);

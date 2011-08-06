@@ -1351,7 +1351,7 @@ gboolean search_match(struct search_q *q, struct search_r *r) {
       return FALSE;
   // Match extension
   char **ext = search_types[(int)q->type].exts;
-  if(ext) {
+  if(ext && *ext) {
     char *l = strrchr(r->file, '.');
     if(G_UNLIKELY(!l || !l[1]))
       return FALSE;
@@ -1364,5 +1364,41 @@ gboolean search_match(struct search_q *q, struct search_r *r) {
   }
   // Okay, we have a match
   return TRUE;
+}
+
+
+// Generate the required /search command for a query.
+char *search_command(struct search_q *q, gboolean onhub) {
+  GString *str = g_string_new("/search");
+  g_string_append(str, onhub ? " -hub" : " -all");
+  if(q->type == 9) {
+    char tth[40] = {};
+    base32_encode(q->tth, tth);
+    g_string_append(str, " -tth ");
+    g_string_append(str, tth);
+  }
+  if(q->type != 9) {
+    g_string_append(str, " -type ");
+    g_string_append(str, search_types[(int)q->type].name);
+  }
+  if(q->type != 9 && q->size) // TODO: convert back to K/M/G suffix when possible?
+    g_string_append_printf(str, " -%s %"G_GUINT64_FORMAT, q->ge ? "ge" : "le", q->size);
+  char **query = q->type == 9 ? NULL : q->query;
+  char **tmp = query;
+  for(; tmp&&*tmp; tmp++)
+    if(**tmp == '-')
+      break;
+  if(tmp&&*tmp)
+    g_string_append(str, " --");
+  for(tmp=query; tmp&&*tmp; tmp++) {
+    g_string_append_c(str, ' ');
+    if(strcspn(*tmp, " \\'\"") != strlen(*tmp)) {
+      char *s = g_shell_quote(*tmp);
+      g_string_append(str, s);
+      g_free(s);
+    } else
+      g_string_append(str, *tmp);
+  }
+  return g_string_free(str, FALSE);
 }
 

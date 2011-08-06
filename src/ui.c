@@ -1402,8 +1402,7 @@ void ui_search_global_result(struct search_r *r) {
     if(t->type == UIT_SEARCH && search_match(t->search_q, r)) {
       g_sequence_insert_before(g_sequence_get_end_iter(t->list->list), search_r_copy(r));
       ui_listing_inserted(t->list);
-    } else if(t->type == UIT_SEARCH)
-      g_debug("No match.");
+    }
   }
 }
 
@@ -1510,9 +1509,16 @@ static void ui_search_draw(struct ui_tab *tab) {
   mvhline(bottom, 0, ' ', wincols);
   mvprintw(bottom, wincols-21, "%5d results - %3d%%", g_sequence_get_length(tab->list->list), pos);
   attroff(A_REVERSE);
-  // TODO: Display TTH and full path
+  // TODO: Display TTH, exact size and full path
 
-  // TODO: describe what we're searching for
+  // What are we searching for?
+  if(tab->hub)
+    mvprintw(bottom+1, 0, "Searching %s for: ", tab->hub->tab->name);
+  else
+    mvaddstr(bottom+1, 0, "Searching all hubs for: ");
+  char *sq = search_command(tab->search_q, tab->hub?TRUE:FALSE);
+  addstr(sq);
+  g_free(sq);
 }
 
 

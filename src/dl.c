@@ -557,6 +557,20 @@ void dl_queue_add_fl(guint64 uid, struct fl_list *fl, char *base) {
 }
 
 
+// Add a search result to the queue. (Only for files)
+void dl_queue_add_res(struct search_r *r) {
+  char *name = strrchr(r->file, '/');
+  if(name)
+    name++;
+  else
+    name = r->file;
+  if(dl_queue_addfile(r->uid, r->tth, r->size, name))
+    ui_mf(NULL, 0, "%s added to queue.", name);
+  else
+    ui_m(NULL, 0, "Already queued.");
+}
+
+
 
 
 

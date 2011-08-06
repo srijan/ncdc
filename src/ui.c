@@ -1462,6 +1462,7 @@ static char *ui_search_title(struct ui_tab *tab) {
 }
 
 
+// TODO: mark already shared and queued files?
 static void ui_search_draw_row(struct ui_listing *list, GSequenceIter *iter, int row, void *dat) {
   struct search_r *r = g_sequence_get(iter);
   if(iter == list->sel) {
@@ -1544,11 +1545,45 @@ static void ui_search_draw(struct ui_tab *tab) {
 static void ui_search_key(struct ui_tab *tab, guint64 key) {
   if(ui_listing_key(tab->list, key, (winrows-4)/2))
     return;
-  // TODO:
-  // - key to add to download queue
-  // - key to find user in userlist
-  // - key to add user's filelist to the queue
-  // - sorting
+
+  struct search_r *sel = g_sequence_iter_is_end(tab->list->sel) ? NULL : g_sequence_get(tab->list->sel);
+
+  switch(key) {
+  case INPT_CHAR('f'): // f - find user
+    if(!sel)
+      ui_m(NULL, 0, "Nothing selected.");
+    else {
+      struct hub_user *u = g_hash_table_lookup(hub_uids, &sel->uid);
+      if(!u)
+        ui_m(NULL, 0, "User is not online.");
+      else
+        ui_hub_finduser(u->hub->tab, u->uid, NULL, FALSE);
+    }
+    break;
+  case INPT_CHAR('b'): // b - /browse userlist
+  case INPT_CHAR('B'): // B - /browse -f userlist
+    // TODO: go to the selected file/directory upon opening the file list
+    if(!sel)
+      ui_m(NULL, 0, "Nothing selected.");
+    else {
+      struct hub_user *u = g_hash_table_lookup(hub_uids, &sel->uid);
+      if(!u)
+        ui_m(NULL, 0, "User is not online.");
+      else
+        ui_fl_queue(u, key == INPT_CHAR('B'));
+    }
+    break;
+  case INPT_CHAR('d'): // d - download file
+    if(!sel)
+      ui_m(NULL, 0, "Nothing selected.");
+    else if(sel->size == G_MAXUINT64)
+      ui_m(NULL, 0, "Can't download directories from the search. Use 'b' to browse the file list instead.");
+    else
+      dl_queue_add_res(sel);
+    break;
+  }
+
+  // TODO: sorting (and filtering?)
 }
 
 

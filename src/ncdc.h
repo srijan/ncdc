@@ -49,6 +49,7 @@ struct hub;
 struct hub_user;
 struct net;
 struct search_q;
+struct search_r;
 struct tiger_ctx;
 struct tth_ctx;
 struct ui_listing;

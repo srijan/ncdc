@@ -1046,7 +1046,7 @@ static void adc_handle(struct hub *hub, char *msg) {
     else {
       struct search_r *r = search_parse_adc(hub, &cmd);
       if(r) {
-        // TODO: notify tab
+        ui_search_global_result(r);
         search_r_free(r);
       } else
         g_warning("Invalid message from %s: %s", net_remoteaddr(hub->net), msg);
@@ -1411,7 +1411,7 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
   if(strncmp(cmd, "$SR", 3) == 0) {
     struct search_r *r = search_parse_nmdc(hub, cmd);
     if(r) {
-      // TODO: notify search tab
+      ui_search_global_result(r);
       search_r_free(r);
     } else
       g_message("Received invalid $SR: %s", cmd);

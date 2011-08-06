@@ -1265,7 +1265,7 @@ static void ui_dl_draw_row(struct ui_listing *list, GSequenceIter *iter, int row
   struct hub_user *u = g_hash_table_lookup(hub_uids, &dl->u->uid);
   if(u) {
     mvaddnstr(row, 2, u->name, str_offset_from_columns(u->name, 19));
-    mvaddnstr(row, 22, u->hub->tab->name, str_offset_from_columns(u->name, 13));
+    mvaddnstr(row, 22, u->hub->tab->name, str_offset_from_columns(u->hub->tab->name, 13));
   } else
     mvprintw(row, 2, "ID:%016"G_GINT64_MODIFIER"x (offline)", dl->u->uid);
 
@@ -1392,6 +1392,22 @@ static void ui_dl_key(guint64 key) {
 
 // Search results tab (UIT_SEARCH)
 
+
+// Called when a new search result has been received. Looks through the opened
+// search tabs and adds the result to the list if it matches the query.
+void ui_search_global_result(struct search_r *r) {
+  GList *n;
+  for(n=ui_tabs; n; n=n->next) {
+    struct ui_tab *t = n->data;
+    if(t->type == UIT_SEARCH && search_match(t->search_q, r)) {
+      g_sequence_insert_before(g_sequence_get_end_iter(t->list->list), search_r_copy(r));
+      ui_listing_inserted(t->list);
+    } else if(t->type == UIT_SEARCH)
+      g_debug("No match.");
+  }
+}
+
+
 // Ownership of q is passed to the tab, and will be freed on close.
 struct ui_tab *ui_search_create(struct hub *hub, struct search_q *q) {
   struct ui_tab *tab = g_new0(struct ui_tab, 1);
@@ -1415,7 +1431,7 @@ struct ui_tab *ui_search_create(struct hub *hub, struct search_q *q) {
     tab->name[strlen(tab->name)-1] = 0;
 
   // Create an empty list
-  tab->list = ui_listing_create(g_sequence_new(NULL));
+  tab->list = ui_listing_create(g_sequence_new(search_r_free));
   return tab;
 }
 
@@ -1445,15 +1461,71 @@ static char *ui_search_title(struct ui_tab *tab) {
 }
 
 
-static void ui_search_key(struct ui_tab *tab, guint64 key) {
-  if(ui_listing_key(tab->list, key, (winrows-4)/2))
-    return;
+static void ui_search_draw_row(struct ui_listing *list, GSequenceIter *iter, int row, void *dat) {
+  struct search_r *r = g_sequence_get(iter);
+  if(iter == list->sel) {
+    attron(A_BOLD);
+    mvaddch(row, 0, '>');
+    attroff(A_BOLD);
+  }
+
+  struct hub_user *u = g_hash_table_lookup(hub_uids, &r->uid);
+  if(u) {
+    mvaddnstr(row, 2, u->name, str_offset_from_columns(u->name, 19));
+    mvaddnstr(row, 22, u->hub->tab->name, str_offset_from_columns(u->hub->tab->name, 13));
+  } else
+    mvprintw(row, 2, "ID:%016"G_GINT64_MODIFIER"x (offline)", r->uid);
+
+  mvaddstr(row, 36, str_formatsize(r->size));
+
+  mvprintw(row, 48, "%3d/", r->slots);
+  if(u)
+    mvprintw(row, 52, "%3d", u->slots);
+  else
+    mvaddstr(row, 52, "  -");
+
+  char *fn = strrchr(r->file, '/');
+  if(fn)
+    fn++;
+  else
+    fn = r->file;
+  mvaddnstr(row, 57, fn, str_offset_from_columns(fn, wincols-57));
 }
 
 
 static void ui_search_draw(struct ui_tab *tab) {
-  // TODO
+  attron(A_BOLD);
+  mvaddstr(1, 2,  "User");
+  mvaddstr(1, 22, "Hub");
+  mvaddstr(1, 36, "Size");
+  mvaddstr(1, 48, "Slots");
+  mvaddstr(1, 57, "File");
+  attroff(A_BOLD);
+
+  int bottom = winrows-4;
+  int pos = ui_listing_draw(tab->list, 2, bottom-1, ui_search_draw_row, tab);
+
+  // footer
+  attron(A_REVERSE);
+  mvhline(bottom, 0, ' ', wincols);
+  mvprintw(bottom, wincols-21, "%5d results - %3d%%", g_sequence_get_length(tab->list->list), pos);
+  attroff(A_REVERSE);
+  // TODO: Display TTH and full path
+
+  // TODO: describe what we're searching for
 }
+
+
+static void ui_search_key(struct ui_tab *tab, guint64 key) {
+  if(ui_listing_key(tab->list, key, (winrows-4)/2))
+    return;
+  // TODO:
+  // - key to add to download queue
+  // - key to find user in userlist
+  // - key to add user's filelist to the queue
+  // - sorting
+}
+
 
 
 

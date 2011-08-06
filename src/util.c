@@ -1186,11 +1186,20 @@ void search_q_free(struct search_q *q) {
 }
 
 
-void search_r_free(struct search_r *r) {
+// Can be used as a GDestroyNotify callback
+void search_r_free(gpointer data) {
+  struct search_r *r = data;
   if(!r)
     return;
   g_free(r->file);
   g_slice_free(struct search_r, r);
+}
+
+
+struct search_r *search_r_copy(struct search_r *r) {
+  struct search_r *res = g_slice_dup(struct search_r, r);
+  res->file = g_strdup(r->file);
+  return res;
 }
 
 
@@ -1318,8 +1327,42 @@ struct search_r *search_parse_adc(struct hub *hub, struct adc_cmd *cmd) {
   r.uid = u->uid;
 
   // If we're here, then we can safely copy and return the result.
-  struct search_r *res = g_slice_dup(struct search_r, &r);
-  res->file = g_strdup(r.file);
-  return res;
+  return search_r_copy(&r);
+}
+
+
+// Matches a search result with a query.
+gboolean search_match(struct search_q *q, struct search_r *r) {
+  // TTH match is fast and easy
+  if(q->type == 9)
+    return r->size == G_MAXUINT64 ? FALSE : memcmp(q->tth, r->tth, 24) == 0 ? TRUE : FALSE;
+  // Match file/dir type
+  if(q->type == 8 && r->size != G_MAXUINT64)
+    return FALSE;
+  if((q->size || (q->type >= 2 && q->type <= 7)) && r->size == G_MAXUINT64)
+    return FALSE;
+  // Match size
+  if(q->size && !(q->ge ? r->size >= q->size : r->size <= q->size))
+    return FALSE;
+  // Match query
+  char **str = q->query;
+  for(; str&&*str; str++)
+    if(G_LIKELY(!str_casestr(r->file, *str)))
+      return FALSE;
+  // Match extension
+  char **ext = search_types[(int)q->type].exts;
+  if(ext) {
+    char *l = strrchr(r->file, '.');
+    if(G_UNLIKELY(!l || !l[1]))
+      return FALSE;
+    l++;
+    for(; *ext; ext++)
+      if(G_UNLIKELY(g_ascii_strcasecmp(l, *ext) == 0))
+        break;
+    if(!*ext)
+      return FALSE;
+  }
+  // Okay, we have a match
+  return TRUE;
 }
 

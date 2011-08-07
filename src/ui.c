@@ -1416,9 +1416,9 @@ static int ui_search_cmp_user(guint64 ua, guint64 ub) {
   struct hub_user *b = g_hash_table_lookup(hub_uids, &ub);
   int o =
     !a && !b ? (ua > ub ? 1 : ua < ub ? -1 : 0) :
-     a && !b ? 1 : !a && b ? -1 : strcmp(a->name, b->name);
+     a && !b ? 1 : !a && b ? -1 : g_utf8_collate(a->name, b->name);
   if(!o && a && b)
-    return strcmp(a->hub->tab->name, b->hub->tab->name);
+    return g_utf8_collate(a->hub->tab->name, b->hub->tab->name);
   return o;
 }
 
@@ -1426,7 +1426,7 @@ static int ui_search_cmp_user(guint64 ua, guint64 ub) {
 static int ui_search_cmp_file(const char *fa, const char *fb) {
   const char *a = strrchr(fa, '/');
   const char *b = strrchr(fb, '/');
-  return strcmp(a?a+1:fa, b?b+1:fb);
+  return g_utf8_collate(a?a+1:fa, b?b+1:fb);
 }
 
 
@@ -1469,6 +1469,7 @@ void ui_search_global_result(struct search_r *r) {
     if(t->type == UIT_SEARCH && search_match(t->search_q, r)) {
       g_sequence_insert_sorted(t->list->list, search_r_copy(r), ui_search_sort_func, t);
       ui_listing_inserted(t->list);
+      t->prio = MAX(t->prio, UIP_LOW);
     }
   }
 }

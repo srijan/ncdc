@@ -92,6 +92,7 @@ struct hub {
   unsigned char nfo_slots, nfo_h_norm, nfo_h_reg, nfo_h_op;
   guint64 nfo_share;
   guint32 nfo_ip4;
+  unsigned short nfo_port;
   // whether we've fetched the complete user list (and their $MyINFO's)
   gboolean received_first; // true if one precondition for joincomplete is satisfied.
   gboolean joincomplete;
@@ -485,12 +486,13 @@ void hub_opencc(struct hub *hub, struct hub_user *u) {
 
 
 // Send a search request
-// TODO: active searches
 void hub_search(struct hub *hub, struct search_q *q) {
   // ADC
   if(hub->adc) {
     // TODO: use FSCH to only get results from active users when we are passive?
     GString *cmd = adc_generate('B', ADCC_SCH, hub->sid, 0);
+    if(cc_listen)
+      g_string_append_printf(cmd, " TO%"G_GUINT64_FORMAT, hub->id);
     if(q->type == 9) {
       char tth[40] = {};
       base32_encode(q->tth, tth);
@@ -515,10 +517,13 @@ void hub_search(struct hub *hub, struct search_q *q) {
 
   // NMDC
   } else {
+    char *dest = cc_listen
+      ? g_strdup_printf("%s:%d", cc_listen_ip, cc_listen_port)
+      : g_strdup_printf("Hub:%s", hub->nick_hub);
     if(q->type == 9) {
       char tth[40] = {};
       base32_encode(q->tth, tth);
-      net_sendf(hub->net, "$Search Hub:%s F?T?0?9?TTH:%s", hub->nick_hub, tth);
+      net_sendf(hub->net, "$Search %s F?T?0?9?TTH:%s", dest, tth);
     } else {
       char *str = g_strjoinv(" ", q->query);
       char *enc = nmdc_encode_and_escape(hub, str);
@@ -526,10 +531,11 @@ void hub_search(struct hub *hub, struct search_q *q) {
       for(str=enc; *str; str++)
         if(*str == ' ')
           *str = '$';
-      net_sendf(hub->net, "$Search Hub:%s %c?%c?%"G_GUINT64_FORMAT"?%d?%s",
-        hub->nick_hub, q->size ? 'T' : 'F', q->ge ? 'F' : 'T', q->size, q->type, enc);
+      net_sendf(hub->net, "$Search %s %c?%c?%"G_GUINT64_FORMAT"?%d?%s",
+        dest, q->size ? 'T' : 'F', q->ge ? 'F' : 'T', q->size, q->type, enc);
       g_free(enc);
     }
+    g_free(dest);
   }
 }
 
@@ -546,6 +552,7 @@ void hub_send_nfo(struct hub *hub) {
   unsigned char slots, h_norm, h_reg, h_op;
   guint64 share;
   guint32 ip4;
+  unsigned short port;
 
   desc = conf_hub_get(string, hub->tab->name, "description");
   conn = conf_hub_get(string, hub->tab->name, "connection");
@@ -572,11 +579,12 @@ void hub_send_nfo(struct hub *hub) {
   }
   slots = conf_slots();
   ip4 = cc_listen ? ip4_pack(cc_listen_ip) : 0;
+  port = cc_listen ? cc_listen_port : 0;
   share = fl_local_list_size;
 
   // check whether we need to make any further effort
-  if(hub->nick_valid && streq(desc) && streq(conn) && streq(mail)
-      && eq(slots) && eq(h_norm) && eq(h_reg) && eq(h_op) && eq(share) && eq(ip4)) {
+  if(hub->nick_valid && streq(desc) && streq(conn) && streq(mail) && eq(slots)
+      && eq(h_norm) && eq(h_reg) && eq(h_op) && eq(share) && eq(ip4) && eq(port)) {
     g_free(desc);
     g_free(conn);
     g_free(mail);
@@ -598,9 +606,14 @@ void hub_send_nfo(struct hub *hub) {
     }
     if(f || !eq(ip4)) {
       g_string_append_printf(cmd, " I4%s", ip4_unpack(ip4)); // ip4 = 0 == 0.0.0.0, which is exactly what we want
-      g_string_append(cmd, ip4 ? " SUTCP4" : " SU");
+      g_string_append(cmd, ip4 ? " SUTCP4,UDP4" : " SU");
     }
-    if(f || !eq(share))
+    if((f || !eq(port))) {
+      if(port)
+        g_string_append_printf(cmd, " U4%d", port);
+      else
+        g_string_append(cmd, " U4");
+    } if(f || !eq(share))
       g_string_append_printf(cmd, " SS%"G_GUINT64_FORMAT, share);
     if(f || !eq(slots))
       g_string_append_printf(cmd, " SL%d", slots);

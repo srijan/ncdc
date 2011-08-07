@@ -1056,12 +1056,14 @@ void cc_free(struct cc *cc) {
 
 // Active mode
 
-// listen socket. NULL if we aren't active.
-GSocket *cc_listen = NULL;
-char    *cc_listen_ip = NULL; // human-readable string. This is the remote IP, not the one we bind to.
+
+GSocket *cc_listen = NULL;     // TCP listen socket. NULL if we aren't active.
+GSocket *cc_listen_udp = NULL; // UDP listen socket.
+char    *cc_listen_ip = NULL;  // human-readable string. This is the remote IP, not the one we bind to.
 guint16  cc_listen_port = 0;
 
-static int cc_listen_src = 0;
+static int cc_listen_tcp_src = 0;
+static int cc_listen_udp_src = 0;
 
 
 static void cc_listen_stop() {
@@ -1069,26 +1071,144 @@ static void cc_listen_stop() {
     return;
   g_free(cc_listen_ip);
   cc_listen_ip = NULL;
-  g_source_remove(cc_listen_src);
+  g_source_remove(cc_listen_tcp_src);
+  g_source_remove(cc_listen_udp_src);
   g_object_unref(cc_listen);
-  cc_listen = FALSE;
+  g_object_unref(cc_listen_udp);
+  cc_listen = cc_listen_udp = FALSE;
 }
 
 
-static gboolean listen_handle(GSocket *sock, GIOCondition cond, gpointer dat) {
+static gboolean listen_tcp_handle(GSocket *sock, GIOCondition cond, gpointer dat) {
   GError *err = NULL;
   GSocket *s = g_socket_accept(sock, NULL, &err);
   if(!s) {
     if(err->code != G_IO_ERROR_WOULD_BLOCK) {
       ui_mf(ui_main, 0, "Listen error: %s. Switching to passive mode.", err->message);
-      hub_global_nfochange();
       cc_listen_stop();
+      hub_global_nfochange();
     }
     g_error_free(err);
     return FALSE;
   }
   cc_incoming(cc_create(NULL), s);
   return TRUE;
+}
+
+
+static void listen_udp_handle_msg(char *addr, char *msg, gboolean adc) {
+  if(!msg[0])
+    return;
+  struct search_r *r = NULL;
+
+  // ADC
+  if(adc) {
+    GError *err = NULL;
+    struct adc_cmd cmd;
+    adc_parse(msg, &cmd, NULL, &err);
+    if(err) {
+      g_warning("ADC parse error from UDP:%s: %s. --> %s", addr, err->message, msg);
+      g_error_free(err);
+      return;
+    }
+    r = search_parse_adc(NULL, &cmd);
+    g_strfreev(cmd.argv);
+
+  // NMDC
+  } else
+    r = search_parse_nmdc(NULL, msg);
+
+  // Handle search result
+  if(r) {
+    ui_search_global_result(r);
+    search_r_free(r);
+  } else
+    g_warning("Invalid search result from UDP:%s: %s", addr, msg);
+}
+
+
+static gboolean listen_udp_handle(GSocket *sock, GIOCondition cond, gpointer dat) {
+  static char buf[5000]; // can be static, this function is only called in the main thread.
+  GError *err = NULL;
+  GSocketAddress *addr = NULL;
+  int r = g_socket_receive_from(sock, &addr, buf, 5000, NULL, &err);
+
+  // handle error
+  if(r < 0) {
+    if(err->code != G_IO_ERROR_WOULD_BLOCK) {
+      ui_mf(ui_main, 0, "UDP read error: %s. Switching to passive mode.", err->message);
+      cc_listen_stop();
+      hub_global_nfochange();
+    }
+    g_error_free(err);
+    return FALSE;
+  }
+
+  // get source ip:port in a readable fashion, for debugging
+  char addr_str[100];
+  GInetSocketAddress *socka = G_INET_SOCKET_ADDRESS(addr);
+  if(!socka)
+    strcat(addr_str, "(addr error)");
+  else {
+    char *ip = g_inet_address_to_string(g_inet_socket_address_get_address(socka));
+    g_snprintf(addr_str, 100, "%s:%d", ip, g_inet_socket_address_get_port(socka));
+    g_free(ip);
+  }
+  g_object_unref(addr);
+
+  // check for ADC or NMDC
+  gboolean adc = FALSE;
+  if(buf[0] == 'U')
+    adc = TRUE;
+  else if(buf[0] != '$') {
+    g_message("Received invalid message on UDP from %s: %s", addr_str, buf);
+    return TRUE;
+  }
+
+  // handle message. since all we receive is either URES or $SR, we can handle that here
+  char *cur = buf, *next = buf;
+  while((next = strchr(cur, adc ? '\n' : '|')) != NULL) {
+    *(next++) = 0;
+    g_debug("UDP:%s< %s", addr_str, cur);
+    listen_udp_handle_msg(addr_str, cur, adc);
+    cur = next;
+  }
+
+  return TRUE;
+}
+
+
+// TODO: option to bind to a specific IP, for those who want that functionality
+static GSocket *listen_sock_create(int port, gboolean tcp, GError **err) {
+  GError *tmperr = NULL;
+
+  // get local address
+  GInetAddress *laddr = g_inet_address_new_any(G_SOCKET_FAMILY_IPV4);
+  GSocketAddress *saddr = G_SOCKET_ADDRESS(g_inet_socket_address_new(laddr, port));
+  g_object_unref(laddr);
+
+  // create the socket
+  GSocket *s = g_socket_new(G_SOCKET_FAMILY_IPV4,
+    tcp ? G_SOCKET_TYPE_STREAM : G_SOCKET_TYPE_DATAGRAM,
+    tcp ? G_SOCKET_PROTOCOL_TCP : G_SOCKET_PROTOCOL_UDP, NULL);
+  g_socket_set_blocking(s, FALSE);
+
+  // bind to the address
+  g_socket_bind(s, saddr, TRUE, &tmperr);
+  g_object_unref(saddr);
+  if(tmperr) {
+    g_propagate_error(err, tmperr);
+    g_object_unref(s);
+    return NULL;
+  }
+
+  // for TCP: listen()
+  if(tcp && !g_socket_listen(s, &tmperr)) {
+    g_propagate_error(err, tmperr);
+    g_object_unref(s);
+    return NULL;
+  }
+  return s;
 }
 
 
@@ -1105,42 +1225,44 @@ gboolean cc_listen_start() {
   // can be 0, in which case it'll be randomly assigned
   int port = g_key_file_get_integer(conf_file, "global", "active_port", NULL);
 
-  // TODO: option to bind to a specific IP, for those who want that functionality
-  GInetAddress *laddr = g_inet_address_new_any(G_SOCKET_FAMILY_IPV4);
-  GSocketAddress *saddr = G_SOCKET_ADDRESS(g_inet_socket_address_new(laddr, port));
-  g_object_unref(laddr);
-
-  // create(), bind() and listen()
-  GSocket *s = g_socket_new(G_SOCKET_FAMILY_IPV4, G_SOCKET_TYPE_STREAM, G_SOCKET_PROTOCOL_TCP, NULL);
-  g_socket_set_blocking(s, FALSE);
-  g_socket_bind(s, saddr, TRUE, &err);
-  g_object_unref(saddr);
-  if(err) {
-    ui_mf(ui_main, 0, "Error creating listen socket: %s", err->message);
+  // Open TCP listen socket
+  GSocket *tcp = listen_sock_create(port, TRUE, &err);
+  if(!tcp) {
+    ui_mf(ui_main, 0, "Error creating TCP listen socket: %s", err->message);
     g_error_free(err);
-    g_object_unref(s);
     return FALSE;
   }
-  if(!g_socket_listen(s, &err)) {
-    ui_mf(ui_main, 0, "Error creating listen socket: %s", err->message);
+
+  // The port could have changed (in case it was 0), so re-fetch it and use
+  // that for the UDP port as well.
+  GSocketAddress *addr = g_socket_get_local_address(tcp, NULL);
+  port = g_inet_socket_address_get_port(G_INET_SOCKET_ADDRESS(addr));
+  g_object_unref(addr);
+
+  // Open UDP listen socket
+  GSocket *udp = listen_sock_create(port, FALSE, &err);
+  if(!udp) {
+    ui_mf(ui_main, 0, "Error creating UDP listen socket: %s", err->message);
     g_error_free(err);
-    g_object_unref(s);
     return FALSE;
   }
 
   // attach incoming connections handler to the event loop
-  GSource *src = g_socket_create_source(s, G_IO_IN, NULL);
-  g_source_set_callback(src, (GSourceFunc)listen_handle, NULL, NULL);
-  cc_listen_src = g_source_attach(src, NULL);
+  GSource *src = g_socket_create_source(tcp, G_IO_IN, NULL);
+  g_source_set_callback(src, (GSourceFunc)listen_tcp_handle, NULL, NULL);
+  cc_listen_tcp_src = g_source_attach(src, NULL);
+  g_source_unref(src);
+  // and start receiving incoming UDP messages
+  src = g_socket_create_source(udp, G_IO_IN, NULL);
+  g_source_set_callback(src, (GSourceFunc)listen_udp_handle, NULL, NULL);
+  cc_listen_udp_src = g_source_attach(src, NULL);
   g_source_unref(src);
 
   // set global variables
-  cc_listen = s;
+  cc_listen = tcp;
+  cc_listen_udp = udp;
+  cc_listen_port = port;
   cc_listen_ip = g_key_file_get_string(conf_file, "global", "active_ip", NULL);
-  // actual listen port may be different from what we specified (notably when port = 0)
-  GSocketAddress *addr = g_socket_get_local_address(s, NULL);
-  cc_listen_port = g_inet_socket_address_get_port(G_INET_SOCKET_ADDRESS(addr));
-  g_object_unref(addr);
 
   ui_mf(ui_main, 0, "Listening on port %d (%s).", cc_listen_port, cc_listen_ip);
   hub_global_nfochange();

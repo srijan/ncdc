@@ -1204,7 +1204,6 @@ struct search_r *search_r_copy(struct search_r *r) {
 
 
 // Currently requires hub to be valid. Modifies msg in-place for temporary stuff.
-// TODO: Handle active responses (hub=NULL)
 struct search_r *search_parse_nmdc(struct hub *hub, char *msg) {
   struct search_r r = {};
   char *tmp, *tmp2;
@@ -1224,8 +1223,15 @@ struct search_r *search_parse_nmdc(struct hub *hub, char *msg) {
   // msg is now searched backwards, because we can't reliably determine the end
   // of the filename otherwise.
 
-  // <space>(hub_ip:hub_port). Also ignored since we only support passive results for now.
+  // <space>(hub_ip:hub_port).
   tmp = strrchr(msg, ' ');
+  if(!tmp)
+    return NULL;
+  *(tmp++) = 0;
+  if(*(tmp++) != '(')
+    return NULL;
+  char *hubaddr = tmp;
+  tmp = strchr(tmp, ')');
   if(!tmp)
     return NULL;
   *tmp = 0;
@@ -1272,6 +1278,23 @@ struct search_r *search_parse_nmdc(struct hub *hub, char *msg) {
   while(--tmp > r.file && *tmp == '/')
     *tmp = 0;
 
+  // For active search results: figure out the hub
+  if(!hub) {
+    tmp = strchr(hubaddr, ':') ? g_strdup(hubaddr) : g_strdup_printf("%s:411", hubaddr);
+    GList *n;
+    struct ui_tab *t;
+    for(n=ui_tabs; n; n=n->next) {
+      t = n->data;
+      // TODO: cache net_remoteaddr()? Or even create a lookup table for it?
+      if(t->type == UIT_HUB && t->hub->nick_valid && !t->hub->adc && strcmp(tmp, net_remoteaddr(t->hub->net)) == 0)
+        break;
+    }
+    g_free(tmp);
+    if(!n)
+      return FALSE;
+    hub = t->hub;
+  }
+
   // Figure out r.uid
   struct hub_user *u = g_hash_table_lookup(hub->users, user);
   if(!u)
@@ -1285,25 +1308,32 @@ struct search_r *search_parse_nmdc(struct hub *hub, char *msg) {
 }
 
 
-// TODO: active responses
 struct search_r *search_parse_adc(struct hub *hub, struct adc_cmd *cmd) {
   struct search_r r = {};
   char *tmp, *tmp2;
 
+  // If this came from UDP, fetch the users' CID
+  if(!hub && (cmd->type != 'U' || cmd->argc < 1 || !istth(cmd->argv[0])))
+    return NULL;
+  char cid[24];
+  if(!hub)
+    base32_decode(cmd->argv[0], cid);
+  char **argv = hub ? cmd->argv : cmd->argv+1;
+
   // file
-  r.file = adc_getparam(cmd->argv, "FN", NULL);
+  r.file = adc_getparam(argv, "FN", NULL);
   if(!r.file)
     return NULL;
   while(strlen(r.file) > 1 && r.file[strlen(r.file)-1] == '/')
     r.file[strlen(r.file)-1] = 0;
 
   // tth & size
-  tmp = adc_getparam(cmd->argv, "TR", NULL);
+  tmp = adc_getparam(argv, "TR", NULL);
   if(tmp) {
     if(!istth(tmp))
       return NULL;
     base32_decode(tmp, r.tth);
-    tmp = adc_getparam(cmd->argv, "SI", NULL);
+    tmp = adc_getparam(argv, "SI", NULL);
     if(!tmp)
       return NULL;
     r.size = g_ascii_strtoull(tmp, &tmp2, 10);
@@ -1313,18 +1343,37 @@ struct search_r *search_parse_adc(struct hub *hub, struct adc_cmd *cmd) {
     r.size = G_MAXUINT64;
 
   // slots
-  tmp = adc_getparam(cmd->argv, "SL", NULL);
+  tmp = adc_getparam(argv, "SL", NULL);
   if(tmp) {
     r.slots = g_ascii_strtoull(tmp, &tmp2, 10);
     if(tmp == tmp2 || !tmp2 || *tmp2)
       return NULL;
   }
 
-  // uid
-  struct hub_user *u = g_hash_table_lookup(hub->sessions, GINT_TO_POINTER(cmd->source));
-  if(!u)
-    return NULL;
-  r.uid = u->uid;
+  // uid - passive
+  if(hub) {
+    struct hub_user *u = g_hash_table_lookup(hub->sessions, GINT_TO_POINTER(cmd->source));
+    if(!u)
+      return NULL;
+    r.uid = u->uid;
+
+  // uid - active. Active responses must have the hubid in the token, from
+  // which we can generate the uid.
+  } else {
+    tmp = adc_getparam(argv, "TO", NULL);
+    if(!tmp)
+      return NULL;
+    guint64 hubid = g_ascii_strtoull(tmp, &tmp2, 10);
+    if(tmp == tmp2 || !tmp2 || *tmp2)
+      return NULL;
+    struct tiger_ctx t;
+    tiger_init(&t);
+    tiger_update(&t, (char *)&hubid, 8);
+    tiger_update(&t, cid, 24);
+    char res[24];
+    tiger_final(&t, res);
+    memcpy(&r.uid, res, 8);
+  }
 
   // If we're here, then we can safely copy and return the result.
   return search_r_copy(&r);

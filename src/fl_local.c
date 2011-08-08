@@ -749,8 +749,10 @@ static void fl_refresh_compare(struct fl_list *old, struct fl_list *new) {
     // check
     if(check) {
       // If it's a file, it may have been modified or we're missing the TTH
-      if(oldl->isfile && (!oldl->hastth || newl->lastmod > oldl->lastmod || newl->size != oldl->size))
+      if(oldl->isfile && (!oldl->hastth || newl->lastmod > oldl->lastmod || newl->size != oldl->size)) {
+        oldl->size = newl->size;
         fl_hash_queue_append(oldl);
+      }
       // If it's a dir, recurse into it
       if(!oldl->isfile)
         fl_refresh_compare(oldl, newl);

@@ -219,12 +219,14 @@ void conf_init() {
 
 
 void conf_save() {
-  char *dat = g_key_file_to_data(conf_file, NULL, NULL);
   char *cf = g_build_filename(conf_dir, "config.ini", NULL);
-  FILE *f = fopen(cf, "w");
-  if(!f || fputs(dat, f) < 0 || fclose(f))
+  char *tmpf = g_strdup_printf("%s.tmp", cf);
+  char *dat = g_key_file_to_data(conf_file, NULL, NULL);
+  FILE *f = fopen(tmpf, "w");
+  if(!f || fputs(dat, f) < 0 || fclose(f) || rename(tmpf, cf) < 0)
     g_critical("Cannot save config file '%s': %s", cf, g_strerror(errno));
   g_free(dat);
+  g_free(tmpf);
   g_free(cf);
 }
 

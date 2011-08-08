@@ -1440,7 +1440,9 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
 
 
 static gboolean check_nfo(gpointer data) {
-  hub_send_nfo(data);
+  struct hub *hub = data;
+  if(hub->nick_valid)
+    hub_send_nfo(hub);
   return TRUE;
 }
 

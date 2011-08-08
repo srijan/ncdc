@@ -68,16 +68,52 @@ void fl_list_free(gpointer dat) {
 }
 
 
-// Must return 0 if and only if a and b are equal, assuming they do reside in
-// the same directory. A name comparison is enough for this. It is assumed that
-// names are case-sensitive.  (Actually, this function may not access other
-// members than the name, otherwise a file-by-name lookup wouldn't work.)
-gint fl_list_cmp(gconstpointer a, gconstpointer b, gpointer dat) {
-  return strcmp(((struct fl_list *)a)->name, ((struct fl_list *)b)->name);
+// This should be somewhat equivalent to
+//   strcmp(g_utf8_casefold(a), g_utf8_casefold(b)),
+// but hopefully faster by avoiding the memory allocations.
+// Note that g_utf8_collate() is not suitable for case-insensitive filename
+// comparison. For example, g_utf8_collate('a', 'A') != 0.
+int fl_list_cmp_name(const char *a, const char *b) {
+  int d;
+  while(*a && *b) {
+    d = g_unichar_tolower(g_utf8_get_char(a)) - g_unichar_tolower(g_utf8_get_char(b));
+    if(d)
+      return d;
+    a = g_utf8_next_char(a);
+    b = g_utf8_next_char(b);
+  }
+  return *a ? 1 : *b ? -1 : 0;
 }
 
 
-void fl_list_add(struct fl_list *parent, struct fl_list *cur) {
+// Used for sorting items within a directory and determining whether two files
+// in the same directory are equivalent (that is, have the same name). File
+// names are case-insensitive, as required by the ADC protocol.
+gint fl_list_cmp(gconstpointer a, gconstpointer b, gpointer dat) {
+  return fl_list_cmp_name(((struct fl_list *)a)->name, ((struct fl_list *)b)->name);
+}
+
+
+// Adds `cur' to the directory `parent'. Returns NULL on success.
+// This may fail when an item with the same name (according to fl_list_cmp())
+// is already present. In such an event, two things can happen:
+// 1. strcmp(dup, cur) <= 0:
+//    `cur' is not inserted and this function returns `cur'.
+// 2. strcmp(dup, cur) > 0:
+//    `cur' is inserted and `dup' is returned.
+// In either case, if the return value is non-NULL, fl_list_remove() should be
+// called on it.
+struct fl_list *fl_list_add(struct fl_list *parent, struct fl_list *cur) {
+  // Check for duplicate.
+  GSequenceIter *iter = g_sequence_iter_prev(g_sequence_search(parent->sub, cur, fl_list_cmp, NULL));
+  struct fl_list *dup = g_sequence_iter_is_end(iter) ? NULL : g_sequence_get(iter);
+  if(dup && fl_list_cmp_name(cur->name, dup->name) != 0)
+    dup = NULL;
+  if(dup)
+    g_debug("fl_list_add(): Duplicate file found: \"%s\" == \"%s\"", cur->name, dup->name);
+  if(dup && strcmp(dup->name, cur->name) <= 0)
+    return cur;
+
   cur->parent = parent;
   g_sequence_insert_sorted(parent->sub, cur, fl_list_cmp, NULL);
   if(!cur->isfile || (cur->isfile && cur->hastth))
@@ -87,6 +123,7 @@ void fl_list_add(struct fl_list *parent, struct fl_list *cur) {
     parent->size += cur->size;
     parent = parent->parent;
   }
+  return dup;
 }
 
 
@@ -95,9 +132,15 @@ void fl_list_remove(struct fl_list *fl) {
   struct fl_list *par = fl->parent;
   GSequenceIter *iter = NULL;
   if(par) {
-    // can't use _lookup(), too new (2.28)
+    // Can't use _lookup(), too new (2.28).
+    // Note that in normal situations, there are no two items in a directory
+    // for which fl_list_cmp() returns 0. However, since this does happen just
+    // after fl_list_add() has returned `dup', we need to handle it in order to
+    // create a correct list again.
     iter = g_sequence_iter_prev(g_sequence_search(par->sub, fl, fl_list_cmp, NULL));
     g_return_if_fail(!g_sequence_iter_is_end(iter));
+    while(g_sequence_get(iter) != fl && fl_list_cmp_name(((struct fl_list *)g_sequence_get(iter))->name, fl->name) == 0)
+      iter = g_sequence_iter_prev(iter);
     g_return_if_fail(g_sequence_get(iter) == fl);
 
     // update parent->hastth
@@ -141,7 +184,7 @@ struct fl_list *fl_list_file(const struct fl_list *dir, const char *name) {
   strcpy(cmp->name, name);
   GSequenceIter *iter = g_sequence_iter_prev(g_sequence_search(dir->sub, cmp, fl_list_cmp, NULL));
   return g_sequence_iter_is_end(iter)
-    || strcmp(name, ((struct fl_list *)g_sequence_get(iter))->name) != 0 ? NULL : g_sequence_get(iter);
+    || fl_list_cmp_name(name, ((struct fl_list *)g_sequence_get(iter))->name) != 0 ? NULL : g_sequence_get(iter);
 }
 
 
@@ -442,7 +485,12 @@ static int fl_load_handle(xmlTextReaderPtr reader, gboolean *havefl, gboolean *n
       tmp->isfile = FALSE;
       tmp->incomplete = attr[1] && attr[1][0] == '1';
       tmp->sub = g_sequence_new(fl_list_free);
-      fl_list_add(*newdir ? *cur : (*cur)->parent, tmp);
+      if(fl_list_add(*newdir ? *cur : (*cur)->parent, tmp)) {
+        fl_list_remove(tmp);
+        free(attr[0]);
+        free(attr[1]);
+        return -1;
+      }
       *cur = tmp;
       *newdir = !xmlTextReaderIsEmptyElement(reader);
       free(attr[0]);
@@ -470,9 +518,15 @@ static int fl_load_handle(xmlTextReaderPtr reader, gboolean *havefl, gboolean *n
       tmp->size = g_ascii_strtoull(attr[1], NULL, 10);
       tmp->hastth = 1;
       base32_decode(attr[2], tmp->tth);
-      fl_list_add(*newdir ? *cur : (*cur)->parent, tmp);
-      *newdir = FALSE;
+      if(fl_list_add(*newdir ? *cur : (*cur)->parent, tmp)) {
+        fl_list_remove(tmp);
+        free(attr[0]);
+        free(attr[1]);
+        free(attr[2]);
+        return -1;
+      }
       *cur = tmp;
+      *newdir = FALSE;
       free(attr[0]);
       free(attr[1]);
       free(attr[2]);

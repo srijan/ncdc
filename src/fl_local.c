@@ -367,11 +367,11 @@ struct fl_scan_args {
 
 // recursive
 // Doesn't handle paths longer than PATH_MAX, but I don't think it matters all that much.
-static void fl_scan_dir(struct fl_list *parent, const char *path, gboolean inc_hidden) {
+static void fl_scan_dir(struct fl_list *parent, const char *path, const char *vpath, gboolean inc_hidden) {
   GError *err = NULL;
   GDir *dir = g_dir_open(path, 0, &err);
   if(!dir) {
-    ui_mf(ui_main, UIP_MED, "Error reading directory \"%s\": %s", path, g_strerror(errno));
+    ui_mf(ui_main, UIP_MED, "Error reading directory \"%s\": %s", vpath, g_strerror(errno));
     g_error_free(err);
     return;
   }
@@ -387,9 +387,11 @@ static void fl_scan_dir(struct fl_list *parent, const char *path, gboolean inc_h
     char *confname = g_filename_to_utf8(name, -1, NULL, NULL, NULL);
     if(!confname)
       confname = g_filename_display_name(name);
+    char *vcpath = g_build_filename(vpath, confname, NULL);
     char *encname = g_filename_from_utf8(confname, -1, NULL, NULL, NULL);
     if(!encname) {
-      ui_mf(ui_main, UIP_MED, "Error reading directory entry in \"%s\": Invalid encoding.", path);
+      ui_mf(ui_main, UIP_MED, "Error reading directory entry in \"%s\": Invalid encoding.", vcpath);
+      g_free(vcpath);
       g_free(confname);
       continue;
     }
@@ -400,15 +402,16 @@ static void fl_scan_dir(struct fl_list *parent, const char *path, gboolean inc_h
     g_free(encname);
     if(r < 0 || !(S_ISREG(dat.st_mode) || S_ISDIR(dat.st_mode))) {
       if(r < 0)
-        ui_mf(ui_main, UIP_MED, "Error stat'ing \"%s\": %s", cpath, g_strerror(errno));
+        ui_mf(ui_main, UIP_MED, "Error stat'ing \"%s\": %s", vcpath, g_strerror(errno));
       else
-        ui_mf(ui_main, UIP_MED, "Not sharing \"%s\": Neither file nor directory.", cpath);
+        ui_mf(ui_main, UIP_MED, "Not sharing \"%s\": Neither file nor directory.", vcpath);
       g_free(confname);
       g_free(cpath);
+      g_free(vcpath);
       continue;
     }
     g_free(cpath);
-    // and create the node
+    // create the node
     struct fl_list *cur = g_malloc0(sizeof(struct fl_list)+strlen(confname)+1);
     strcpy(cur->name, confname);
     g_free(confname);
@@ -417,7 +420,13 @@ static void fl_scan_dir(struct fl_list *parent, const char *path, gboolean inc_h
       cur->size = dat.st_size;
       cur->lastmod = dat.st_mtime;
     }
-    fl_list_add(parent, cur);
+    // and add it
+    struct fl_list *dup = fl_list_add(parent, cur);
+    if(dup) {
+      ui_mf(ui_main, UIP_MED, "Not sharing \"%s\": Other file with same name (but different case) already shared.", vcpath);
+      fl_list_remove(dup);
+    }
+    g_free(vcpath);
   }
   g_dir_close(dir);
 
@@ -427,10 +436,14 @@ static void fl_scan_dir(struct fl_list *parent, const char *path, gboolean inc_h
   for(iter=g_sequence_get_begin_iter(parent->sub); !g_sequence_iter_is_end(iter); iter=g_sequence_iter_next(iter)) {
     struct fl_list *cur = g_sequence_get(iter);
     if(!cur->isfile) {
-      char *cpath = g_build_filename(path, cur->name, NULL);
+      char *enc = g_filename_from_utf8(cur->name, -1, NULL, NULL, NULL);
+      char *cpath = g_build_filename(path, enc, NULL);
+      char *virtpath = g_build_filename(vpath, cur->name, NULL);
       cur->sub = g_sequence_new(fl_list_free);
-      fl_scan_dir(cur, cpath, inc_hidden);
+      fl_scan_dir(cur, cpath, virtpath, inc_hidden);
+      g_free(virtpath);
       g_free(cpath);
+      g_free(enc);
     }
   }
 }
@@ -446,7 +459,7 @@ static void fl_scan_thread(gpointer data, gpointer udata) {
     cur->name[0] = 0;
     char *tmp = g_filename_from_utf8(args->path[i], -1, NULL, NULL, NULL);
     cur->sub = g_sequence_new(fl_list_free);
-    fl_scan_dir(cur, tmp, args->inc_hidden);
+    fl_scan_dir(cur, tmp, args->path[i], args->inc_hidden);
     g_free(tmp);
     args->res[i] = cur;
   }
@@ -721,6 +734,7 @@ static void fl_refresh_compare(struct fl_list *old, struct fl_list *new) {
     // old == new: same
     if(cmp == 0) {
       g_warn_if_fail(!!oldl->isfile == !!newl->isfile); // TODO: handle this case
+      g_warn_if_fail(strcmp(oldl->name, newl->name) == 0); // TODO: handle this case as well
       if(oldl->isfile && (!oldl->hastth || newl->lastmod > oldl->lastmod || newl->size != oldl->size))
         fl_hash_queue_append(oldl);
       if(!oldl->isfile)

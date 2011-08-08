@@ -1308,10 +1308,10 @@ static void ui_dl_draw() {
   mvaddstr(1, 59, "File");
   attroff(A_BOLD);
 
-  struct dl *sel = g_sequence_iter_is_end(ui_dl->list->sel) ? NULL : g_sequence_get(ui_dl->list->sel);
-
-  int bottom = sel && sel->prio == DLP_ERR ? winrows-4 : winrows-3;
+  int bottom = winrows-4;
   int pos = ui_listing_draw(ui_dl->list, 2, bottom-1, ui_dl_draw_row, NULL);
+
+  struct dl *sel = g_sequence_iter_is_end(ui_dl->list->sel) ? NULL : g_sequence_get(ui_dl->list->sel);
 
   // footer
   attron(A_REVERSE);

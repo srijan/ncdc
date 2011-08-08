@@ -1,3 +1,11 @@
+0.6 - 2011-08-08
+	- Added file searching, through a /search command
+	- Added tab to display the search results
+	- Listen for incoming messages on UDP in active mode
+	- Allow specifying a hub address with /open
+	- Fixed case-sensitivity of shared files
+	- Various bugfixes and other improvements
+
 0.5 - 2011-08-02
 	- Downloaded files are now TTH-checked
 	- Added download queue priorities

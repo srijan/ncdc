@@ -420,13 +420,15 @@ static void fl_scan_dir(struct fl_list *parent, const char *path, const char *vp
       cur->size = dat.st_size;
       cur->lastmod = dat.st_mtime;
     }
+    g_free(vcpath);
     // and add it
     struct fl_list *dup = fl_list_add(parent, cur);
     if(dup) {
-      ui_mf(ui_main, UIP_MED, "Not sharing \"%s\": Other file with same name (but different case) already shared.", vcpath);
+      char *tmp = g_build_filename(vpath, dup->name, NULL);
+      ui_mf(ui_main, UIP_MED, "Not sharing \"%s\": Other file with same name (but different case) already shared.", tmp);
       fl_list_remove(dup);
+      g_free(tmp);
     }
-    g_free(vcpath);
   }
   g_dir_close(dir);
 
@@ -730,20 +732,41 @@ static void fl_refresh_compare(struct fl_list *old, struct fl_list *new) {
     struct fl_list *oldl = g_sequence_iter_is_end(oldi) ? NULL : g_sequence_get(oldi);
     struct fl_list *newl = g_sequence_iter_is_end(newi) ? NULL : g_sequence_get(newi);
     int cmp = !oldl ? 1 : !newl ? -1 : fl_list_cmp(oldl, newl, NULL);
+    gboolean check = FALSE, remove = FALSE, insert = FALSE;
 
-    // old == new: same
-    if(cmp == 0) {
-      g_warn_if_fail(!!oldl->isfile == !!newl->isfile); // TODO: handle this case
-      g_warn_if_fail(strcmp(oldl->name, newl->name) == 0); // TODO: handle this case as well
+    // special case #1: old == new, but one is a directory and the other is a file
+    // special case #2: old == new, but the file names have different case
+    // In both situations we just delete our information and overwrite/rehash it with new.
+    if(cmp == 0 && (!!oldl->isfile != !!newl->isfile || strcmp(oldl->name, newl->name) != 0))
+      remove = insert = TRUE;
+    else if(cmp == 0) // old == new, just check
+      check = TRUE;
+    else if(cmp > 0)  // old > new: insert new
+      insert = TRUE;
+    else              // old < new: remove
+      remove = TRUE;
+
+    // check
+    if(check) {
+      // If it's a file, it may have been modified or we're missing the TTH
       if(oldl->isfile && (!oldl->hastth || newl->lastmod > oldl->lastmod || newl->size != oldl->size))
         fl_hash_queue_append(oldl);
+      // If it's a dir, recurse into it
       if(!oldl->isfile)
         fl_refresh_compare(oldl, newl);
       oldi = g_sequence_iter_next(oldi);
       newi = g_sequence_iter_next(newi);
+    }
 
-    // old > new: insert new
-    } else if(cmp > 0) {
+    // remove
+    if(remove) {
+      oldi = g_sequence_iter_next(oldi);
+      fl_refresh_delhash(oldl);
+      fl_list_remove(oldl);
+    }
+
+    // insert
+    if(insert) {
       struct fl_list *tmp = fl_list_copy(newl);
       fl_list_add(old, tmp);
       if(tmp->isfile)
@@ -751,12 +774,6 @@ static void fl_refresh_compare(struct fl_list *old, struct fl_list *new) {
       else
         fl_refresh_addhash(tmp);
       newi = g_sequence_iter_next(newi);
-
-    // new > old: delete old
-    } else {
-      oldi = g_sequence_iter_next(oldi);
-      fl_refresh_delhash(oldl);
-      fl_list_remove(oldl);
     }
   }
   old->incomplete = FALSE;

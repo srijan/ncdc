@@ -656,6 +656,7 @@ void hub_send_nfo(struct hub *hub) {
   hub->nfo_h_op = h_op;
   hub->nfo_share = share;
   hub->nfo_ip4 = ip4;
+  hub->nfo_port = port;
 }
 
 #undef eq

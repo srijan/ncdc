@@ -510,6 +510,30 @@ static void set_download_slots(char *group, char *key, char *val) {
 }
 
 
+static void get_backlog(char *group, char *key) {
+  int n = g_key_file_get_integer(conf_file, group, key, NULL);
+  ui_mf(NULL, 0, "%s.%s = %d%s", group, key, n, !n ? " (disabled)" : "");
+}
+
+
+static void set_backlog(char *group, char *key, char *val) {
+  if(!val)
+    UNSET(group, key);
+  else {
+    long v = strtol(val, NULL, 10);
+    if((!v && errno == EINVAL) || v < INT_MIN || v > INT_MAX || v < 0)
+      ui_m(NULL, 0, "Invalid number.");
+    else if(v > 100)
+      ui_m(NULL, 0, "Maximum value is 100.");
+    else {
+      g_key_file_set_integer(conf_file, group, key, v);
+      conf_save();
+      get_backlog(group, key);
+    }
+  }
+}
+
+
 // the settings list
 // TODO: help text / documentation?
 static struct setting settings[] = {
@@ -518,6 +542,7 @@ static struct setting settings[] = {
   { "active_port",   "global", get_int,           set_active_port,   NULL,            },
   { "autoconnect",   NULL,     get_bool_f,        set_autoconnect,   set_bool_sug     }, // may not be used in "global"
   { "autorefresh",   "global", get_autorefresh,   set_autorefresh,   NULL             }, // in minutes, 0 = disabled
+  { "backlog",       NULL,     get_backlog,       set_backlog,       NULL,            }, // number of lines, 0 = disabled
   { "connection",    NULL,     get_string,        set_userinfo,      NULL             },
   { "description",   NULL,     get_string,        set_userinfo,      NULL             },
   { "download_dir",  "global", get_download_dir,  set_download_dir,  path_suggest     },

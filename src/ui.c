@@ -153,7 +153,7 @@ struct ui_tab *ui_msg_create(struct hub *hub, struct hub_user *user) {
   tab->msg_online = TRUE;
   tab->uid = user->uid;
   tab->name = g_strdup_printf("~%s", user->name);
-  tab->log = ui_logwindow_create(tab->name, 0);
+  tab->log = ui_logwindow_create(tab->name, g_key_file_get_integer(conf_file, "global", "backlog", NULL));
 
   ui_mf(tab, 0, "Chatting with %s on %s.", user->name, hub->tab->name);
 
@@ -238,7 +238,7 @@ struct ui_tab *ui_hub_create(const char *name, gboolean conn) {
   // NOTE: tab name is also used as configuration group
   tab->name = g_strdup_printf("#%s", name);
   tab->type = UIT_HUB;
-  tab->log = ui_logwindow_create(tab->name, 0);
+  tab->log = ui_logwindow_create(tab->name, conf_hub_get(integer, tab->name, "backlog"));
   // Every hub tab should have a unique ID. The name of the tab (which is the
   // group name in the config file) is changable, but internally we'd want a
   // more stable ID for user CID creation on NMDC hubs, so let's create one.

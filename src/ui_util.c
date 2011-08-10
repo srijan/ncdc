@@ -33,7 +33,6 @@
 
 
 // Log window "widget"
-// TODO: log file rotation (of some sorts)
 
 
 #if INTERFACE
@@ -52,14 +51,88 @@ struct ui_logwindow {
 #endif
 
 
-struct ui_logwindow *ui_logwindow_create(const char *file) {
+static void ui_logwindow_addline(struct ui_logwindow *lw, const char *msg, gboolean raw) {
+  if(lw->lastlog == lw->lastvis)
+    lw->lastvis = lw->lastlog + 1;
+  lw->lastlog++;
+  lw->updated = TRUE;
+
+  time_t tm = time(NULL);
+  char ts[50];
+  strftime(ts, 10, "%H:%M:%S ", localtime(&tm));
+  lw->buf[lw->lastlog & LOGWIN_BUF] = raw ? g_strdup(msg) : g_strconcat(ts, msg, NULL);
+
+  if(!raw && lw->file) {
+    strftime(ts, 49, "[%F %H:%M:%S %Z] ", localtime(&tm));
+    if(fprintf(lw->file, "%s%s\n", ts, msg) < 0 && !strstr(msg, "(LOGERR)"))
+      g_warning("Error writing to log file: %s (LOGERR)", strerror(errno));
+  }
+
+  int next = (lw->lastlog + 1) & LOGWIN_BUF;
+  if(lw->buf[next]) {
+    g_free(lw->buf[next]);
+    lw->buf[next] = NULL;
+  }
+}
+
+
+static void ui_logwindow_load(struct ui_logwindow *lw, const char *fn, int num) {
+  char **l = file_tail(fn, num);
+  if(!l) {
+    g_warning("Unable to tail log file '%s': %s", fn, g_strerror(errno));
+    return;
+  }
+  int i, len = g_strv_length(l);
+  char *m;
+  for(i=0; i<len; i++) {
+    if(!g_utf8_validate(l[i], -1, NULL))
+      continue;
+    // parse line: [yyyy-mm-dd hh:mm:ss TIMEZONE] <string>
+    char *msg = strchr(l[i], ']');
+    char *time = strchr(l[i], ' ');
+    char *tmp = time ? strchr(time+1, ' ') : NULL;
+    if(l[i][0] != '[' || !msg || !time || !tmp || tmp < time || msg[1] != ' ')
+      continue;
+    g_debug(l[i]);
+    time++;
+    *msg = 0;
+    msg += 2;
+    // if this is the first line, display a notice
+    if(!i) {
+      m = g_strdup_printf("-- Backlog starts on %s.", l[i]+1);
+      ui_logwindow_addline(lw, m, FALSE);
+      g_free(m);
+    }
+    // display the line
+    *tmp = 0;
+    m = g_strdup_printf("%s %s", time, msg);
+    ui_logwindow_addline(lw, m, TRUE);
+    g_free(m);
+    *tmp = ' ';
+    // if this is the last line, display another notice
+    if(i == len-1) {
+      m = g_strdup_printf("-- Backlog ends on %s", l[i]+1);
+      ui_logwindow_addline(lw, m, FALSE);
+      g_free(m);
+      ui_logwindow_addline(lw, "", FALSE);
+    }
+  }
+  g_strfreev(l);
+}
+
+
+struct ui_logwindow *ui_logwindow_create(const char *file, int load) {
   struct ui_logwindow *lw = g_new0(struct ui_logwindow, 1);
   if(file) {
     char *n = g_strconcat(file, ".log", NULL);
     char *fn = g_build_filename(conf_dir, "logs", n, NULL);
+
+    if(load)
+      ui_logwindow_load(lw, fn, load);
+
     lw->file = fopen(fn, "a");
     if(!lw->file)
-      g_warning("Unable to open log file '%s' for writing: %s", fn, strerror(errno));
+      g_warning("Unable to open log file '%s' for writing: %s", fn, g_strerror(errno));
     g_free(n);
     g_free(fn);
   }
@@ -75,40 +148,15 @@ void ui_logwindow_free(struct ui_logwindow *lw) {
 }
 
 
-static void ui_logwindow_addline(struct ui_logwindow *lw, const char *msg) {
-  if(lw->lastlog == lw->lastvis)
-    lw->lastvis = lw->lastlog + 1;
-  lw->lastlog++;
-  lw->updated = TRUE;
-
-  time_t tm = time(NULL);
-  char ts[50];
-  strftime(ts, 10, "%H:%M:%S ", localtime(&tm));
-  lw->buf[lw->lastlog & LOGWIN_BUF] = g_strconcat(ts, msg, NULL);
-
-  if(lw->file) {
-    strftime(ts, 49, "[%F %H:%M:%S %Z] ", localtime(&tm));
-    if(fprintf(lw->file, "%s%s\n", ts, msg) < 0 && !strstr(msg, "(LOGERR)"))
-      g_warning("Error writing to log file: %s (LOGERR)", strerror(errno));
-  }
-
-  int next = (lw->lastlog + 1) & LOGWIN_BUF;
-  if(lw->buf[next]) {
-    g_free(lw->buf[next]);
-    lw->buf[next] = NULL;
-  }
-}
-
-
 void ui_logwindow_add(struct ui_logwindow *lw, const char *msg) {
   if(!msg[0]) {
-    ui_logwindow_addline(lw, "");
+    ui_logwindow_addline(lw, "", FALSE);
     return;
   }
   char **lines = g_strsplit(msg, "\n", 0);
   char **line;
   for(line=lines; *line; line++)
-    ui_logwindow_addline(lw, *line);
+    ui_logwindow_addline(lw, *line, FALSE);
   g_strfreev(lines);
 }
 

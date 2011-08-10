@@ -606,6 +606,108 @@ path_suggest_f:
 
 
 
+// Reads from fd until EOF and returns the number of lines found. Starts
+// counting after the first '\n' if start is FALSE. Returns -1 on error.
+static int file_count_lines(int fd) {
+  char buf[1024];
+  int n = 0;
+  int r;
+  while((r = read(fd, buf, 1024)) > 0)
+    while(r--)
+      if(buf[r] == '\n')
+        n++;
+  return r == 0 ? MAX(0, n) : r;
+}
+
+
+// Skips 'skip' lines and reads n lines from fd.
+static char **file_read_lines(int fd, int skip, int n) {
+  char buf[1024];
+  // skip 'skip' lines
+  int r = 0;
+  while(skip > 0 && (r = read(fd, buf, 1024)) > 0) {
+    int i;
+    for(i=0; i<r; i++) {
+      if(buf[i] == '\n' && !--skip) {
+        r -= i+1;
+        memmove(buf, buf+i+1, r);
+        break;
+      }
+    }
+  }
+  if(r < 0)
+    return NULL;
+  // now read the rest of the lines
+  char **res = g_new0(char *, n+1);
+  int num = 0;
+  GString *cur = g_string_sized_new(1024);
+  do {
+    char *tmp = buf;
+    int left = r;
+    char *sep;
+    while(num < n && left > 0 && (sep = memchr(tmp, '\n', left)) != NULL) {
+      int w = sep - tmp;
+      g_string_append_len(cur, tmp, w);
+      res[num++] = g_strdup(cur->str);
+      g_string_assign(cur, "");
+      left -= w+1;
+      tmp += w+1;
+    }
+    g_string_append_len(cur, tmp, left);
+  } while(num < n && (r = read(fd, buf, 1024)) > 0);
+  g_string_free(cur, TRUE);
+  if(r < 0) {
+    g_strfreev(res);
+    return NULL;
+  }
+  return res;
+}
+
+
+// Read the last n lines from a file and return them in a string array. The
+// file must end with a newline, and only \n is recognized as one.  Returns
+// NULL on error, with errno set. Can return an empty string array (result &&
+// !*result). This isn't the fastest implementation available, but at least it
+// does not have to read the entire file.
+char **file_tail(const char *fn, int n) {
+  if(n <= 0)
+    return g_new0(char *, 1);
+
+  int fd = open(fn, O_RDONLY);
+  if(fd < 0)
+    return NULL;
+  int backbytes = n*128;
+  off_t offset;
+  while((offset = lseek(fd, -backbytes, SEEK_END)) != (off_t)-1) {
+    int lines = file_count_lines(fd);
+    if(lines < 0)
+      return NULL;
+    // not enough lines, try seeking back further
+    if(offset > 0 && lines < n)
+      backbytes *= 2;
+    // otherwise, if we have enough lines seek again and fetch them
+    else if(lseek(fd, offset, SEEK_SET) == (off_t)-1)
+      return NULL;
+    else
+      return file_read_lines(fd, MAX(0, lines-n), MIN(lines+1, n));
+  }
+
+  // offset is -1 if we reach this. we may have been seeking to a negative
+  // offset, so let's try from the beginning.
+  if(errno == EINVAL) {
+    if(lseek(fd, 0, SEEK_SET) == (off_t)-1)
+      return NULL;
+    int lines = file_count_lines(fd);
+    if(lines < 0 || lseek(fd, 0, SEEK_SET) == (off_t)-1)
+      return NULL;
+    return file_read_lines(fd, MAX(0, lines-n), MIN(lines+1, n));
+  }
+
+  return NULL;
+}
+
+
+
 
 #if INTERFACE
 

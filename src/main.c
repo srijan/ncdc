@@ -275,9 +275,9 @@ static gboolean auto_open = TRUE;
 static GOptionEntry cli_options[] = {
   { "version", 'v', G_OPTION_FLAG_NO_ARG, G_OPTION_ARG_CALLBACK, print_version,
       "Print version and compilation information.", NULL },
-  { "session-dir", 'c', G_OPTION_FLAG_OPTIONAL_ARG, G_OPTION_ARG_FILENAME, &conf_dir,
+  { "session-dir", 'c', 0, G_OPTION_ARG_FILENAME, &conf_dir,
       "Use a different session directory. Default: `$NCDC_DIR' or `$HOME/.ncdc'.", "<dir>" },
-  { "no-autoconnect", 'n', G_OPTION_FLAG_NO_ARG|G_OPTION_FLAG_REVERSE, G_OPTION_ARG_NONE, &auto_open,
+  { "no-autoconnect", 'n', G_OPTION_FLAG_REVERSE, G_OPTION_ARG_NONE, &auto_open,
       "Don't automatically connect to hubs with the `autoconnect' option set.", NULL },
   { NULL }
 };

@@ -126,6 +126,8 @@ struct ui_logwindow *ui_logwindow_create(const char *file, int load) {
     char *n = g_strconcat(file, ".log", NULL);
     char *fn = g_build_filename(conf_dir, "logs", n, NULL);
 
+    // Note: doing _load before lw->file is initialized prevents the
+    // "-- Backlog .." messages from being logged.
     if(load)
       ui_logwindow_load(lw, fn, load);
 
@@ -162,7 +164,7 @@ void ui_logwindow_add(struct ui_logwindow *lw, const char *msg) {
 
 void ui_logwindow_clear(struct ui_logwindow *lw) {
   int i;
-  for(i=0; i<LOGWIN_BUF; i++) {
+  for(i=0; i<=LOGWIN_BUF; i++) {
     g_free(lw->buf[i]);
     lw->buf[i] = NULL;
   }

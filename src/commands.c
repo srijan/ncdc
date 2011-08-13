@@ -523,8 +523,8 @@ static void set_backlog(char *group, char *key, char *val) {
     long v = strtol(val, NULL, 10);
     if((!v && errno == EINVAL) || v < INT_MIN || v > INT_MAX || v < 0)
       ui_m(NULL, 0, "Invalid number.");
-    else if(v > 100)
-      ui_m(NULL, 0, "Maximum value is 100.");
+    else if(v >= LOGWIN_BUF)
+      ui_mf(NULL, 0, "Maximum value is %d.", LOGWIN_BUF-1);
     else {
       g_key_file_set_integer(conf_file, group, key, v);
       conf_save();

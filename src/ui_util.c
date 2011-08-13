@@ -44,11 +44,43 @@ struct ui_logwindow {
   int lastlog;
   int lastvis;
   FILE *file;
+  char *file_path;
+  struct stat file_st;
   char *buf[LOGWIN_BUF+1];
   gboolean updated;
 };
 
 #endif
+
+
+// (Re-)opens the log file and checks for inode and file size changes.
+static void ui_logwindow_checkfile(struct ui_logwindow *lw) {
+  if(!lw->file_path)
+    return;
+
+  // stat
+  struct stat st;
+  if(stat(lw->file_path, &st) < 0) {
+    g_warning("Unable to stat log file '%s': %s. Attempting to re-create it.", lw->file_path, g_strerror(errno));
+    if(lw->file) {
+      fclose(lw->file);
+      lw->file = NULL;
+    }
+  }
+
+  // if we have the log open, compare inode & size
+  if(lw->file && (lw->file_st.st_ino != st.st_ino || lw->file_st.st_size > st.st_size)) {
+    fclose(lw->file);
+    lw->file = NULL;
+  }
+  memcpy(&lw->file_st, &st, sizeof(struct stat));
+
+  // if the log hadn't been opened or has been closed earlier, try to open it again
+  if(!lw->file)
+    lw->file = fopen(lw->file_path, "a");
+  if(!lw->file)
+    g_warning("Unable to open log file '%s' for writing: %s", lw->file_path, g_strerror(errno));
+}
 
 
 static void ui_logwindow_addline(struct ui_logwindow *lw, const char *msg, gboolean raw) {
@@ -62,6 +94,7 @@ static void ui_logwindow_addline(struct ui_logwindow *lw, const char *msg, gbool
   strftime(ts, 10, "%H:%M:%S ", localtime(&tm));
   lw->buf[lw->lastlog & LOGWIN_BUF] = raw ? g_strdup(msg) : g_strconcat(ts, msg, NULL);
 
+  ui_logwindow_checkfile(lw);
   if(!raw && lw->file) {
     strftime(ts, 49, "[%F %H:%M:%S %Z] ", localtime(&tm));
     if(fprintf(lw->file, "%s%s\n", ts, msg) < 0 && !strstr(msg, "(LOGERR)"))
@@ -124,19 +157,15 @@ struct ui_logwindow *ui_logwindow_create(const char *file, int load) {
   struct ui_logwindow *lw = g_new0(struct ui_logwindow, 1);
   if(file) {
     char *n = g_strconcat(file, ".log", NULL);
-    char *fn = g_build_filename(conf_dir, "logs", n, NULL);
+    lw->file_path = g_build_filename(conf_dir, "logs", n, NULL);
+    g_free(n);
 
-    // Note: doing _load before lw->file is initialized prevents the
+    // Note: doing _load() before _checkfile() prevents the
     // "-- Backlog .." messages from being logged.
     if(load)
-      ui_logwindow_load(lw, fn, load);
-
-    lw->file = fopen(fn, "a");
-    if(!lw->file)
-      g_warning("Unable to open log file '%s' for writing: %s", fn, g_strerror(errno));
-    g_free(n);
-    g_free(fn);
+      ui_logwindow_load(lw, lw->file_path, load);
   }
+  ui_logwindow_checkfile(lw);
   return lw;
 }
 
@@ -145,6 +174,7 @@ void ui_logwindow_free(struct ui_logwindow *lw) {
   if(lw->file)
     fclose(lw->file);
   ui_logwindow_clear(lw);
+  g_free(lw->file_path);
   g_free(lw);
 }
 

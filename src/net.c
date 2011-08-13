@@ -29,7 +29,6 @@
 #include <errno.h>
 #include <limits.h>
 #include <stdlib.h>
-#include <sys/stat.h>
 #include <fcntl.h>
 #ifdef HAVE_LINUX_SENDFILE
 # include <sys/sendfile.h>

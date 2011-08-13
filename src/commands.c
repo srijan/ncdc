@@ -28,7 +28,6 @@
 #include <limits.h>
 #include <stdlib.h>
 #include <errno.h>
-#include <sys/stat.h>
 
 
 // currently opened tab, see cmd_handle()

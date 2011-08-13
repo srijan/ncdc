@@ -26,7 +26,6 @@
 
 #include "ncdc.h"
 #include <stdlib.h>
-#include <sys/stat.h>
 
 
 // List (well, table) of users who are granted a slot. Key = CID (g_strdup'ed),

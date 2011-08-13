@@ -93,7 +93,6 @@ static void ui_logwindow_load(struct ui_logwindow *lw, const char *fn, int num) 
     char *tmp = time ? strchr(time+1, ' ') : NULL;
     if(l[i][0] != '[' || !msg || !time || !tmp || tmp < time || msg[1] != ' ')
       continue;
-    g_debug(l[i]);
     time++;
     *msg = 0;
     msg += 2;

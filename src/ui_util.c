@@ -37,7 +37,6 @@
 
 #if INTERFACE
 
-#define LOGWIN_PAD 9
 #define LOGWIN_BUF 1023 // must be 2^x-1
 
 struct ui_logwindow {
@@ -241,6 +240,53 @@ void ui_logwindow_scroll(struct ui_logwindow *lw, int i) {
 }
 
 
+// Draws a line between x and x+cols on row y (continuing on y-1 .. y-(rows+1) for
+// multiple rows). Returns the actual number of rows written to.
+static int ui_logwindow_drawline(struct ui_logwindow *lw, int y, int x, int nrows, int cols, char *str) {
+  // Determine the indentation for multi-line rows. This is:
+  // - Always after the time part (hh:mm:ss )
+  // - For chat messages: after the nick (<nick> )
+  // - For /me's: after the (** )
+  int indent = 0;
+  char *tmp = strchr(str, ' ');
+  if(tmp)
+    indent = tmp-str+1;
+  if(tmp && tmp[1] == '<' && (tmp = strchr(tmp, '>')) != NULL)
+    indent = tmp-str+2;
+  else if(tmp && tmp[1] == '*' && tmp[2] == '*')
+    indent += 3;
+
+  // defines a mask over the string: <#0,#1), <#1,#2), ..
+  static unsigned short rows[201];
+  rows[0] = rows[1] = 0;
+  int cur = 1, curcols = 0, i = 0;
+
+  // loop through the characters and determine on which row to put them
+  while(str[i]) {
+    int width = gunichar_width(g_utf8_get_char(str+i));
+    if(curcols+width >= (cur > 1 ? cols-indent : cols)) {
+      // too many rows? don't display the rest
+      if(cur >= 200)
+        break;
+      cur++;
+      curcols = 0;
+    }
+    i = g_utf8_next_char(str+i) - str;
+    rows[cur] = i;
+    curcols += width;
+    // too many bytes in the string? don't display the rest
+    if(i > USHRT_MAX-10)
+      break;
+  }
+
+  // print the rows
+  for(i=cur-1; nrows>0 && i>=0; i--, nrows--, y--)
+    mvaddnstr(y, i == 0 ? x : x+indent, str+rows[i], rows[i+1]-rows[i]);
+
+  return cur;
+}
+
+
 // TODO: this function is called often and can be optimized.
 // TODO: wrap on word boundary
 void ui_logwindow_draw(struct ui_logwindow *lw, int y, int x, int rows, int cols) {
@@ -248,39 +294,11 @@ void ui_logwindow_draw(struct ui_logwindow *lw, int y, int x, int rows, int cols
   int cur = lw->lastvis;
   lw->updated = FALSE;
 
-  // defines a mask over the string: <#0,#1), <#1,#2), ..
-  static unsigned short lines[201];
-  lines[0] = 0;
-
   while(top >= y) {
     char *str = lw->buf[cur & LOGWIN_BUF];
     if(!str)
       break;
-    int curline = 1, curlinecols = 0, i = 0;
-    lines[1] = 0;
-
-    // loop through the characters and determine on which line to put them
-    while(str[i]) {
-      int width = gunichar_width(g_utf8_get_char(str+i));
-      if(curlinecols+width >= (curline > 1 ? cols-LOGWIN_PAD : cols)) {
-        // too many lines? don't display the rest
-        if(curline >= 200)
-          break;
-        curline++;
-        curlinecols = 0;
-      }
-      i = g_utf8_next_char(str+i) - str;
-      lines[curline] = i;
-      curlinecols += width;
-      // too many bytes in the string? don't display the rest
-      if(i > USHRT_MAX-10)
-        break;
-    }
-
-    // print the lines
-    for(i=curline-1; top>=y && i>=0; i--, top--)
-      mvaddnstr(top, i == 0 ? x : x+9, str+lines[i], lines[i+1]-lines[i]);
-
+    top -= ui_logwindow_drawline(lw, top, x, top-y+1, cols, str);
     cur = (cur-1) & LOGWIN_BUF;
   }
 }

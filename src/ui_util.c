@@ -91,7 +91,7 @@ static void ui_logwindow_checkfile(struct ui_logwindow *lw) {
 }
 
 
-static void ui_logwindow_addline(struct ui_logwindow *lw, const char *msg, gboolean raw) {
+static void ui_logwindow_addline(struct ui_logwindow *lw, const char *msg, gboolean raw, gboolean nolog) {
   if(lw->lastlog == lw->lastvis)
     lw->lastvis = lw->lastlog + 1;
   lw->lastlog++;
@@ -103,7 +103,7 @@ static void ui_logwindow_addline(struct ui_logwindow *lw, const char *msg, gbool
   lw->buf[lw->lastlog & LOGWIN_BUF] = raw ? g_strdup(msg) : g_strconcat(ts, msg, NULL);
 
   ui_logwindow_checkfile(lw);
-  if(!raw && lw->file) {
+  if(!nolog && lw->file) {
     strftime(ts, 49, "[%F %H:%M:%S %Z] ", localtime(&tm));
     if(fprintf(lw->file, "%s%s\n", ts, msg) < 0 && !strstr(msg, "(LOGERR)"))
       g_warning("Error writing to log file: %s (LOGERR)", strerror(errno));
@@ -140,21 +140,21 @@ static void ui_logwindow_load(struct ui_logwindow *lw, const char *fn, int num) 
     // if this is the first line, display a notice
     if(!i) {
       m = g_strdup_printf("-- Backlog starts on %s.", l[i]+1);
-      ui_logwindow_addline(lw, m, FALSE);
+      ui_logwindow_addline(lw, m, FALSE, TRUE);
       g_free(m);
     }
     // display the line
     *tmp = 0;
     m = g_strdup_printf("%s %s", time, msg);
-    ui_logwindow_addline(lw, m, TRUE);
+    ui_logwindow_addline(lw, m, TRUE, TRUE);
     g_free(m);
     *tmp = ' ';
     // if this is the last line, display another notice
     if(i == len-1) {
       m = g_strdup_printf("-- Backlog ends on %s", l[i]+1);
-      ui_logwindow_addline(lw, m, FALSE);
+      ui_logwindow_addline(lw, m, FALSE, TRUE);
       g_free(m);
-      ui_logwindow_addline(lw, "", FALSE);
+      ui_logwindow_addline(lw, "", FALSE, TRUE);
     }
   }
   g_strfreev(l);
@@ -168,8 +168,6 @@ struct ui_logwindow *ui_logwindow_create(const char *file, int load) {
     lw->file_path = g_build_filename(conf_dir, "logs", n, NULL);
     g_free(n);
 
-    // Note: doing _load() before _checkfile() prevents the
-    // "-- Backlog .." messages from being logged.
     if(load)
       ui_logwindow_load(lw, lw->file_path, load);
   }
@@ -189,7 +187,7 @@ void ui_logwindow_free(struct ui_logwindow *lw) {
 
 void ui_logwindow_add(struct ui_logwindow *lw, const char *msg) {
   if(!msg[0]) {
-    ui_logwindow_addline(lw, "", FALSE);
+    ui_logwindow_addline(lw, "", FALSE, FALSE);
     return;
   }
 
@@ -210,10 +208,10 @@ void ui_logwindow_add(struct ui_logwindow *lw, const char *msg) {
   char **line;
   for(line=lines; *line; line++) {
     if(!prefix || lines == line)
-      ui_logwindow_addline(lw, *line, FALSE);
+      ui_logwindow_addline(lw, *line, FALSE, FALSE);
     else {
       tmp = g_strconcat(prefix, *line, NULL);
-      ui_logwindow_addline(lw, tmp, FALSE);
+      ui_logwindow_addline(lw, tmp, FALSE, FALSE);
       g_free(tmp);
     }
   }

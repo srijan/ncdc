@@ -1435,8 +1435,15 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
   }
 
   // global hub message
-  if(cmd[0] != '$')
-    ui_m(hub->tab, UIM_PASS|UIM_CHAT|UIP_MED, nmdc_unescape_and_decode(hub, cmd));
+  if(cmd[0] != '$') {
+    char *msg = nmdc_unescape_and_decode(hub, cmd);
+    if(msg[0] == '<' || (msg[0] == '*' && msg[1] == '*'))
+      ui_m(hub->tab, UIM_PASS|UIM_CHAT|UIP_MED, msg);
+    else {
+      ui_m(hub->tab, UIM_PASS|UIM_CHAT|UIP_MED, g_strconcat("<hub> ", msg, NULL));
+      g_free(msg);
+    }
+  }
 }
 
 

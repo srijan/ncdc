@@ -184,10 +184,32 @@ void ui_logwindow_add(struct ui_logwindow *lw, const char *msg) {
     ui_logwindow_addline(lw, "", FALSE);
     return;
   }
+
   char **lines = g_strsplit(msg, "\n", 0);
+
+  // For chat messages and /me's, prefix every line with "<nick>" or "** nick"
+  char *prefix = NULL;
+  char *tmp;
+  if( (**lines == '<' && (tmp = strchr(*lines, '>')) != NULL && *(++tmp) == ' ') || // <nick>
+      (**lines == '*' && lines[0][1] == '*' && (tmp = strchr(*lines, ' ')) != NULL)) { // ** nick
+    char old = tmp[1];
+    tmp[1] = 0;
+    prefix = g_strdup(*lines);
+    tmp[1] = old;
+  }
+
+  // add the lines
   char **line;
-  for(line=lines; *line; line++)
-    ui_logwindow_addline(lw, *line, FALSE);
+  for(line=lines; *line; line++) {
+    if(!prefix || lines == line)
+      ui_logwindow_addline(lw, *line, FALSE);
+    else {
+      tmp = g_strconcat(prefix, *line, NULL);
+      ui_logwindow_addline(lw, tmp, FALSE);
+      g_free(tmp);
+    }
+  }
+  g_free(prefix);
   g_strfreev(lines);
 }
 
@@ -269,6 +291,8 @@ gboolean ui_logwindow_key(struct ui_logwindow *lw, guint64 key, int rows) {
   }
   return FALSE;
 }
+
+
 
 
 

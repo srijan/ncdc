@@ -1536,6 +1536,8 @@ void hub_connect(struct hub *hub) {
   hub->adc = FALSE;
   if(strncmp(addr, "dchub://", 8) == 0)
     addr += 8;
+  else if(strncmp(addr, "nmdc://", 7) == 0)
+    addr += 7;
   else if(strncmp(addr, "adc://", 6) == 0) {
     addr += 6;
     hub->adc = TRUE;

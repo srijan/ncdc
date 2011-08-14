@@ -59,13 +59,13 @@ static void ui_logwindow_checkfile(struct ui_logwindow *lw) {
     return;
 
   // stat
+  gboolean restat = !lw->file;
   struct stat st;
-  if(stat(lw->file_path, &st) < 0) {
+  if(lw->file && stat(lw->file_path, &st) < 0) {
     g_warning("Unable to stat log file '%s': %s. Attempting to re-create it.", lw->file_path, g_strerror(errno));
-    if(lw->file) {
-      fclose(lw->file);
-      lw->file = NULL;
-    }
+    fclose(lw->file);
+    lw->file = NULL;
+    restat = TRUE;
   }
 
   // if we have the log open, compare inode & size
@@ -73,13 +73,21 @@ static void ui_logwindow_checkfile(struct ui_logwindow *lw) {
     fclose(lw->file);
     lw->file = NULL;
   }
-  memcpy(&lw->file_st, &st, sizeof(struct stat));
 
   // if the log hadn't been opened or has been closed earlier, try to open it again
   if(!lw->file)
     lw->file = fopen(lw->file_path, "a");
   if(!lw->file)
     g_warning("Unable to open log file '%s' for writing: %s", lw->file_path, g_strerror(errno));
+
+  // stat again if we need to
+  if(lw->file && restat && stat(lw->file_path, &st) < 0) {
+    g_warning("Unable to stat log file '%s': %s. Closing.", lw->file_path, g_strerror(errno));
+    fclose(lw->file);
+    lw->file = NULL;
+  }
+
+  memcpy(&lw->file_st, &st, sizeof(struct stat));
 }
 
 

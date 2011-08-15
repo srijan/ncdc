@@ -240,6 +240,59 @@ void ui_logwindow_scroll(struct ui_logwindow *lw, int i) {
 }
 
 
+// Calculate the wrapping points in a line. Storing the mask in *rows, the row
+// where the indent is reset in *ind_row, and returning the number of rows.
+static int ui_logwindow_calc_wrap(char *str, int cols, int indent, int *rows, int *ind_row) {
+  rows[0] = rows[1] = 0;
+  *ind_row = 0;
+  int cur = 1, curcols = 0, i = 0;
+
+  // Appends an entity that will not be wrapped (i.e. a single character or a
+  // word that isn't too long). Does a 'break' if there are too many lines.
+#define append(w, b, ind) \
+  int t_w = w;\
+  if(curcols+t_w > cols) {\
+    if(++cur >= 200)\
+      break;\
+    if(ind && !*ind_row)\
+      *ind_row = cur-1;\
+    curcols = *ind_row ? 0 : indent;\
+  }\
+  i += b;\
+  curcols += t_w;\
+  rows[cur] = i;
+
+  while(str[i] && cur < 200) {
+    // Determine the width of the current word
+    int j = i;
+    int width = 0;
+    for(; str[j] && str[j] != ' '; j = g_utf8_next_char(str+j)-str)
+      width += gunichar_width(g_utf8_get_char(str+j));
+
+    // Special-case the space
+    if(j == i) {
+      append(1,1, FALSE);
+
+    // If the word still fits on the current line or is smaller than cols/2, then consider it as a single entity
+    } else if(curcols+width <= cols || width < cols/2) {
+      append(width, j-i, FALSE);
+
+    // Otherwise, wrap on character-boundary and ignore indent
+    } else {
+      char *tmp = str+i;
+      for(; *tmp && *tmp != ' '; tmp = g_utf8_next_char(tmp)) {
+        append(gunichar_width(g_utf8_get_char(tmp)), g_utf8_next_char(tmp)-tmp, TRUE);
+      }
+    }
+  }
+
+#undef append
+  if(!*ind_row)
+    *ind_row = cur;
+  return cur;
+}
+
+
 // Draws a line between x and x+cols on row y (continuing on y-1 .. y-(rows+1) for
 // multiple rows). Returns the actual number of rows written to.
 static int ui_logwindow_drawline(struct ui_logwindow *lw, int y, int x, int nrows, int cols, char *str) {
@@ -256,39 +309,22 @@ static int ui_logwindow_drawline(struct ui_logwindow *lw, int y, int x, int nrow
   else if(tmp && tmp[1] == '*' && tmp[2] == '*')
     indent += 3;
 
-  // defines a mask over the string: <#0,#1), <#1,#2), ..
-  static unsigned short rows[201];
-  rows[0] = rows[1] = 0;
-  int cur = 1, curcols = 0, i = 0;
-
-  // loop through the characters and determine on which row to put them
-  while(str[i]) {
-    int width = gunichar_width(g_utf8_get_char(str+i));
-    if(curcols+width >= (cur > 1 ? cols-indent : cols)) {
-      // too many rows? don't display the rest
-      if(cur >= 200)
-        break;
-      cur++;
-      curcols = 0;
-    }
-    i = g_utf8_next_char(str+i) - str;
-    rows[cur] = i;
-    curcols += width;
-    // too many bytes in the string? don't display the rest
-    if(i > USHRT_MAX-10)
-      break;
-  }
+  // Determine the wrapping boundaries.
+  // Defines a mask over the string: <#0,#1), <#1,#2), ..
+  static int rows[201];
+  int ind_row;
+  int cur = ui_logwindow_calc_wrap(str, cols, indent, rows, &ind_row);
 
   // print the rows
+  int i;
   for(i=cur-1; nrows>0 && i>=0; i--, nrows--, y--)
-    mvaddnstr(y, i == 0 ? x : x+indent, str+rows[i], rows[i+1]-rows[i]);
+    mvaddnstr(y, i == 0 || i >= ind_row ? x : x+indent, str+rows[i], rows[i+1]-rows[i]);
 
   return cur;
 }
 
 
 // TODO: this function is called often and can be optimized.
-// TODO: wrap on word boundary
 void ui_logwindow_draw(struct ui_logwindow *lw, int y, int x, int rows, int cols) {
   int top = rows + y - 1;
   int cur = lw->lastvis;

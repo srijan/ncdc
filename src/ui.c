@@ -1894,12 +1894,12 @@ static void ui_draw_status() {
 
 
 #define tabcol(t, n) (2+ceil(log10((n)+1))+str_columns(((struct ui_tab *)(t)->data)->name))
-#define prio2a(p) ((p) == UIP_LOW ? UIC(TABPRIO_LOW) : (p) == UIP_MED ? UIC(TABPRIO_MED) : UIC(TABPRIO_HIGH))
+#define prio2a(p) ((p) == UIP_LOW ? UIC(tabprio_low) : (p) == UIP_MED ? UIC(tabprio_med) : UIC(tabprio_high))
 
 /* All tabs are in one of the following states:
  * - Selected                 (tab == ui_tab_cur->data) = sel    "n:name" in A_BOLD
  * - No change                (!sel && tab->prio == UIP_EMPTY)   "n:name" normal
- * - Change, low priority     (!sel && tab->prio == UIP_LOW)     "n!name", with ! in UIC(TABPRIO_LOW)
+ * - Change, low priority     (!sel && tab->prio == UIP_LOW)     "n!name", with ! in UIC(tabprio_low)
  * - Change, medium priority  (!sel && tab->prio == UIP_MED)     "n!name", with ! in ^_MED
  * - Change, high priority    (!sel && tab->prio == UIP_HIGH)    "n!name", with ! in ^_HIGH
  *

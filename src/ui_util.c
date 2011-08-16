@@ -44,17 +44,18 @@
 
 #define COLOR_DEFAULT (-1)
 
+//  name            default fg       default bg       default attr
 #define UI_COLORS \
-  C(LOG_DEFAULT,    COLOR_DEFAULT,   COLOR_DEFAULT,   0)\
-  C(LOG_TIME,       COLOR_DEFAULT,   COLOR_DEFAULT,   0)\
-  C(LOG_NICK,       COLOR_DEFAULT,   COLOR_DEFAULT,   0)\
-  C(LOG_OWNNICK,    COLOR_DEFAULT,   COLOR_DEFAULT,   A_BOLD)\
-  C(LOG_HIGHLIGHT,  COLOR_YELLOW,    COLOR_DEFAULT,   A_BOLD)\
-  C(LOG_JOIN,       COLOR_CYAN,      COLOR_DEFAULT,   A_BOLD)\
-  C(LOG_QUIT,       COLOR_CYAN,      COLOR_DEFAULT,   0)\
-  C(TABPRIO_LOW,    COLOR_BLACK,     COLOR_DEFAULT,   A_BOLD)\
-  C(TABPRIO_MED,    COLOR_CYAN,      COLOR_DEFAULT,   A_BOLD)\
-  C(TABPRIO_HIGH,   COLOR_MAGENTA,   COLOR_DEFAULT,   A_BOLD)
+  C(log_default,    COLOR_DEFAULT,   COLOR_DEFAULT,   0)\
+  C(log_highlight,  COLOR_YELLOW,    COLOR_DEFAULT,   A_BOLD)\
+  C(log_join,       COLOR_CYAN,      COLOR_DEFAULT,   A_BOLD)\
+  C(log_nick,       COLOR_DEFAULT,   COLOR_DEFAULT,   0)\
+  C(log_ownnick,    COLOR_DEFAULT,   COLOR_DEFAULT,   A_BOLD)\
+  C(log_quit,       COLOR_CYAN,      COLOR_DEFAULT,   0)\
+  C(log_time,       COLOR_DEFAULT,   COLOR_DEFAULT,   0)\
+  C(tabprio_high,   COLOR_MAGENTA,   COLOR_DEFAULT,   A_BOLD)\
+  C(tabprio_low,    COLOR_BLACK,     COLOR_DEFAULT,   A_BOLD)\
+  C(tabprio_med,    COLOR_CYAN,      COLOR_DEFAULT,   A_BOLD)
 
 
 enum ui_coltype {
@@ -66,9 +67,16 @@ enum ui_coltype {
 
 
 struct ui_color {
-  short fg, bg;
-  int x, a;
+  char name[16];
+  short fg, bg, d_fg, d_bg;
+  int x, d_x, a;
 };
+
+struct ui_attr {
+  char name[11];
+  gboolean color : 1;
+  int attr;
+}
 
 #define UIC(n) (ui_colors[UIC_##n].a)
 
@@ -76,13 +84,130 @@ struct ui_color {
 
 
 struct ui_color ui_colors[] = {
-#define C(n, fg, bg, attr) { fg, bg, attr, 0 },
+#define C(n, fg, bg, attr) { G_STRINGIFY(n), fg, bg, fg, bg, attr, attr, 0 },
   UI_COLORS
 #undef C
-  { -1, -1, 0, 0 }
+  { "" }
 };
 
-int ui_colors_num = G_N_ELEMENTS(ui_colors);
+
+struct ui_attr ui_attr_names[] = {
+  { "black",     TRUE,  COLOR_BLACK   },
+  { "blue",      TRUE,  COLOR_BLUE    },
+  { "bold",      FALSE, A_BOLD        },
+  { "cyan",      TRUE,  COLOR_CYAN    },
+  { "default",   TRUE,  COLOR_DEFAULT },
+  { "green",     TRUE,  COLOR_GREEN   },
+  { "magenta",   TRUE,  COLOR_MAGENTA },
+  { "red",       TRUE,  COLOR_RED     },
+  { "reverse",   FALSE, A_REVERSE     },
+  { "underline", FALSE, A_UNDERLINE   },
+  { "white",     TRUE,  COLOR_WHITE   },
+  { "yellow",    TRUE,  COLOR_YELLOW  },
+  { "" }
+};
+
+
+struct ui_attr *ui_attr_by_name(const char *n) {
+  struct ui_attr *a = ui_attr_names;
+  for(; *a->name; a++)
+    if(strcmp(a->name, n) == 0)
+      return a;
+  return NULL;
+}
+
+
+char *ui_name_by_attr(int n) {
+  struct ui_attr *a = ui_attr_names;
+  for(; *a->name; a++)
+    if(a->attr == n)
+      return a->name;
+  return NULL;
+}
+
+
+struct ui_color *ui_color_by_name(const char *n) {
+  struct ui_color *c = ui_colors;
+  for(; *c->name; c++)
+    if(strcmp(c->name, n) == 0)
+      return c;
+  return NULL;
+}
+
+
+gboolean ui_color_str_parse(const char *str, short *fg, short *bg, int *x, GError **err) {
+  int state = 0; // 0 = no fg, 1 = no bg, 2 = both
+  short f = COLOR_DEFAULT, b = COLOR_DEFAULT;
+  int a = 0;
+  char **args = g_strsplit(str, ",", 0);
+  char **arg = args;
+  for(; arg && *arg; arg++) {
+    g_strstrip(*arg);
+    if(!**arg)
+      continue;
+    struct ui_attr *attr = ui_attr_by_name(*arg);
+    if(!attr) {
+      g_set_error(err, 1, 0, "Unknown color or attribute: %s", *arg);
+      g_strfreev(args);
+      return FALSE;
+    }
+    if(!attr->color)
+      a |= attr->attr;
+    else if(!state) {
+      f = attr->attr;
+      state++;
+    } else if(state == 1) {
+      b = attr->attr;
+      state++;
+    } else {
+      g_set_error(err, 1, 0, "Don't know what to do with a third color: %s", *arg);
+      g_strfreev(args);
+      return FALSE;
+    }
+  }
+  g_strfreev(args);
+  if(fg) *fg = f;
+  if(bg) *bg = b;
+  if(x)  *x  = a;
+  return TRUE;
+}
+
+
+char *ui_color_str_gen(int fd, int bg, int x) {
+  static char buf[100]; // must be smaller than (max_color_name * 2) + (max_attr_name * 3) + 6
+  strcpy(buf, ui_name_by_attr(fd));
+  if(bg != COLOR_DEFAULT) {
+    strcat(buf, ",");
+    strcat(buf, ui_name_by_attr(bg));
+  }
+  struct ui_attr *attr = ui_attr_names;
+  for(; attr->name[0]; attr++)
+    if(!attr->color && x & attr->attr) {
+      strcat(buf, ",");
+      strcat(buf, attr->name);
+    }
+  return buf;
+}
+
+
+// TODO: re-use color pairs when we have too many (>64) color groups
+void ui_colors_update() {
+  char confname[50] = "color_";
+  int pair = 0;
+  struct ui_color *c = ui_colors;
+  for(; *c->name; c++) {
+    strcpy(confname+6, c->name);
+    char *conf = g_key_file_get_string(conf_file, "color", confname, NULL);
+    if(!conf || !ui_color_str_parse(conf, &c->fg, &c->bg, &c->x, NULL)) {
+      c->fg = c->d_fg;
+      c->bg = c->d_bg;
+      c->x = c->d_x;
+    }
+    g_free(conf);
+    init_pair(++pair, c->fg, c->bg);
+    c->a = c->x | COLOR_PAIR(pair);
+  }
+}
 
 
 void ui_colors_init() {
@@ -92,12 +217,7 @@ void ui_colors_init() {
   start_color();
   use_default_colors();
 
-  // TODO: re-use color pairs when we have too many (>64) color groups
-  int i;
-  for(i=0; i<ui_colors_num; i++) {
-    init_pair(i+1, ui_colors[i].fg, ui_colors[i].bg);
-    ui_colors[i].a = ui_colors[i].x | COLOR_PAIR(i+1);
-  }
+  ui_colors_update();
 }
 
 
@@ -386,7 +506,7 @@ static int ui_logwindow_calc_color(struct ui_logwindow *lw, char *str, int *sep,
   int t_f = from;\
   if(sep[mask] != t_f) {\
     sep[mask+1] = t_f;\
-    attr[mask] = UIC(LOG_DEFAULT);\
+    attr[mask] = UIC(log_default);\
     mask++;\
   }\
   sep[mask] = t_f;\
@@ -397,7 +517,7 @@ static int ui_logwindow_calc_color(struct ui_logwindow *lw, char *str, int *sep,
   // time
   char *msg = strchr(str, ' ');
   if(msg) {
-    addm(0, msg-str, UIC(LOG_TIME));
+    addm(0, msg-str, UIC(log_time));
     msg++;
   }
 
@@ -414,19 +534,19 @@ static int ui_logwindow_calc_color(struct ui_logwindow *lw, char *str, int *sep,
     int r = lw->checkchat ? lw->checkchat(lw->handle, str+nickstart, str+nickend+1) : 0;
     tmp[0] = old;
     // and use the correct color
-    addm(nickstart, nickend, r == 2 ? UIC(LOG_OWNNICK) : r == 1 ? UIC(LOG_HIGHLIGHT) : UIC(LOG_NICK));
+    addm(nickstart, nickend, r == 2 ? UIC(log_ownnick) : r == 1 ? UIC(log_highlight) : UIC(log_nick));
   }
 
   // join/quits (--> and --<)
   if(msg && msg[0] == '-' && msg[1] == '-' && (msg[2] == '>' || msg[2] == '<')) {
-    addm(msg-str, strlen(str), msg[2] == '>' ? UIC(LOG_JOIN) : UIC(LOG_QUIT));
+    addm(msg-str, strlen(str), msg[2] == '>' ? UIC(log_join) : UIC(log_quit));
   }
 
 #undef addm
   // make sure the last mask is correct and return
   if(sep[mask+1] != strlen(str)) {
     sep[mask+1] = strlen(str);
-    attr[mask] = UIC(LOG_DEFAULT);
+    attr[mask] = UIC(log_default);
   }
   return mask;
 }

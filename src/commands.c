@@ -533,6 +533,33 @@ static void set_backlog(char *group, char *key, char *val) {
 }
 
 
+static void get_color(char *group, char *key) {
+  g_return_if_fail(strncmp(key, "color_", 6) == 0);
+  struct ui_color *c = ui_color_by_name(key+6);
+  g_return_if_fail(c);
+  ui_mf(NULL, 0, "%s.%s = %s", group, key, ui_color_str_gen(c->fg, c->bg, c->x));
+}
+
+
+static void set_color(char *group, char *key, char *val) {
+  if(!val) {
+    UNSET(group, key);
+    ui_colors_update();
+  } else {
+    GError *err = NULL;
+    if(!ui_color_str_parse(val, NULL, NULL, NULL, &err)) {
+      ui_m(NULL, 0, err->message);
+      g_error_free(err);
+    } else {
+      g_key_file_set_string(conf_file, group, key, val);
+      conf_save();
+      ui_colors_update();
+      get_color(group, key);
+    }
+  }
+}
+
+
 // the settings list
 // TODO: help text / documentation?
 static struct setting settings[] = {
@@ -542,6 +569,9 @@ static struct setting settings[] = {
   { "autoconnect",   NULL,     get_bool_f,        set_autoconnect,   set_bool_sug     }, // may not be used in "global"
   { "autorefresh",   "global", get_autorefresh,   set_autorefresh,   NULL             }, // in minutes, 0 = disabled
   { "backlog",       NULL,     get_backlog,       set_backlog,       NULL,            }, // number of lines, 0 = disabled
+#define C(n, a,b,c) { "color_" G_STRINGIFY(n), "color", get_color, set_color, NULL },
+  UI_COLORS
+#undef C
   { "connection",    NULL,     get_string,        set_userinfo,      NULL             },
   { "description",   NULL,     get_string,        set_userinfo,      NULL             },
   { "download_dir",  "global", get_download_dir,  set_download_dir,  path_suggest     },

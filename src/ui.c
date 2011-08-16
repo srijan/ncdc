@@ -176,9 +176,9 @@ static void ui_msg_draw(struct ui_tab *tab) {
   // Check that the user is online and still has the same name
   struct hub_user *u = g_hash_table_lookup(hub_uids, &tab->uid);
   if(u && !tab->msg_online)
-    ui_mf(tab, 0, "%s has joined.", u->name);
+    ui_mf(tab, 0, "--> %s has joined.", u->name);
   else if(!u && tab->msg_online)
-    ui_mf(tab, 0, "%s has quit.", tab->name+1);
+    ui_mf(tab, 0, "--< %s has quit.", tab->name+1);
   else if(u && strcmp(u->name, tab->name+1) != 0) {
     ui_mf(tab, 0, "%s is now known as %s.", tab->name+1, u->name);
     g_free(tab->name);
@@ -396,9 +396,9 @@ void ui_hub_userchange(struct ui_tab *tab, int change, struct hub_user *user) {
     user->isjoined = TRUE;
     if(log && tab->hub->joincomplete && (!tab->hub->nick_valid
         || (tab->hub->adc ? (tab->hub->sid != user->sid) : (strcmp(tab->hub->nick_hub, user->name_hub) != 0))))
-      ui_mf(tab, 0, "%s has joined.", user->name);
+      ui_mf(tab, 0, "--> %s has joined.", user->name);
   } else if(change == UIHUB_UC_QUIT && log)
-    ui_mf(tab, 0, "%s has quit.", user->name);
+    ui_mf(tab, 0, "--< %s has quit.", user->name);
 }
 
 

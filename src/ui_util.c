@@ -45,11 +45,13 @@
 #define COLOR_DEFAULT (-1)
 
 #define UI_COLORS \
-  C(LOG_TIME,       COLOR_DEFAULT,   COLOR_DEFAULT,   0)\
   C(LOG_DEFAULT,    COLOR_DEFAULT,   COLOR_DEFAULT,   0)\
+  C(LOG_TIME,       COLOR_DEFAULT,   COLOR_DEFAULT,   0)\
   C(LOG_NICK,       COLOR_DEFAULT,   COLOR_DEFAULT,   0)\
   C(LOG_OWNNICK,    COLOR_DEFAULT,   COLOR_DEFAULT,   A_BOLD)\
   C(LOG_HIGHLIGHT,  COLOR_YELLOW,    COLOR_DEFAULT,   A_BOLD)\
+  C(LOG_JOIN,       COLOR_CYAN,      COLOR_DEFAULT,   A_BOLD)\
+  C(LOG_QUIT,       COLOR_CYAN,      COLOR_DEFAULT,   0)\
   C(TABPRIO_LOW,    COLOR_BLACK,     COLOR_DEFAULT,   A_BOLD)\
   C(TABPRIO_MED,    COLOR_CYAN,      COLOR_DEFAULT,   A_BOLD)\
   C(TABPRIO_HIGH,   COLOR_MAGENTA,   COLOR_DEFAULT,   A_BOLD)
@@ -104,6 +106,14 @@ void ui_colors_init() {
 
 // Log window "widget"
 
+
+/* Log format of some special messages:
+ *   Chat message:  "<nick> msg"
+ *   Chat /me:      "** nick msg"
+ *   User joined    "--> nick has joined." (may be internationalized,
+ *   User quit      "--< nick has quit."    don't depend on the actual message)
+ * Anything else is a system / help message.
+ */
 
 #if INTERFACE
 
@@ -385,31 +395,39 @@ static int ui_logwindow_calc_color(struct ui_logwindow *lw, char *str, int *sep,
   mask++;
 
   // time
-  char *tmp = strchr(str, ' ');
-  if(tmp) {
-    addm(0, tmp-str, UIC(LOG_TIME));
+  char *msg = strchr(str, ' ');
+  if(msg) {
+    addm(0, msg-str, UIC(LOG_TIME));
+    msg++;
   }
 
-  // <nick> and ** nick
-  char *tmp2;
-  if(tmp && (
-      (tmp[1] == '<' && (tmp2 = strchr(tmp, '>')) != NULL && tmp2[1] == ' ') || // <nick>
-      (tmp[1] == '*' && tmp[2] == '*' && (tmp2 = strchr(tmp+1, ' ')) != NULL))) { // ** nick
-    int nickstart = (tmp-str) + (tmp[1] == '<' ? 2 : 3);
-    int nickend = tmp2-str;
+  // chat messages (<nick> and ** nick)
+  char *tmp;
+  if(msg && (
+      (msg[0] == '<' && (tmp = strchr(msg, '>')) != NULL && tmp[1] == ' ') || // <nick>
+      (msg[0] == '*' && msg[1] == '*' && (tmp = strchr(msg, ' ')) != NULL))) { // ** nick
+    int nickstart = (msg-str) + (msg[0] == '<' ? 1 : 2);
+    int nickend = tmp-str;
     // check for a highlight or whether it is our own nick
-    char old = tmp2[0];
-    tmp2[0] = 0;
+    char old = tmp[0];
+    tmp[0] = 0;
     int r = lw->checkchat ? lw->checkchat(lw->handle, str+nickstart, str+nickend+1) : 0;
-    tmp2[0] = old;
+    tmp[0] = old;
     // and use the correct color
     addm(nickstart, nickend, r == 2 ? UIC(LOG_OWNNICK) : r == 1 ? UIC(LOG_HIGHLIGHT) : UIC(LOG_NICK));
   }
 
+  // join/quits (--> and --<)
+  if(msg && msg[0] == '-' && msg[1] == '-' && (msg[2] == '>' || msg[2] == '<')) {
+    addm(msg-str, strlen(str), msg[2] == '>' ? UIC(LOG_JOIN) : UIC(LOG_QUIT));
+  }
+
 #undef addm
   // make sure the last mask is correct and return
-  sep[mask+1] = strlen(str);
-  attr[mask] = UIC(LOG_DEFAULT);
+  if(sep[mask+1] != strlen(str)) {
+    sep[mask+1] = strlen(str);
+    attr[mask] = UIC(LOG_DEFAULT);
+  }
   return mask;
 }
 

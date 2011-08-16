@@ -66,6 +66,7 @@ struct ui_tab {
   gboolean user_hide_conn : 1;
   // HUB
   gboolean hub_joincomplete : 1;
+  GRegex *hub_highlight;
   struct ui_tab *userlist_tab;
   // FL
   struct fl_list *fl_list;
@@ -244,15 +245,22 @@ int ui_hub_log_checkchat(void *dat, char *nick, char *msg) {
   if(strcmp(nick, tab->hub->nick) == 0)
     return 2;
 
-  // TODO: this is also duplicated in ui_m() and can be optimized.
-  int r = 0;
+  if(!tab->hub->tab->hub_highlight)
+    return 0;
+
+  return g_regex_match(tab->hub->tab->hub_highlight, msg, 0, NULL) ? 1 : 0;
+}
+
+
+// Called by hub.c when hub->nick is set or changed. (Not called when hub->nick is reset to NULL)
+void ui_hub_setnick(struct ui_tab *tab) {
+  if(!tab->hub->nick)
+    return;
   char *name = g_regex_escape_string(tab->hub->nick, -1);
   char *pattern = g_strdup_printf("\\b%s\\b", name);
-  if(g_regex_match_simple(pattern, msg, G_REGEX_CASELESS, 0))
-    r = 1;
+  tab->hub_highlight = g_regex_new(pattern, G_REGEX_CASELESS|G_REGEX_OPTIMIZE, 0, NULL);
   g_free(name);
   g_free(pattern);
-  return r;
 }
 
 
@@ -1781,14 +1789,9 @@ static gboolean ui_m_mainthread(gpointer dat) {
     ui_m_updated = TRUE;
   }
   if(tab->log && msg->msg && !(msg->flags & (UIM_NOLOG & ~UIM_NOTIFY))) {
-    if((msg->flags & UIM_CHAT) && tab->type == UIT_HUB && tab->hub->nick_valid) {
-      char *name = g_regex_escape_string(tab->hub->nick, -1);
-      char *pattern = g_strdup_printf("\\b%s\\b", name);
-      if(g_regex_match_simple(pattern, msg->msg, G_REGEX_CASELESS, 0))
-        prio = UIP_HIGH;
-      g_free(name);
-      g_free(pattern);
-    }
+    if((msg->flags & UIM_CHAT) && tab->type == UIT_HUB && tab->hub_highlight
+        && g_regex_match(tab->hub_highlight, msg->msg, 0, NULL))
+      prio = UIP_HIGH;
     ui_logwindow_add(tab->log, msg->msg);
     tab->prio = MAX(tab->prio, MAX(prio, notify ? UIP_EMPTY : UIP_LOW));
   }

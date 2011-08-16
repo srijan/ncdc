@@ -846,6 +846,7 @@ static void adc_handle(struct hub *hub, char *msg) {
       hub->sid = ADC_DFCC(cmd.argv[0]);
       hub->state = ADC_S_IDENTIFY;
       hub->nick = conf_hub_get(string, hub->tab->name, "nick");
+      ui_hub_setnick(hub->tab);
       hub_send_nfo(hub);
     }
     break;
@@ -1184,6 +1185,7 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
     net_sendf(hub->net, "$Key %s", key);
     hub->nick = conf_hub_get(string, hub->tab->name, "nick");
     hub->nick_hub = charset_convert(hub, FALSE, hub->nick);
+    ui_hub_setnick(hub->tab);
     net_sendf(hub->net, "$ValidateNick %s", hub->nick_hub);
     g_free(key);
     g_free(lock);

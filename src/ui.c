@@ -154,6 +154,8 @@ struct ui_tab *ui_msg_create(struct hub *hub, struct hub_user *user) {
   tab->uid = user->uid;
   tab->name = g_strdup_printf("~%s", user->name);
   tab->log = ui_logwindow_create(tab->name, g_key_file_get_integer(conf_file, "global", "backlog", NULL));
+  tab->log->handle = tab;
+  tab->log->checkchat = ui_hub_log_checkchat;
 
   ui_mf(tab, 0, "Chatting with %s on %s.", user->name, hub->tab->name);
 
@@ -233,12 +235,35 @@ static void ui_msg_msg(struct ui_tab *tab, const char *msg) {
 #endif
 
 
+// Also used for ui_msg_*
+int ui_hub_log_checkchat(void *dat, char *nick, char *msg) {
+  struct ui_tab *tab = dat;
+  if(!tab->hub->nick)
+    return 0;
+
+  if(strcmp(nick, tab->hub->nick) == 0)
+    return 2;
+
+  // TODO: this is also duplicated in ui_m() and can be optimized.
+  int r = 0;
+  char *name = g_regex_escape_string(tab->hub->nick, -1);
+  char *pattern = g_strdup_printf("\\b%s\\b", name);
+  if(g_regex_match_simple(pattern, msg, G_REGEX_CASELESS, 0))
+    r = 1;
+  g_free(name);
+  g_free(pattern);
+  return r;
+}
+
+
 struct ui_tab *ui_hub_create(const char *name, gboolean conn) {
   struct ui_tab *tab = g_new0(struct ui_tab, 1);
   // NOTE: tab name is also used as configuration group
   tab->name = g_strdup_printf("#%s", name);
   tab->type = UIT_HUB;
   tab->log = ui_logwindow_create(tab->name, conf_hub_get(integer, tab->name, "backlog"));
+  tab->log->handle = tab;
+  tab->log->checkchat = ui_hub_log_checkchat;
   // Every hub tab should have a unique ID. The name of the tab (which is the
   // group name in the config file) is changable, but internally we'd want a
   // more stable ID for user CID creation on NMDC hubs, so let's create one.
@@ -1841,7 +1866,7 @@ void ui_init() {
   keypad(stdscr, 1);
   nodelay(stdscr, 1);
 
-  //ui_colors_init();
+  ui_colors_init();
 
   // draw
   ui_draw();

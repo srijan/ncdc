@@ -42,14 +42,20 @@
 
 #if INTERFACE
 
+#define COLOR_DEFAULT (-1)
+
 #define UI_COLORS \
-  C(TABPRIO_LOW,  COLOR_BLACK,   -1, A_BOLD)\
-  C(TABPRIO_MED,  COLOR_CYAN,    -1, A_BOLD)\
-  C(TABPRIO_HIGH, COLOR_MAGENTA, -1, A_BOLD)
+  C(LOG_TIME,       COLOR_DEFAULT,   COLOR_DEFAULT,   0)\
+  C(LOG_DEFAULT,    COLOR_DEFAULT,   COLOR_DEFAULT,   0)\
+  C(LOG_NICK,       COLOR_DEFAULT,   COLOR_DEFAULT,   0)\
+  C(LOG_OWNNICK,    COLOR_DEFAULT,   COLOR_DEFAULT,   A_BOLD)\
+  C(LOG_HIGHLIGHT,  COLOR_YELLOW,    COLOR_DEFAULT,   A_BOLD)\
+  C(TABPRIO_LOW,    COLOR_BLACK,     COLOR_DEFAULT,   A_BOLD)\
+  C(TABPRIO_MED,    COLOR_CYAN,      COLOR_DEFAULT,   A_BOLD)\
+  C(TABPRIO_HIGH,   COLOR_MAGENTA,   COLOR_DEFAULT,   A_BOLD)
 
 
 enum ui_coltype {
-  UIC_UNUSED,
 #define C(n, fg, bg, attr) UIC_##n,
   UI_COLORS
 #undef C
@@ -68,7 +74,6 @@ struct ui_color {
 
 
 struct ui_color ui_colors[] = {
-  {},
 #define C(n, fg, bg, attr) { fg, bg, attr, 0 },
   UI_COLORS
 #undef C
@@ -88,8 +93,8 @@ void ui_colors_init() {
   // TODO: re-use color pairs when we have too many (>64) color groups
   int i;
   for(i=0; i<ui_colors_num; i++) {
-    init_pair(i, ui_colors[i].fg, ui_colors[i].bg);
-    ui_colors[i].a = ui_colors[i].x | COLOR_PAIR(i);
+    init_pair(i+1, ui_colors[i].fg, ui_colors[i].bg);
+    ui_colors[i].a = ui_colors[i].x | COLOR_PAIR(i+1);
   }
 }
 
@@ -112,6 +117,8 @@ struct ui_logwindow {
   struct stat file_st;
   char *buf[LOGWIN_BUF+1];
   gboolean updated;
+  int (*checkchat)(void *, char *, char *);
+  void *handle;
 };
 
 #endif
@@ -360,19 +367,49 @@ static int ui_logwindow_calc_wrap(char *str, int cols, int indent, int *rows, in
 
 // Determines the colors each part of a log line should have. Returns the
 // highest index to the attr array.
-static int ui_logwindow_calc_color(char *str, int *sep, int *attr) {
+static int ui_logwindow_calc_color(struct ui_logwindow *lw, char *str, int *sep, int *attr) {
   sep[0] = 0;
   int mask = 0;
+
+  // add a mask
+#define addm(from, to, a)\
+  int t_f = from;\
+  if(sep[mask] != t_f) {\
+    sep[mask+1] = t_f;\
+    attr[mask] = UIC(LOG_DEFAULT);\
+    mask++;\
+  }\
+  sep[mask] = t_f;\
+  sep[mask+1] = to;\
+  attr[mask] = a;\
+  mask++;
+
   // time
   char *tmp = strchr(str, ' ');
   if(tmp) {
-    sep[mask+1] = tmp-str;
-    attr[mask] = A_BOLD;
-    mask++;
+    addm(0, tmp-str, UIC(LOG_TIME));
   }
+
+  // <nick> and ** nick
+  char *tmp2;
+  if(tmp && (
+      (tmp[1] == '<' && (tmp2 = strchr(tmp, '>')) != NULL && tmp2[1] == ' ') || // <nick>
+      (tmp[1] == '*' && tmp[2] == '*' && (tmp2 = strchr(tmp+1, ' ')) != NULL))) { // ** nick
+    int nickstart = (tmp-str) + (tmp[1] == '<' ? 2 : 3);
+    int nickend = tmp2-str;
+    // check for a highlight or whether it is our own nick
+    char old = tmp2[0];
+    tmp2[0] = 0;
+    int r = lw->checkchat ? lw->checkchat(lw->handle, str+nickstart, str+nickend+1) : 0;
+    tmp2[0] = old;
+    // and use the correct color
+    addm(nickstart, nickend, r == 2 ? UIC(LOG_OWNNICK) : r == 1 ? UIC(LOG_HIGHLIGHT) : UIC(LOG_NICK));
+  }
+
+#undef addm
   // make sure the last mask is correct and return
   sep[mask+1] = strlen(str);
-  attr[mask] = 0;
+  attr[mask] = UIC(LOG_DEFAULT);
   return mask;
 }
 
@@ -404,7 +441,7 @@ static int ui_logwindow_drawline(struct ui_logwindow *lw, int y, int x, int nrow
   // Determine the colors to give each part
   static int colors_sep[10]; // Mask, similar to the rows array
   static int colors[10];     // Color attribute for each mask
-  int cmask = ui_logwindow_calc_color(str, colors_sep, colors);
+  int cmask = ui_logwindow_calc_color(lw, str, colors_sep, colors);
 
   // print the rows
   int r = 0, c = 0;

@@ -289,13 +289,34 @@ static int ui_logwindow_calc_wrap(char *str, int cols, int indent, int *rows, in
 #undef append
   if(!*ind_row)
     *ind_row = cur;
-  return cur;
+  return cur-1;
+}
+
+
+// Determines the colors each part of a log line should have. Returns the
+// highest index to the attr array.
+static int ui_logwindow_calc_color(char *str, int *sep, int *attr) {
+  sep[0] = 0;
+  int mask = 0;
+  // time
+  char *tmp = strchr(str, ' ');
+  if(tmp) {
+    sep[mask+1] = tmp-str;
+    attr[mask] = A_BOLD;
+    mask++;
+  }
+  // make sure the last mask is correct and return
+  sep[mask+1] = strlen(str);
+  attr[mask] = 0;
+  return mask;
 }
 
 
 // Draws a line between x and x+cols on row y (continuing on y-1 .. y-(rows+1) for
 // multiple rows). Returns the actual number of rows written to.
 static int ui_logwindow_drawline(struct ui_logwindow *lw, int y, int x, int nrows, int cols, char *str) {
+  g_return_val_if_fail(nrows > 0, 1);
+
   // Determine the indentation for multi-line rows. This is:
   // - Always after the time part (hh:mm:ss )
   // - For chat messages: after the nick (<nick> )
@@ -313,18 +334,43 @@ static int ui_logwindow_drawline(struct ui_logwindow *lw, int y, int x, int nrow
   // Defines a mask over the string: <#0,#1), <#1,#2), ..
   static int rows[201];
   int ind_row;
-  int cur = ui_logwindow_calc_wrap(str, cols, indent, rows, &ind_row);
+  int rmask = ui_logwindow_calc_wrap(str, cols, indent, rows, &ind_row);
+
+  // Determine the colors to give each part
+  static int colors_sep[10]; // Mask, similar to the rows array
+  static int colors[10];     // Color attribute for each mask
+  int cmask = ui_logwindow_calc_color(str, colors_sep, colors);
 
   // print the rows
-  int i;
-  for(i=cur-1; nrows>0 && i>=0; i--, nrows--, y--)
-    mvaddnstr(y, i == 0 || i >= ind_row ? x : x+indent, str+rows[i], rows[i+1]-rows[i]);
+  int r = 0, c = 0;
+  if(rmask-r < nrows)
+    move(y - rmask + r, r == 0 || r >= ind_row ? x : x+indent);
+  while(r <= rmask && c <= cmask) {
+    int rend = rows[r+1];
+    int cend = colors_sep[c+1];
+    int rstart = rows[r];
+    int cstart = colors_sep[c];
+    int start = MAX(rstart, cstart);
 
-  return cur;
+    if(rmask-r < nrows) {
+      attron(colors[c]);
+      addnstr(str+start, MIN(cend, rend)-start);
+      attroff(colors[c]);
+    }
+
+    if(rend <= cend) {
+      r++;
+      if(rmask-r < nrows)
+        move(y - rmask + r, r == 0 || r >= ind_row ? x : x+indent);
+    }
+    if(rend >= cend)
+      c++;
+  }
+
+  return rmask+1;
 }
 
 
-// TODO: this function is called often and can be optimized.
 void ui_logwindow_draw(struct ui_logwindow *lw, int y, int x, int rows, int cols) {
   int top = rows + y - 1;
   int cur = lw->lastvis;

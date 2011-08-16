@@ -32,6 +32,71 @@
 #include <glib/gprintf.h>
 
 
+
+
+
+// colors
+
+// TODO: make these colors configurable
+
+
+#if INTERFACE
+
+#define UI_COLORS \
+  C(TABPRIO_LOW,  COLOR_BLACK,   -1, A_BOLD)\
+  C(TABPRIO_MED,  COLOR_CYAN,    -1, A_BOLD)\
+  C(TABPRIO_HIGH, COLOR_MAGENTA, -1, A_BOLD)
+
+
+enum ui_coltype {
+  UIC_UNUSED,
+#define C(n, fg, bg, attr) UIC_##n,
+  UI_COLORS
+#undef C
+  UIC_NONE
+};
+
+
+struct ui_color {
+  short fg, bg;
+  int x, a;
+};
+
+#define UIC(n) (ui_colors[UIC_##n].a)
+
+#endif // INTERFACE
+
+
+struct ui_color ui_colors[] = {
+  {},
+#define C(n, fg, bg, attr) { fg, bg, attr, 0 },
+  UI_COLORS
+#undef C
+  { -1, -1, 0, 0 }
+};
+
+int ui_colors_num = G_N_ELEMENTS(ui_colors);
+
+
+void ui_colors_init() {
+  if(!has_colors())
+    return;
+
+  start_color();
+  use_default_colors();
+
+  // TODO: re-use color pairs when we have too many (>64) color groups
+  int i;
+  for(i=0; i<ui_colors_num; i++) {
+    init_pair(i, ui_colors[i].fg, ui_colors[i].bg);
+    ui_colors[i].a = ui_colors[i].x | COLOR_PAIR(i);
+  }
+}
+
+
+
+
+
 // Log window "widget"
 
 

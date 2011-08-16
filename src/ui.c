@@ -1806,46 +1806,6 @@ void ui_mf(struct ui_tab *tab, int flags, const char *fmt, ...) {
 
 
 
-// colours
-
-#if INTERFACE
-
-#define UI_COLOURS \
-  C(TABPRIO_LOW,  COLOR_BLACK,   -1, A_BOLD)\
-  C(TABPRIO_MED,  COLOR_CYAN,    -1, A_BOLD)\
-  C(TABPRIO_HIGH, COLOR_MAGENTA, -1, A_BOLD)
-
-
-enum ui_coltype {
-  UIC_UNUSED,
-#define C(n, fg, bg, attr) UIC_##n,
-  UI_COLOURS
-#undef C
-  UIC_NONE
-}
-
-
-struct ui_colour {
-  short fg, bg;
-  int x, a;
-};
-
-#define UIC(n) (ui_colours[UIC_##n].a)
-
-#endif
-
-struct ui_colour ui_colours[] = {
-  {},
-#define C(n, fg, bg, attr) { fg, bg, attr, 0 },
-  UI_COLOURS
-#undef C
-  { -1, -1, 0, 0 }
-};
-
-int ui_colours_num = G_N_ELEMENTS(ui_colours);
-
-
-
 // Global stuff
 
 struct ui_textinput *ui_global_textinput;
@@ -1881,17 +1841,7 @@ void ui_init() {
   keypad(stdscr, 1);
   nodelay(stdscr, 1);
 
-  // init colours
-  if(has_colors()) {
-    start_color();
-    use_default_colors();
-
-    int i;
-    for(i=1; i<ui_colours_num; i++) {
-      init_pair(i, ui_colours[i].fg, ui_colours[i].bg);
-      ui_colours[i].a = ui_colours[i].x | COLOR_PAIR(i);
-    }
-  }
+  //ui_colors_init();
 
   // draw
   ui_draw();
@@ -1927,7 +1877,7 @@ static void ui_draw_status() {
  *
  * The truncated indicators are in the following states:
  * - No changes    ">>" or "<<"
- * - Change        "!>" or "<!"  with ! in same colour as above
+ * - Change        "!>" or "<!"  with ! in same color as above
  */
 
 static void ui_draw_tablist() {

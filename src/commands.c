@@ -560,6 +560,23 @@ static void set_color(char *group, char *key, char *val) {
 }
 
 
+static void set_color_sug(char *val, char **sug) {
+  char *attr = strrchr(val, ',');
+  if(attr)
+    *(attr++) = 0;
+  else
+    attr = val;
+  g_strstrip(attr);
+  struct ui_attr *a = ui_attr_names;
+  int i = 0, len = strlen(attr);
+  for(; a->name[0] && i<20; a++)
+    if(strncmp(attr, a->name, len) == 0)
+      sug[i++] = g_strdup(a->name);
+  if(i && attr != val)
+    strv_prefix(sug, val, ",", NULL);
+}
+
+
 // the settings list
 // TODO: help text / documentation?
 static struct setting settings[] = {
@@ -569,7 +586,7 @@ static struct setting settings[] = {
   { "autoconnect",   NULL,     get_bool_f,        set_autoconnect,   set_bool_sug     }, // may not be used in "global"
   { "autorefresh",   "global", get_autorefresh,   set_autorefresh,   NULL             }, // in minutes, 0 = disabled
   { "backlog",       NULL,     get_backlog,       set_backlog,       NULL,            }, // number of lines, 0 = disabled
-#define C(n, a,b,c) { "color_" G_STRINGIFY(n), "color", get_color, set_color, NULL },
+#define C(n, a,b,c) { "color_" G_STRINGIFY(n), "color", get_color, set_color, set_color_sug },
   UI_COLORS
 #undef C
   { "connection",    NULL,     get_string,        set_userinfo,      NULL             },

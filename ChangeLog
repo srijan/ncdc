@@ -1,3 +1,14 @@
+0.7 - 2011-08-17
+	- Added word wrapping for the log window
+	- Added basic colors and nick highlighting to the log window
+	- Allow colors to be changed with the /set command
+	- Added backlog feature and setting
+	- Added silent building to the configure script
+	- Automatically re-open log files when they are moved/truncated externally
+	- Accept 'nmdc://' URLs as alternative to 'dchub://'
+	- Fixed spamming of useless $MyINFO and BINF commands every 5 minutes
+	- Fixed minor memory leak when closing/clearing the log window
+
 0.6 - 2011-08-08
 	- Added file searching, through a /search command
 	- Added tab to display the search results

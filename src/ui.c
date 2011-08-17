@@ -67,6 +67,7 @@ struct ui_tab {
   // HUB
   gboolean hub_joincomplete : 1;
   GRegex *hub_highlight;
+  char *hub_nick;
   struct ui_tab *userlist_tab;
   // FL
   struct fl_list *fl_list;
@@ -239,23 +240,30 @@ static void ui_msg_msg(struct ui_tab *tab, const char *msg) {
 // Also used for ui_msg_*
 int ui_hub_log_checkchat(void *dat, char *nick, char *msg) {
   struct ui_tab *tab = dat;
-  if(!tab->hub->nick)
+  tab = tab->hub->tab;
+  if(!tab->hub_nick)
     return 0;
 
-  if(strcmp(nick, tab->hub->nick) == 0)
+  if(strcmp(nick, tab->hub_nick) == 0)
     return 2;
 
-  if(!tab->hub->tab->hub_highlight)
+  if(!tab->hub_highlight)
     return 0;
 
-  return g_regex_match(tab->hub->tab->hub_highlight, msg, 0, NULL) ? 1 : 0;
+  return g_regex_match(tab->hub_highlight, msg, 0, NULL) ? 1 : 0;
 }
 
 
 // Called by hub.c when hub->nick is set or changed. (Not called when hub->nick is reset to NULL)
+// A local hub_nick field is kept in the hub tab struct to still provide
+// highlighting for it after disconnecting from the hub.
 void ui_hub_setnick(struct ui_tab *tab) {
   if(!tab->hub->nick)
     return;
+  g_free(tab->hub_nick);
+  if(tab->hub_highlight)
+    g_regex_unref(tab->hub_highlight);
+  tab->hub_nick = g_strdup(tab->hub->nick);
   char *name = g_regex_escape_string(tab->hub->nick, -1);
   char *pattern = g_strdup_printf("\\b%s\\b", name);
   tab->hub_highlight = g_regex_new(pattern, G_REGEX_CASELESS|G_REGEX_OPTIMIZE, 0, NULL);
@@ -314,6 +322,9 @@ void ui_hub_close(struct ui_tab *tab) {
 
   hub_free(tab->hub);
   ui_logwindow_free(tab->log);
+  g_free(tab->hub_nick);
+  if(tab->hub_highlight)
+    g_regex_unref(tab->hub_highlight);
   g_free(tab->name);
   g_free(tab);
 }

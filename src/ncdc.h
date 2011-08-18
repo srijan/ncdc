@@ -48,6 +48,7 @@ struct dl;
 struct fl_list;
 struct hub;
 struct hub_user;
+struct logfile;
 struct net;
 struct search_q;
 struct search_r;

@@ -1555,3 +1555,88 @@ char *search_command(struct search_q *q, gboolean onhub) {
   return g_string_free(str, FALSE);
 }
 
+
+
+
+
+// Log file writer. Prefixes all messages with a timestamp and allows the logs
+// to be rotated.
+
+#if INTERFACE
+
+struct logfile {
+  FILE *file;
+  char *path;
+  struct stat st;
+};
+
+#endif
+
+
+// (Re-)opens the log file and checks for inode and file size changes.
+static void logfile_checkfile(struct logfile *l) {
+  // stat
+  gboolean restat = !l->file;
+  struct stat st;
+  if(l->file && stat(l->path, &st) < 0) {
+    g_warning("Unable to stat log file '%s': %s. Attempting to re-create it.", l->path, g_strerror(errno));
+    fclose(l->file);
+    l->file = NULL;
+    restat = TRUE;
+  }
+
+  // if we have the log open, compare inode & size
+  if(l->file && (l->st.st_ino != st.st_ino || l->st.st_size > st.st_size)) {
+    fclose(l->file);
+    l->file = NULL;
+  }
+
+  // if the log hadn't been opened or has been closed earlier, try to open it again
+  if(!l->file)
+    l->file = fopen(l->path, "a");
+  if(!l->file)
+    g_warning("Unable to open log file '%s' for writing: %s", l->path, g_strerror(errno));
+
+  // stat again if we need to
+  if(l->file && restat && stat(l->path, &st) < 0) {
+    g_warning("Unable to stat log file '%s': %s. Closing.", l->path, g_strerror(errno));
+    fclose(l->file);
+    l->file = NULL;
+  }
+
+  memcpy(&l->st, &st, sizeof(struct stat));
+}
+
+
+struct logfile *logfile_create(const char *name) {
+  struct logfile *l = g_slice_new0(struct logfile);
+
+  char *n = g_strconcat(name, ".log", NULL);
+  l->path = g_build_filename(conf_dir, "logs", n, NULL);
+  g_free(n);
+
+  logfile_checkfile(l);
+  return l;
+}
+
+
+void logfile_free(struct logfile *l) {
+  if(!l)
+    return;
+  if(l->file)
+    fclose(l->file);
+  g_free(l->path);
+  g_slice_free(struct logfile, l);
+}
+
+
+void logfile_add(struct logfile *l, const char *msg) {
+  time_t tm = time(NULL);
+  char ts[50];
+
+  logfile_checkfile(l);
+  strftime(ts, 49, "[%F %H:%M:%S %Z]", localtime(&tm));
+  if(l->file && fprintf(l->file, "%s %s\n", ts, msg) < 0 && !strstr(msg, " (LOGERR)"))
+    g_warning("Error writing to log file: %s (LOGERR)", g_strerror(errno));
+}
+

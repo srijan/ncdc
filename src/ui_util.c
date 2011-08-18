@@ -242,9 +242,7 @@ void ui_colors_init() {
 struct ui_logwindow {
   int lastlog;
   int lastvis;
-  FILE *file;
-  char *file_path;
-  struct stat file_st;
+  struct logfile *logfile;
   char *buf[LOGWIN_BUF+1];
   gboolean updated;
   int (*checkchat)(void *, char *, char *);
@@ -252,44 +250,6 @@ struct ui_logwindow {
 };
 
 #endif
-
-
-// (Re-)opens the log file and checks for inode and file size changes.
-static void ui_logwindow_checkfile(struct ui_logwindow *lw) {
-  if(!lw->file_path)
-    return;
-
-  // stat
-  gboolean restat = !lw->file;
-  struct stat st;
-  if(lw->file && stat(lw->file_path, &st) < 0) {
-    g_warning("Unable to stat log file '%s': %s. Attempting to re-create it.", lw->file_path, g_strerror(errno));
-    fclose(lw->file);
-    lw->file = NULL;
-    restat = TRUE;
-  }
-
-  // if we have the log open, compare inode & size
-  if(lw->file && (lw->file_st.st_ino != st.st_ino || lw->file_st.st_size > st.st_size)) {
-    fclose(lw->file);
-    lw->file = NULL;
-  }
-
-  // if the log hadn't been opened or has been closed earlier, try to open it again
-  if(!lw->file)
-    lw->file = fopen(lw->file_path, "a");
-  if(!lw->file)
-    g_warning("Unable to open log file '%s' for writing: %s", lw->file_path, g_strerror(errno));
-
-  // stat again if we need to
-  if(lw->file && restat && stat(lw->file_path, &st) < 0) {
-    g_warning("Unable to stat log file '%s': %s. Closing.", lw->file_path, g_strerror(errno));
-    fclose(lw->file);
-    lw->file = NULL;
-  }
-
-  memcpy(&lw->file_st, &st, sizeof(struct stat));
-}
 
 
 static void ui_logwindow_addline(struct ui_logwindow *lw, const char *msg, gboolean raw, gboolean nolog) {
@@ -303,12 +263,8 @@ static void ui_logwindow_addline(struct ui_logwindow *lw, const char *msg, gbool
   strftime(ts, 10, "%H:%M:%S ", localtime(&tm));
   lw->buf[lw->lastlog & LOGWIN_BUF] = raw ? g_strdup(msg) : g_strconcat(ts, msg, NULL);
 
-  ui_logwindow_checkfile(lw);
-  if(!nolog && lw->file) {
-    strftime(ts, 49, "[%F %H:%M:%S %Z] ", localtime(&tm));
-    if(fprintf(lw->file, "%s%s\n", ts, msg) < 0 && !strstr(msg, "(LOGERR)"))
-      g_warning("Error writing to log file: %s (LOGERR)", strerror(errno));
-  }
+  if(!nolog && lw->logfile)
+    logfile_add(lw->logfile, msg);
 
   int next = (lw->lastlog + 1) & LOGWIN_BUF;
   if(lw->buf[next]) {
@@ -365,23 +321,18 @@ static void ui_logwindow_load(struct ui_logwindow *lw, const char *fn, int num) 
 struct ui_logwindow *ui_logwindow_create(const char *file, int load) {
   struct ui_logwindow *lw = g_new0(struct ui_logwindow, 1);
   if(file) {
-    char *n = g_strconcat(file, ".log", NULL);
-    lw->file_path = g_build_filename(conf_dir, "logs", n, NULL);
-    g_free(n);
+    lw->logfile = logfile_create(file);
 
     if(load)
-      ui_logwindow_load(lw, lw->file_path, load);
+      ui_logwindow_load(lw, lw->logfile->path, load);
   }
-  ui_logwindow_checkfile(lw);
   return lw;
 }
 
 
 void ui_logwindow_free(struct ui_logwindow *lw) {
-  if(lw->file)
-    fclose(lw->file);
+  logfile_free(lw->logfile);
   ui_logwindow_clear(lw);
-  g_free(lw->file_path);
   g_free(lw);
 }
 

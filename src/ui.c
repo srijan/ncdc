@@ -805,11 +805,10 @@ static void ui_conn_draw_row(struct ui_listing *list, GSequenceIter *iter, int r
   }
 
   mvaddch(row, 2,
-    !cc->nick || (cc->adc && cc->state != ADC_S_NORMAL) ? 'C' : // connecting
-    cc->timeout_src    ? '-' : // disconnected
-    cc->net->file_left ? 'U' : // uploading
-    cc->net->recv_left ? 'D' : // downloading
-                         'I'); // idle
+    cc->state == CCS_CONN      ? 'C' :
+    cc->state == CCS_DISCONN   ? '-' :
+    cc->state == CCS_HANDSHAKE ? 'H' :
+    cc->state == CCS_IDLE      ? 'I' : cc->dl ? 'D' : 'U');
 
   if(cc->nick)
     mvaddnstr(row, 4, cc->nick, str_offset_from_columns(cc->nick, 15));
@@ -884,10 +883,10 @@ static void ui_conn_draw_details(int l) {
   // line 2
   mvaddstr(l+2, 13, cc->remoteaddr);
   mvaddstr(l+2, 47,
-    !cc->nick || (cc->adc && cc->state != ADC_S_NORMAL) ? "Connecting" :
-    cc->timeout_src    ? "Disconnected" :
-    cc->net->file_left ? "Uploading" :
-    cc->net->recv_left ? "Downloading" : "Idle");
+    cc->state == CCS_CONN      ? "Connecting" :
+    cc->state == CCS_DISCONN   ? "Disconnected" :
+    cc->state == CCS_HANDSHAKE ? "Handshake" :
+    cc->state == CCS_IDLE      ? "Idle" : cc->dl ? "Downloading" : "Uploading");
   // line 3
   mvprintw(l+3, 13, "%d KiB/s (%s)", ratecalc_get(cc->net->rate_out)/1024, str_formatsize(cc->net->rate_out->total));
   mvprintw(l+3, 47, "%d KiB/s (%s)", ratecalc_get(cc->net->rate_in)/1024, str_formatsize(cc->net->rate_in->total));
@@ -973,7 +972,7 @@ static void ui_conn_key(guint64 key) {
   case INPT_CHAR('q'): // q - find queue item
     if(!cc)
       ui_m(NULL, 0, "Nothing selected.");
-    else if(!cc->candl || !cc->last_file)
+    else if(!cc->dl || !cc->last_file)
       ui_m(NULL, 0, "Not downloading a file.");
     else {
       struct dl *dl = g_hash_table_lookup(dl_queue, cc->dl_hash);

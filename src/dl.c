@@ -208,8 +208,7 @@ static void dl_queue_start(struct dl *dl) {
     return;
   // try to re-use an existing connection
   if(dl->u->cc) {
-    // download connection in the idle state
-    if(dl->u->cc->candl && dl->u->cc->net->conn && !dl->u->cc->isdl) {
+    if(dl->u->cc->dl && dl->u->cc->state == CCS_IDLE) {
       g_debug("dl:%016"G_GINT64_MODIFIER"x: re-using connection", dl->u->uid);
       cc_download(dl->u->cc);
     }
@@ -241,7 +240,7 @@ void dl_queue_startany() {
     if(du->active || !du->queue || ((struct dl *)du->queue->data)->prio <= DLP_OFF)
       continue;
     if(// Case 1: We are still connected to a user, in idle state.
-      (du->cc && du->cc->net->conn && du->cc->candl && !du->cc->isdl) ||
+      (du->cc && du->cc->dl && du->cc->state == CCS_IDLE) ||
       // Case 2: We are not connected and do not expect to get connected.
       (!du->cc && !du->expect)
     ) {

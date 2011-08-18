@@ -77,6 +77,7 @@ struct net {
   int file_fd;
   gint64 file_left;
   guint64 file_offset;
+  void (*send_cb)(struct net *);
   // receiving raw data (a file, usually)
   guint64 recv_left;
   void (*recv_cb)(struct net *, int, char *, guint64); // don't confuse the name with cb_rcv...
@@ -352,9 +353,11 @@ static gboolean handle_output(GSocket *sock, GIOCondition cond, gpointer dat) {
   // send a file
   } else if(n->file_left) {
     gboolean c = handle_sendfile(n) && (n->out->len || n->file_left);
-    if(!n->file_left)
+    if(!n->file_left) {
       close(n->file_fd);
-    if(c)
+      if(n->send_cb)
+        n->send_cb(n);
+    } if(c)
       return TRUE;
   }
 
@@ -534,9 +537,11 @@ void net_sendf(struct net *n, const char *fmt, ...) {
 
 // TODO: error reporting?
 // Note: the net_send() family shouldn't be used while a file is being sent.
-void net_sendfile(struct net *n, const char *path, guint64 offset, guint64 length) {
+// cb() will be called when the requested data has been sent successfully.
+void net_sendfile(struct net *n, const char *path, guint64 offset, guint64 length, void (*cb)(struct net *)) {
   g_return_if_fail(!n->file_left);
   g_return_if_fail((n->file_fd = open(path, O_RDONLY)) >= 0);
+  n->send_cb = cb;
   n->file_offset = offset;
   n->file_left = length;
   send_do(n);

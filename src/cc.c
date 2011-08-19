@@ -165,6 +165,7 @@ struct cc {
   struct hub *hub;
   char *nick_raw; // (NMDC)
   char *nick;
+  char *hub_name; // Copy of hub->tab->name when hub is reset to NULL
   gboolean adc : 1;
   gboolean active : 1;
   gboolean isop : 1;
@@ -173,11 +174,10 @@ struct cc {
   gboolean dl : 1;
   int dir;        // (NMDC) our direction. -1 = Upload, otherwise: Download $dir
   int state;
-  char cid[8];    // (ADC)
+  char cid[24];   // (ADC) only the first 8 bytes are used for checking,
+                  // but the full 24 bytes are stored after receiving CINF (for logging)
   int timeout_src;
-  time_t last_action;
   char remoteaddr[24]; // xxx.xxx.xxx.xxx:ppppp
-  char dl_hash[24];
   char *token;    // (ADC)
   char *last_file;
   char *tthl_dat;
@@ -185,6 +185,8 @@ struct cc {
   guint64 last_size;
   guint64 last_length;
   guint64 last_offset;
+  time_t last_start;
+  char last_hash[24];
   GError *err;
   GSequenceIter *iter;
 };
@@ -270,8 +272,10 @@ void cc_remove_hub(struct hub *hub) {
   GSequenceIter *i = g_sequence_get_begin_iter(cc_list);
   for(; !g_sequence_iter_is_end(i); i=g_sequence_iter_next(i)) {
     struct cc *c = g_sequence_get(i);
-    if(c->hub == hub)
+    if(c->hub == hub) {
+      c->hub_name = g_strdup(hub->tab->name);
       c->hub = NULL;
+    }
   }
 
   // Remove from expects list
@@ -362,7 +366,7 @@ void cc_download(struct cc *cc) {
   struct dl *dl = dl_queue_next(cc->uid);
   if(!dl)
     return;
-  memcpy(cc->dl_hash, dl->hash, 24);
+  memcpy(cc->last_hash, dl->hash, 24);
   // get virtual path
   char fn[45] = {};
   if(dl->islist)
@@ -395,7 +399,7 @@ void cc_download(struct cc *cc) {
 
 static void handle_recvfile(struct net *n, int read, char *buf, guint64 left) {
   struct cc *cc = n->handle;
-  struct dl *dl = g_hash_table_lookup(dl_queue, cc->dl_hash);
+  struct dl *dl = g_hash_table_lookup(dl_queue, cc->last_hash);
   if(dl && !dl_received(dl, read, buf)) {
     g_set_error_literal(&cc->err, 1, 0, "Download error.");
     cc_disconnect(cc);
@@ -415,7 +419,7 @@ static void handle_recvfile(struct net *n, int read, char *buf, guint64 left) {
 
 static void handle_recvtth(struct net *n, int read, char *buf, guint64 left) {
   struct cc *cc = n->handle;
-  struct dl *dl = g_hash_table_lookup(dl_queue, cc->dl_hash);
+  struct dl *dl = g_hash_table_lookup(dl_queue, cc->last_hash);
   if(dl) {
     g_return_if_fail(read + left <= cc->last_length);
     memcpy(cc->tthl_dat+(cc->last_length-(left+read)), buf, read);
@@ -432,7 +436,7 @@ static void handle_recvtth(struct net *n, int read, char *buf, guint64 left) {
 
 
 static void handle_adcsnd(struct cc *cc, gboolean tthl, guint64 start, guint64 bytes) {
-  struct dl *dl = g_hash_table_lookup(dl_queue, cc->dl_hash);
+  struct dl *dl = g_hash_table_lookup(dl_queue, cc->last_hash);
   if(!dl) {
     g_set_error_literal(&cc->err, 1, 0, "Download interrupted.");
     cc_disconnect(cc);
@@ -449,6 +453,7 @@ static void handle_adcsnd(struct cc *cc, gboolean tthl, guint64 start, guint64 b
     cc->tthl_dat = g_malloc(bytes);
     net_recvfile(cc->net, bytes, handle_recvtth);
   }
+  time(&cc->last_start);
 }
 
 
@@ -573,11 +578,14 @@ static void handle_adcget(struct cc *cc, char *type, char *id, guint64 start, gi
     cc->last_length = bytes;
     cc->last_offset = start;
     cc->last_size = st.st_size;
+    if(f)
+      memcpy(cc->last_hash, f->tth, 24);
     char *tmp = adc_escape(id, !cc->adc);
     net_sendf(cc->net, cc->adc ? "CSND file %s %"G_GUINT64_FORMAT" %"G_GINT64_FORMAT : "$ADCSND file %s %"G_GUINT64_FORMAT" %"G_GINT64_FORMAT, tmp, start, bytes);
     net_sendfile(cc->net, path, start, bytes, handle_sendcomplete);
     g_free(tmp);
     cc->state = CCS_TRANSFER;
+    time(&cc->last_start);
   } else {
     g_set_error_literal(err, 1, 53, "No Slots Available");
     g_free(vpath);
@@ -679,15 +687,17 @@ static void adc_handle(struct cc *cc, char *msg) {
         cc_disconnect(cc);
       } else if(cc->active) {
         cc->token = g_strdup(token);
-        memcpy(cc->cid, cid, 8);
+        memcpy(cc->cid, cid, 24);
         cc_expect_adc_rm(cc);
         struct hub_user *u = cc->uid ? g_hash_table_lookup(hub_uids, &cc->uid) : NULL;
         if(!u) {
           g_set_error_literal(&cc->err, 1, 0, "Protocol error.");
           g_warning("CC:%s: Unexpected ADC connection: %s", net_remoteaddr(cc->net), msg);
           cc_disconnect(cc);
-        } else
+        } else {
           handle_id(cc, u);
+          memcpy(cc->cid, cid, 24);
+        }
       }
       if(cc->dl && cc->state == CCS_IDLE)
         cc_download(cc);
@@ -753,7 +763,7 @@ static void adc_handle(struct cc *cc, char *msg) {
         g_message("CC:%s: Received message in wrong state: %s", net_remoteaddr(cc->net), msg);
         cc_disconnect(cc);
       } else {
-        struct dl *dl = g_hash_table_lookup(dl_queue, cc->dl_hash);
+        struct dl *dl = g_hash_table_lookup(dl_queue, cc->last_hash);
         if(dl)
           dl_queue_seterr(dl, DLE_NOFILE, 0);
         if(cmd.argv[0][0] == '2')
@@ -879,7 +889,6 @@ static void nmdc_direction(struct cc *cc, gboolean down, int num) {
 static void nmdc_handle(struct cc *cc, char *cmd) {
   GMatchInfo *nfo;
 
-  time(&(cc->last_action));
   g_clear_error(&(cc->err));
 
   // create regexes (declared statically, allocated/compiled on first call)
@@ -1028,7 +1037,7 @@ static void nmdc_handle(struct cc *cc, char *cmd) {
       g_set_error(&cc->err, 1, 0, msg);
       // Handle "File Not Available" and ".. no more exists"
       if(str_casestr(msg, "file not available") || str_casestr(msg, "no more exists")) {
-        struct dl *dl = g_hash_table_lookup(dl_queue, cc->dl_hash);
+        struct dl *dl = g_hash_table_lookup(dl_queue, cc->last_hash);
         if(dl)
           dl_queue_seterr(dl, DLE_NOFILE, 0);
       }
@@ -1076,7 +1085,6 @@ struct cc *cc_create(struct hub *hub) {
   struct cc *cc = g_new0(struct cc, 1);
   cc->net = net_create('|', cc, FALSE, handle_cmd, handle_error);
   cc->hub = hub;
-  time(&(cc->last_action));
   cc->iter = g_sequence_append(cc_list, cc);
   cc->state = CCS_CONN;
   if(ui_conn)
@@ -1087,7 +1095,6 @@ struct cc *cc_create(struct hub *hub) {
 
 static void handle_connect(struct net *n) {
   struct cc *cc = n->handle;
-  time(&(cc->last_action));
   strncpy(cc->remoteaddr, net_remoteaddr(cc->net), 23);
   if(!cc->hub)
     cc_disconnect(cc);
@@ -1173,7 +1180,6 @@ static gboolean handle_timeout(gpointer dat) {
 
 void cc_disconnect(struct cc *cc) {
   g_return_if_fail(cc->state != CCS_DISCONN);
-  time(&(cc->last_action));
   net_disconnect(cc->net);
   cc->timeout_src = g_timeout_add_seconds(60, handle_timeout, cc);
   g_free(cc->token);
@@ -1200,6 +1206,7 @@ void cc_free(struct cc *cc) {
   g_free(cc->tthl_dat);
   g_free(cc->nick_raw);
   g_free(cc->nick);
+  g_free(cc->hub_name);
   g_free(cc->last_file);
   g_free(cc);
 }

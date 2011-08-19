@@ -975,7 +975,7 @@ static void ui_conn_key(guint64 key) {
     else if(!cc->dl || !cc->last_file)
       ui_m(NULL, 0, "Not downloading a file.");
     else {
-      struct dl *dl = g_hash_table_lookup(dl_queue, cc->dl_hash);
+      struct dl *dl = g_hash_table_lookup(dl_queue, cc->last_hash);
       if(!dl)
         ui_m(NULL, 0, "File has been removed from the queue.");
       else {

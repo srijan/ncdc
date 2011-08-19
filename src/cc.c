@@ -321,6 +321,10 @@ static void xfer_log_add(struct cc *cc) {
   if(cc->tthl_dat)
     return;
 
+  char *key = cc->dl ? "log_downloads" : "log_uploads";
+  if(g_key_file_has_key(conf_file, "log", key, NULL) && !g_key_file_get_boolean(conf_file, "log", key, NULL))
+    return;
+
   static struct logfile *log = NULL;
   if(!log)
     log = logfile_create("transfers");

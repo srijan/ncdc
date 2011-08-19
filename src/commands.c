@@ -85,6 +85,13 @@ static void get_bool_f(char *group, char *key) {
 }
 
 
+// not set => true
+static void get_bool_t(char *group, char *key) {
+  ui_mf(NULL, 0, "%s.%s = %s", group, key,
+    !g_key_file_has_key(conf_file, group, key, NULL) || g_key_file_get_boolean(conf_file, group, key, NULL) ? "true" : "false");
+}
+
+
 static void get_int(char *group, char *key) {
   GError *err = NULL;
   int val = g_key_file_get_integer(conf_file, group, key, &err);
@@ -206,6 +213,17 @@ static void set_bool_f(char *group, char *key, char *val) {
     g_key_file_set_boolean(conf_file, group, key, bool_var(val));
     conf_save();
     get_bool_f(group, key);
+  }
+}
+
+
+static void set_bool_t(char *group, char *key, char *val) {
+  if(!val)
+    UNSET(group, key);
+  else {
+    g_key_file_set_boolean(conf_file, group, key, bool_var(val));
+    conf_save();
+    get_bool_t(group, key);
   }
 }
 
@@ -597,6 +615,8 @@ static struct setting settings[] = {
   { "encoding",      NULL,     get_encoding,      set_encoding,      set_encoding_sug },
   { "hubname",       NULL,     get_hubname,       set_hubname,       NULL             }, // makes no sense in "global"
   { "log_debug",     "log",    get_bool_f,        set_bool_f,        set_bool_sug     },
+  { "log_downloads", "log",    get_bool_t,        set_bool_t,        set_bool_sug     },
+  { "log_uploads",   "log",    get_bool_t,        set_bool_t,        set_bool_sug     },
   { "minislots",     "global", get_minislots,     set_minislots,     NULL             },
   { "minislot_size", "global", get_minislot_size, set_minislot_size, NULL             },
   { "nick",          NULL,     get_string,        set_nick,          NULL             }, // global.nick may not be /unset

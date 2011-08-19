@@ -521,6 +521,15 @@ static int ui_logwindow_drawline(struct ui_logwindow *lw, int y, int x, int nrow
   else if(tmp && tmp[1] == '*' && tmp[2] == '*')
     indent += 3;
 
+  // Convert indent from bytes to columns
+  if(indent && indent <= strlen(str)) {
+    int i = indent;
+    char old = str[i];
+    str[i] = 0;
+    indent = str_columns(str);
+    str[i] = old;
+  }
+
   // Determine the wrapping boundaries.
   // Defines a mask over the string: <#0,#1), <#1,#2), ..
   static int rows[201];

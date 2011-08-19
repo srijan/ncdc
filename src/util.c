@@ -1531,7 +1531,7 @@ char *search_command(struct search_q *q, gboolean onhub) {
     g_string_append(str, tth);
   }
   if(q->type != 9) {
-    g_string_append(str, " -type ");
+    g_string_append(str, " -t ");
     g_string_append(str, search_types[(int)q->type].name);
   }
   if(q->type != 9 && q->size) // TODO: convert back to K/M/G suffix when possible?

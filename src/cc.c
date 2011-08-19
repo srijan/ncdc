@@ -312,6 +312,54 @@ int cc_slots_in_use(int *mini) {
 }
 
 
+
+// To be called when an upload or download has finished. Will get info from the
+// cc struct and write it to the transfer log.
+static void xfer_log_add(struct cc *cc) {
+  g_return_if_fail(cc->state == CCS_TRANSFER && cc->last_file);
+  // we don't log tthl transfers
+  if(cc->tthl_dat)
+    return;
+
+  static struct logfile *log = NULL;
+  if(!log)
+    log = logfile_create("transfers");
+
+  char cid[40] = {};
+  if(cc->adc)
+    base32_encode(cc->cid, cid);
+  else
+    strcpy(cid, "-");
+
+  char tth[40] = {};
+  if(strcmp(cc->last_file, "files.xml.bz2") == 0)
+    strcpy(tth, "-");
+  else
+    base32_encode(cc->last_hash, tth);
+
+  guint64 transfer_size = cc->last_length - (cc->dl ? cc->net->recv_left : cc->net->file_left);
+
+  char *nick = adc_escape(cc->nick, FALSE);
+  char *file = adc_escape(cc->last_file, FALSE);
+
+  char *tmp = strchr(cc->remoteaddr, ':');
+  if(tmp)
+    *tmp = 0;
+
+  char *msg = g_strdup_printf("%s %s %s %s %c %c %s %d %"G_GUINT64_FORMAT" %"G_GUINT64_FORMAT" %"G_GUINT64_FORMAT" %s",
+    cc->hub ? cc->hub->tab->name : cc->hub_name, cid, nick, cc->remoteaddr, cc->dl ? 'd' : 'u',
+    transfer_size == cc->last_length ? 'c' : 'i', tth, (int)(time(NULL)-cc->last_start),
+    cc->last_size, cc->last_offset, transfer_size, file);
+  logfile_add(log, msg);
+  g_free(msg);
+
+  if(tmp)
+    *tmp = ':';
+  g_free(nick);
+  g_free(file);
+}
+
+
 // Returns the cc object of a connection with the same user, if there is one.
 static struct cc *cc_check_dupe(struct cc *cc) {
   GSequenceIter *i = g_sequence_get_begin_iter(cc_list);
@@ -411,6 +459,7 @@ static void handle_recvfile(struct net *n, int read, char *buf, guint64 left) {
     cc_disconnect(cc);
   // check for more stuff to download
   if(!left) {
+    xfer_log_add(cc);
     cc->state = CCS_IDLE;
     cc_download(cc);
   }
@@ -459,6 +508,7 @@ static void handle_adcsnd(struct cc *cc, gboolean tthl, guint64 start, guint64 b
 
 static void handle_sendcomplete(struct net *net) {
   struct cc *cc = net->handle;
+  xfer_log_add(cc);
   cc->state = CCS_IDLE;
 }
 
@@ -687,18 +737,17 @@ static void adc_handle(struct cc *cc, char *msg) {
         cc_disconnect(cc);
       } else if(cc->active) {
         cc->token = g_strdup(token);
-        memcpy(cc->cid, cid, 24);
         cc_expect_adc_rm(cc);
         struct hub_user *u = cc->uid ? g_hash_table_lookup(hub_uids, &cc->uid) : NULL;
         if(!u) {
           g_set_error_literal(&cc->err, 1, 0, "Protocol error.");
           g_warning("CC:%s: Unexpected ADC connection: %s", net_remoteaddr(cc->net), msg);
           cc_disconnect(cc);
-        } else {
+        } else
           handle_id(cc, u);
-          memcpy(cc->cid, cid, 24);
-        }
       }
+      if(cc->state == CCS_IDLE)
+        memcpy(cc->cid, cid, 24);
       if(cc->dl && cc->state == CCS_IDLE)
         cc_download(cc);
     }
@@ -1180,6 +1229,8 @@ static gboolean handle_timeout(gpointer dat) {
 
 void cc_disconnect(struct cc *cc) {
   g_return_if_fail(cc->state != CCS_DISCONN);
+  if(cc->state == CCS_TRANSFER)
+    xfer_log_add(cc);
   net_disconnect(cc->net);
   cc->timeout_src = g_timeout_add_seconds(60, handle_timeout, cc);
   g_free(cc->token);

@@ -349,7 +349,7 @@ void ui_logwindow_add(struct ui_logwindow *lw, const char *msg) {
   char *prefix = NULL;
   char *tmp;
   if( (**lines == '<' && (tmp = strchr(*lines, '>')) != NULL && *(++tmp) == ' ') || // <nick>
-      (**lines == '*' && lines[0][1] == '*' && (tmp = strchr(*lines, ' ')) != NULL)) { // ** nick
+      (**lines == '*' && lines[0][1] == '*' && lines[0][2] == ' ' && (tmp = strchr(*lines+3, ' ')) != NULL)) { // ** nick
     char old = tmp[1];
     tmp[1] = 0;
     prefix = g_strdup(*lines);
@@ -476,8 +476,8 @@ static int ui_logwindow_calc_color(struct ui_logwindow *lw, char *str, int *sep,
   char *tmp;
   if(msg && (
       (msg[0] == '<' && (tmp = strchr(msg, '>')) != NULL && tmp[1] == ' ') || // <nick>
-      (msg[0] == '*' && msg[1] == '*' && (tmp = strchr(msg, ' ')) != NULL))) { // ** nick
-    int nickstart = (msg-str) + (msg[0] == '<' ? 1 : 2);
+      (msg[0] == '*' && msg[1] == '*' && msg[2] == ' ' && (tmp = strchr(msg+3, ' ')) != NULL))) { // ** nick
+    int nickstart = (msg-str) + (msg[0] == '<' ? 1 : 3);
     int nickend = tmp-str;
     // check for a highlight or whether it is our own nick
     char old = tmp[0];

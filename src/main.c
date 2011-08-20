@@ -220,6 +220,12 @@ static void catch_sigterm(int sig) {
 }
 
 
+// Re-open the log files when receiving SIGUSR1.
+static void catch_sigusr1(int sig) {
+  g_idle_add_full(G_PRIORITY_HIGH, logfile_global_reopen, NULL, NULL);
+}
+
+
 // Fired when the screen is resized.  Normally I would check for KEY_RESIZE,
 // but that doesn't work very nicely together with select(). See
 // http://www.webservertalk.com/archive107-2005-1-896232.html
@@ -333,6 +339,11 @@ int main(int argc, char **argv) {
   act.sa_handler = catch_sigterm;
   if(sigaction(SIGTERM, &act, NULL) < 0)
     g_error("Can't setup SIGTERM: %s", g_strerror(errno));
+
+  // setup SIGUSR1
+  act.sa_handler = catch_sigusr1;
+  if(sigaction(SIGUSR1, &act, NULL) < 0)
+    g_error("Can't setup SIGUSR1: %s", g_strerror(errno));
 
   fl_init();
   cc_listen_start();

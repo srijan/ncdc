@@ -1573,6 +1573,9 @@ struct logfile {
 #endif
 
 
+static GSList *logfile_instances = NULL;
+
+
 // (Re-)opens the log file and checks for inode and file size changes.
 static void logfile_checkfile(struct logfile *l) {
   // stat
@@ -1616,6 +1619,7 @@ struct logfile *logfile_create(const char *name) {
   g_free(n);
 
   logfile_checkfile(l);
+  logfile_instances = g_slist_prepend(logfile_instances, l);
   return l;
 }
 
@@ -1623,6 +1627,7 @@ struct logfile *logfile_create(const char *name) {
 void logfile_free(struct logfile *l) {
   if(!l)
     return;
+  logfile_instances = g_slist_remove(logfile_instances, l);
   if(l->file)
     fclose(l->file);
   g_free(l->path);
@@ -1638,5 +1643,21 @@ void logfile_add(struct logfile *l, const char *msg) {
   strftime(ts, 49, "[%F %H:%M:%S %Z]", localtime(&tm));
   if(l->file && fprintf(l->file, "%s %s\n", ts, msg) < 0 && !strstr(msg, " (LOGERR)"))
     g_warning("Error writing to log file: %s (LOGERR)", g_strerror(errno));
+}
+
+
+// Flush and re-open all opened log files. (Can be called from an idle source)
+gboolean logfile_global_reopen(gpointer dat) {
+  GSList *n = logfile_instances;
+  for(; n; n=n->next) {
+    struct logfile *l = n->data;
+    if(l->file) {
+      fflush(l->file);
+      fclose(l->file);
+      l->file = NULL;
+    }
+    logfile_checkfile(l);
+  }
+  return FALSE;
 }
 

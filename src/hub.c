@@ -96,6 +96,7 @@ struct hub {
   // whether we've fetched the complete user list (and their $MyINFO's)
   gboolean received_first; // true if one precondition for joincomplete is satisfied.
   gboolean joincomplete;
+  guint joincomplete_timer;
   guint64 id; // "hubid" number
 };
 
@@ -1464,6 +1465,14 @@ static gboolean reconnect_timer(gpointer dat) {
 }
 
 
+static gboolean joincomplete_timer(gpointer dat) {
+  struct hub *hub = dat;
+  hub->joincomplete = TRUE;
+  hub->joincomplete_timer = 0;
+  return FALSE;
+}
+
+
 static void handle_cmd(struct net *n, char *cmd) {
   struct hub *hub = n->handle;
   if(hub->adc)
@@ -1524,6 +1533,10 @@ static void handle_connect(struct net *n) {
 
   if(hub->adc)
     net_send(hub->net, "HSUP ADBASE ADTIGR");
+
+  // In the case that the joincomplete detection fails, consider the join to be
+  // complete anyway after a 2-minute timeout.
+  hub->joincomplete_timer = g_timeout_add_seconds(120, joincomplete_timer, hub);
 }
 
 
@@ -1551,6 +1564,10 @@ void hub_connect(struct hub *hub) {
     g_source_remove(hub->reconnect_timer);
     hub->reconnect_timer = 0;
   }
+  if(hub->joincomplete_timer) {
+    g_source_remove(hub->joincomplete_timer);
+    hub->joincomplete_timer = 0;
+  }
 
   ui_mf(hub->tab, 0, "Connecting to %s...", addr);
   net_connect(hub->net, addr, 411, handle_connect);
@@ -1562,6 +1579,10 @@ void hub_disconnect(struct hub *hub, gboolean recon) {
   if(hub->reconnect_timer) {
     g_source_remove(hub->reconnect_timer);
     hub->reconnect_timer = 0;
+  }
+  if(hub->joincomplete_timer) {
+    g_source_remove(hub->joincomplete_timer);
+    hub->joincomplete_timer = 0;
   }
   net_disconnect(hub->net);
   g_hash_table_remove_all(hub->sessions);
@@ -1575,13 +1596,9 @@ void hub_disconnect(struct hub *hub, gboolean recon) {
     hub->supports_nogetinfo = hub->state = 0;
   if(hub->tab->userlist_tab)
     ui_userlist_disconnect(hub->tab->userlist_tab);
-  if(!recon) {
+  if(!recon)
     ui_m(hub->tab, 0, "Disconnected.");
-    if(hub->reconnect_timer) {
-      g_source_remove(hub->reconnect_timer);
-      hub->reconnect_timer = 0;
-    }
-  } else {
+  else {
     ui_m(hub->tab, 0, "Connection lost. Waiting 30 seconds before reconnecting.");
     hub->reconnect_timer = g_timeout_add_seconds(30, reconnect_timer, hub);
   }

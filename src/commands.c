@@ -1018,18 +1018,26 @@ static void c_close(char *args) {
     ui_m(NULL, 0, "Main tab cannot be closed.");
   else if(tab->type == UIT_HUB)
     ui_hub_close(tab);
-  else if(tab->type == UIT_USERLIST)
+  else if(tab->type == UIT_USERLIST) {
+    ui_tab_cur = g_list_find(ui_tabs, tab->hub->tab);
     ui_userlist_close(tab);
-  else if(tab->type == UIT_MSG)
+  } else if(tab->type == UIT_MSG) {
+    ui_tab_cur = g_list_find(ui_tabs, tab->hub->tab);
     ui_msg_close(tab);
-  else if(tab->type == UIT_CONN)
+  } else if(tab->type == UIT_CONN)
     ui_conn_close();
-  else if(tab->type == UIT_FL)
+  else if(tab->type == UIT_FL) {
+    struct hub_user *u = tab->uid ? g_hash_table_lookup(hub_uids, &tab->uid) : NULL;
+    if(u)
+      ui_tab_cur = g_list_find(ui_tabs, u->hub->tab);
     ui_fl_close(tab);
-  else if(tab->type == UIT_DL)
+  } else if(tab->type == UIT_DL)
     ui_dl_close(tab);
-  else if(tab->type == UIT_SEARCH)
+  else if(tab->type == UIT_SEARCH) {
+    if(tab->hub)
+      ui_tab_cur = g_list_find(ui_tabs, tab->hub->tab);
     ui_search_close(tab);
+  }
 }
 
 

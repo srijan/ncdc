@@ -245,6 +245,12 @@ struct cc {
 
   The _d and _u suffixes relate to the value of cc->dl, and is relevant for the
   idle and transfer states.
+
+  Exchanging TTHL data is handled differently with uploading and downloading:
+  With uploading it is done in a single call to net_send_raw(), and as such the
+  transfer_u state will not be used. Downloading, on the other hand, uses
+  net_recvfile(), and the cc instance will stay in the transfer_d state until
+  the TTHL data has been fully received.
 */
 
 
@@ -257,6 +263,18 @@ void cc_init_global() {
   cc_expected = g_queue_new();
   cc_list = g_sequence_new(NULL);
   cc_granted = g_hash_table_new_full(g_int64_hash, g_int64_equal, g_free, NULL);
+}
+
+
+// Calls cc_disconnect() on every open cc connection. This makes sure that any
+// current transfers are aborted and logged to the transfer log.
+void cc_close_global() {
+  GSequenceIter *i = g_sequence_get_begin_iter(cc_list);
+  for(; !g_sequence_iter_is_end(i); i=g_sequence_iter_next(i)) {
+    struct cc *c = g_sequence_get(i);
+    if(c->state != CCS_DISCONN)
+      cc_disconnect(c);
+  }
 }
 
 
@@ -317,8 +335,8 @@ int cc_slots_in_use(int *mini) {
 // cc struct and write it to the transfer log.
 static void xfer_log_add(struct cc *cc) {
   g_return_if_fail(cc->state == CCS_TRANSFER && cc->last_file);
-  // we don't log tthl transfers
-  if(cc->tthl_dat)
+  // we don't log tthl transfers or transfers that hadn't been started yet
+  if(cc->tthl_dat || !cc->last_length)
     return;
 
   char *key = cc->dl ? "log_downloads" : "log_uploads";
@@ -445,6 +463,7 @@ void cc_download(struct cc *cc) {
   cc->last_file = g_strdup(dl->islist ? "files.xml.bz2" : dl->dest);
   cc->last_offset = dl->have;
   cc->last_size = dl->size;
+  cc->last_length = 0; // to be filled in handle_adcsnd()
   cc->state = CCS_TRANSFER;
 }
 

@@ -359,6 +359,7 @@ int main(int argc, char **argv) {
   printf("Flushing unsaved data to disk...");
   fflush(stdout);
   ui_cmdhist_close();
+  cc_close_global();
   fl_close();
   dl_close_global();
   printf(" Done!\n");

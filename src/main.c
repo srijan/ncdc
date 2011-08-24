@@ -154,6 +154,20 @@ static gboolean stdin_read(GIOChannel *src, GIOCondition cond, gpointer dat) {
 static gboolean one_second_timer(gpointer dat) {
   // TODO: ratecalc_calc() requires fairly precise timing, perhaps do this in a separate thread?
   ratecalc_calc();
+
+  // Detect day change
+  static char pday[11] = ""; // YYYY-MM-DD
+  char cday[11];
+  time_t tm = time(NULL);
+  strftime(cday, 11, "%F", localtime(&tm));
+  if(!pday[0])
+    strcpy(pday, cday);
+  if(strcmp(cday, pday) != 0) {
+    ui_daychange(cday);
+    strcpy(pday, cday);
+  }
+
+  // And draw the UI
   ui_draw();
   return TRUE;
 }

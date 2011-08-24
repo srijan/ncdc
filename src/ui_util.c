@@ -252,7 +252,7 @@ struct ui_logwindow {
 #endif
 
 
-static void ui_logwindow_addline(struct ui_logwindow *lw, const char *msg, gboolean raw, gboolean nolog) {
+void ui_logwindow_addline(struct ui_logwindow *lw, const char *msg, gboolean raw, gboolean nolog) {
   if(lw->lastlog == lw->lastvis)
     lw->lastvis = lw->lastlog + 1;
   lw->lastlog++;
@@ -467,6 +467,8 @@ static int ui_logwindow_calc_color(struct ui_logwindow *lw, char *str, int *sep,
 
   // time
   char *msg = strchr(str, ' ');
+  if(msg && msg-str != 8) // Make sure it's not "Day changed to ..", which doesn't have the time prefix
+    msg = NULL;
   if(msg) {
     addm(0, msg-str, UIC(log_time));
     msg++;

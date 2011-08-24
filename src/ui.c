@@ -2081,6 +2081,19 @@ gboolean ui_checkupdate() {
 }
 
 
+// Called when the day has changed. Argument is new date.
+void ui_daychange(const char *day) {
+  char *msg = g_strdup_printf("Day changed to %s", day);
+  GList *n = ui_tabs;
+  for(; n; n=n->next) {
+    struct ui_tab *t = n->data;
+    if(t->log)
+      ui_logwindow_addline(t->log, msg, TRUE, TRUE);
+  }
+  g_free(msg);
+}
+
+
 void ui_input(guint64 key) {
   struct ui_tab *curtab = ui_tab_cur->data;
 

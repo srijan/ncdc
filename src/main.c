@@ -215,28 +215,6 @@ char *ncdc_version() {
 }
 
 
-static void catch_sigterm(int sig) {
-  ncdc_quit();
-}
-
-
-// Re-open the log files when receiving SIGUSR1.
-static void catch_sigusr1(int sig) {
-  g_idle_add_full(G_PRIORITY_HIGH, logfile_global_reopen, NULL, NULL);
-}
-
-
-// Fired when the screen is resized.  Normally I would check for KEY_RESIZE,
-// but that doesn't work very nicely together with select(). See
-// http://www.webservertalk.com/archive107-2005-1-896232.html
-// Also note that this is a signal handler, and all functions we call here must
-// be re-entrant. Obviously none of the ncurses functions are, so let's set a
-// variable and handle it in the screen_update_check_timer.
-static void catch_sigwinch(int sig) {
-  screen_resized = TRUE;
-}
-
-
 // redirect all non-fatal errors to stderr (NOT stdout!)
 static void log_redirect(const gchar *dom, GLogLevelFlags level, const gchar *msg, gpointer dat) {
   if(!(level & (G_LOG_LEVEL_INFO|G_LOG_LEVEL_DEBUG)) || conf_log_debug()) {
@@ -270,6 +248,81 @@ static void open_autoconnect() {
 }
 
 
+
+
+// Fired when the screen is resized.  Normally I would check for KEY_RESIZE,
+// but that doesn't work very nicely together with select(). See
+// http://www.webservertalk.com/archive107-2005-1-896232.html
+// Also note that this is a signal handler, and all functions we call here must
+// be re-entrant. Obviously none of the ncurses functions are, so let's set a
+// variable and handle it in the screen_update_check_timer.
+static void catch_sigwinch(int sig) {
+  screen_resized = TRUE;
+}
+
+
+
+// A special GSource to handle SIGTERM, SIGHUP and SIGUSR1 synchronously in the
+// main thread. This is done because the functions to control the glib event
+// loop are not re-entrant, and therefore cannot be called from signal
+// handlers.
+
+static gboolean main_sig_log = FALSE;
+static gboolean main_sig_quit = FALSE;
+static gboolean main_noterm = FALSE;
+
+static void catch_sigterm(int sig) {
+  main_sig_quit = TRUE;
+}
+
+static void catch_sighup(int sig) {
+  main_sig_quit = TRUE;
+  main_noterm = TRUE;
+}
+
+// Re-open the log files when receiving SIGUSR1.
+static void catch_sigusr1(int sig) {
+  main_sig_log = TRUE;
+}
+
+static gboolean sighandle_prepare(GSource *source, gint *timeout) {
+  *timeout = -1;
+  return main_sig_quit || main_sig_log;
+}
+
+static gboolean sighandle_check(GSource *source) {
+  return main_sig_quit || main_sig_log;
+}
+
+static gboolean sighandle_dispatch(GSource *source, GSourceFunc callback, gpointer user_data) {
+  return callback(NULL);
+}
+
+static GSourceFuncs sighandle_funcs = {
+  sighandle_prepare,
+  sighandle_check,
+  sighandle_dispatch,
+  NULL
+};
+
+static gboolean sighandle_sourcefunc(gpointer dat) {
+  if(main_sig_quit) {
+    g_debug("%s received, terminating main loop.", main_noterm ? "SIGHUP" : "SIGTERM");
+    ncdc_quit();
+    main_sig_quit = FALSE;
+  }
+  if(main_sig_log) {
+    logfile_global_reopen();
+    main_sig_log = FALSE;
+  }
+  return TRUE;
+}
+
+
+
+
+// Commandline options
+
 static gboolean print_version(const gchar *name, const gchar *val, gpointer dat, GError **err) {
   puts(ncdc_version());
   exit(0);
@@ -287,6 +340,8 @@ static GOptionEntry cli_options[] = {
       "Don't automatically connect to hubs with the `autoconnect' option set.", NULL },
   { NULL }
 };
+
+
 
 
 int main(int argc, char **argv) {
@@ -340,6 +395,11 @@ int main(int argc, char **argv) {
   if(sigaction(SIGTERM, &act, NULL) < 0)
     g_error("Can't setup SIGTERM: %s", g_strerror(errno));
 
+  // setup SIGHUP
+  act.sa_handler = catch_sighup;
+  if(sigaction(SIGHUP, &act, NULL) < 0)
+    g_error("Can't setup SIGHUP: %s", g_strerror(errno));
+
   // setup SIGUSR1
   act.sa_handler = catch_sigusr1;
   if(sigaction(SIGUSR1, &act, NULL) < 0)
@@ -356,6 +416,12 @@ int main(int argc, char **argv) {
   GIOChannel *in = g_io_channel_unix_new(STDIN_FILENO);
   g_io_add_watch(in, G_IO_IN, stdin_read, NULL);
 
+  GSource *sighandle = g_source_new(&sighandle_funcs, sizeof(GSource));
+  g_source_set_priority(sighandle, G_PRIORITY_HIGH);
+  g_source_set_callback(sighandle, sighandle_sourcefunc, NULL, NULL);
+  g_source_attach(sighandle, NULL);
+  g_source_unref(sighandle);
+
   g_timeout_add_seconds_full(G_PRIORITY_HIGH, 1, one_second_timer, NULL, NULL);
   g_timeout_add(100, screen_update_check, NULL);
   g_timeout_add_seconds_full(G_PRIORITY_LOW, 24*3600, dl_fl_clean, NULL, NULL);
@@ -363,18 +429,22 @@ int main(int argc, char **argv) {
   g_main_loop_run(main_loop);
 
   // cleanup
-  erase();
-  refresh();
-  endwin();
+  if(!main_noterm) {
+    erase();
+    refresh();
+    endwin();
 
-  printf("Flushing unsaved data to disk...");
-  fflush(stdout);
+    printf("Flushing unsaved data to disk...");
+    fflush(stdout);
+  }
   ui_cmdhist_close();
   cc_close_global();
   fl_close();
   dl_close_global();
-  printf(" Done!\n");
+  if(!main_noterm)
+    printf(" Done!\n");
 
+  g_debug("Clean shutdown.");
   return 0;
 }
 

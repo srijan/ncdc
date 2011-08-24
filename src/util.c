@@ -1646,8 +1646,8 @@ void logfile_add(struct logfile *l, const char *msg) {
 }
 
 
-// Flush and re-open all opened log files. (Can be called from an idle source)
-gboolean logfile_global_reopen(gpointer dat) {
+// Flush and re-open all opened log files.
+void logfile_global_reopen() {
   GSList *n = logfile_instances;
   for(; n; n=n->next) {
     struct logfile *l = n->data;
@@ -1658,6 +1658,5 @@ gboolean logfile_global_reopen(gpointer dat) {
     }
     logfile_checkfile(l);
   }
-  return FALSE;
 }
 

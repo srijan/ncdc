@@ -903,43 +903,96 @@ gboolean ui_textinput_key(struct ui_textinput *ti, guint64 key, char **str) {
   int chars = g_utf8_strlen(ti->str->str, -1);
   gboolean completereset = TRUE;
   switch(key) {
-  case INPT_KEY(KEY_LEFT):
+  case INPT_KEY(KEY_LEFT): // left  - cursor one character left
     if(ti->pos > 0) ti->pos--;
     break;
-  case INPT_KEY(KEY_RIGHT):
+  case INPT_KEY(KEY_RIGHT):// right - cursor one character right
     if(ti->pos < chars) ti->pos++;
     break;
-  case INPT_KEY(KEY_END):
+  case INPT_KEY(KEY_END):  // end
+  case INPT_CTRL('e'):     // C-e   - cursor to end
     ti->pos = chars;
     break;
-  case INPT_KEY(KEY_HOME):
+  case INPT_KEY(KEY_HOME): // home
+  case INPT_CTRL('a'):     // C-a   - cursor to begin
     ti->pos = 0;
     break;
-  case INPT_KEY(KEY_BACKSPACE):
+  case INPT_ALT('b'):      // Alt+b - cursor one word backward
+    if(ti->pos > 0) {
+      char *pos = g_utf8_offset_to_pointer(ti->str->str, ti->pos-1);
+      while(pos > ti->str->str && *pos == ' ')
+        pos--;
+      while(pos > ti->str->str && *(pos-1) != ' ')
+        pos--;
+      ti->pos = g_utf8_strlen(ti->str->str, pos-ti->str->str);
+    }
+    break;
+  case INPT_ALT('f'):      // Alt+f - cursor one word forward
+    if(ti->pos < chars) {
+      char *pos = g_utf8_offset_to_pointer(ti->str->str, ti->pos);
+      while(*pos == ' ')
+        pos++;
+      while(*pos && *pos != ' ')
+        pos++;
+      ti->pos = g_utf8_strlen(ti->str->str, pos-ti->str->str);
+    }
+    break;
+  case INPT_KEY(KEY_BACKSPACE): // backspace - delete character before cursor
     if(ti->pos > 0) {
       char *pos = g_utf8_offset_to_pointer(ti->str->str, ti->pos-1);
       g_string_erase(ti->str, pos-ti->str->str, g_utf8_next_char(pos)-pos);
       ti->pos--;
     }
     break;
-  case INPT_KEY(KEY_DC):
+  case INPT_KEY(KEY_DC):   // del   - delete character under cursor
     if(ti->pos < chars) {
       char *pos = g_utf8_offset_to_pointer(ti->str->str, ti->pos);
       g_string_erase(ti->str, pos-ti->str->str, g_utf8_next_char(pos)-pos);
     }
     break;
-  case INPT_KEY(KEY_UP):
-  case INPT_KEY(KEY_DOWN):
+  case INPT_CTRL('w'):     // C-w   - delete to previous space
+    if(ti->pos > 0) {
+      char *end = g_utf8_offset_to_pointer(ti->str->str, ti->pos-1);
+      char *begin = end;
+      while(begin > ti->str->str && *begin == ' ')
+        begin--;
+      while(begin > ti->str->str && *(begin-1) != ' ')
+        begin--;
+      ti->pos -= g_utf8_strlen(begin, g_utf8_next_char(end)-begin);
+      g_string_erase(ti->str, begin-ti->str->str, g_utf8_next_char(end)-begin);
+    }
+    break;
+  case INPT_ALT('d'):      // Alt+d - delete to next space
+    if(ti->pos < chars) {
+      char *begin = g_utf8_offset_to_pointer(ti->str->str, ti->pos);
+      char *end = begin;
+      while(*end == ' ')
+        end++;
+      while(*end && *(end+1) && *(end+1) != ' ')
+        end++;
+      g_string_erase(ti->str, begin-ti->str->str, g_utf8_next_char(end)-begin);
+    }
+    break;
+  case INPT_CTRL('k'):     // C-k   - delete everything after cursor
+    if(ti->pos < chars)
+      g_string_erase(ti->str, g_utf8_offset_to_pointer(ti->str->str, ti->pos)-ti->str->str, -1);
+    break;
+  case INPT_CTRL('u'):     // C-u   - delete entire line
+    g_string_erase(ti->str, 0, -1);
+    ti->pos = 0;
+    break;
+  case INPT_KEY(KEY_UP):   // up    - history search back
+  case INPT_KEY(KEY_DOWN): // down  - history search forward
     if(ti->usehist)
       ui_textinput_search(ti, key == INPT_KEY(KEY_UP));
     else
       return FALSE;
     break;
-  case INPT_CTRL('i'): // tab
+  case INPT_CTRL('i'):     // tab   - autocomplete
     ui_textinput_complete(ti);
     completereset = FALSE;
     break;
-  case INPT_CTRL('j'): // newline
+  case INPT_CTRL('j'):     // newline - accept & clear
     *str = ui_textinput_reset(ti);
     break;
   default:

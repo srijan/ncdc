@@ -2130,8 +2130,7 @@ void ui_input(guint64 key) {
     cmd_handle("/clear");
     break;
 
-  case INPT_CTRL('e'): // ctrl+e
-  case INPT_CTRL('u'): // ctrl+u (alias for /refresh)
+  case INPT_ALT('r'): // alt+r (alias for /refresh)
     cmd_handle("/refresh");
     break;
 

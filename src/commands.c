@@ -1565,10 +1565,8 @@ static struct cmd cmds[] = {
     "The slot will be granted for as long as ncdc stays open. If you restart"
     " ncdc, the user will have to wait for a regular slot. Unless, of course, you"
     " /grant a slot again.\n\n"
-    "Also note that in the case of NMDC, a granted slot is specific to a single"
-    " hub. If the user is" " also on other hubs, he/she will not be granted a"
-    " slot on those hubs. This is a limitation in the NMDC protocol, and has been"
-    " fixed in ADC."
+    "Note that a granted slot is specific to a single hub. If the user is also"
+    " on other hubs, he/she will not be granted a slot on those hubs."
   },
   { "help", c_help, c_help_sug,
     "[<command>]", "Request information on commands.",

@@ -108,7 +108,7 @@ void cc_expect_add(struct hub *hub, struct hub_user *u, char *t, gboolean dl) {
 }
 
 
-// Checks the expects list for the current connection, cc->dl, cc->uid and
+// Checks the expects list for the current connection, sets cc->dl, cc->uid and
 // cc->hub and removes it from the expects list. cc->cid and cc->token must be
 // known.
 static gboolean cc_expect_adc_rm(struct cc *cc) {
@@ -760,6 +760,7 @@ static void adc_handle(struct cc *cc, char *msg) {
         cc_disconnect(cc);
       } else if(cc->active) {
         cc->token = g_strdup(token);
+        memcpy(cc->cid, cid, 24);
         cc_expect_adc_rm(cc);
         struct hub_user *u = cc->uid ? g_hash_table_lookup(hub_uids, &cc->uid) : NULL;
         if(!u) {
@@ -768,8 +769,7 @@ static void adc_handle(struct cc *cc, char *msg) {
           cc_disconnect(cc);
         } else
           handle_id(cc, u);
-      }
-      if(cc->state == CCS_IDLE)
+      } else
         memcpy(cc->cid, cid, 24);
       if(cc->dl && cc->state == CCS_IDLE)
         cc_download(cc);

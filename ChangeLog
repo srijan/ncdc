@@ -1,3 +1,17 @@
+0.8 - 2011-08-26
+	- Added transfer log
+	- Added log_downloads and log_uploads settings
+	- Added day changed indicators to the log windows
+	- Added common readline keys to the text input box
+	- Changed /refresh shortcut from Ctrl+e/u to Alt+r
+	- Allow join messages to work even when the join completion detection fails
+	- Select parent tab when closing a userlist, PM or filelist tab
+	- Re-open log files when receiving SIGUSR1
+	- Perform a clean shutdown when the terminal is closed
+	- Fixed bug in formatting the title of a /search tab
+	- Fixed log indent for non-ASCII nicks
+	- Fixed log highlighting and indenting for /me messages
+
 0.7 - 2011-08-17
 	- Added word wrapping for the log window
 	- Added basic colors and nick highlighting to the log window

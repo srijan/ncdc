@@ -672,7 +672,7 @@ static int dl_hash_update(struct dl *dl, int length, char *buf) {
 // download, FALSE when something went wrong and the transfer should be
 // aborted.
 // TODO: do this in a separate thread to avoid blocking on HDD writes.
-gboolean dl_received(struct dl *dl, int length, char *buf) {
+gboolean dl_received(struct dl *dl, char *buf, int length) {
   //g_debug("dl:%016"G_GINT64_MODIFIER"x: Received %d bytes for %s (size = %"G_GUINT64_FORMAT", have = %"G_GUINT64_FORMAT")", dl->u->uid, length, dl->dest, dl->size, dl->have+length);
   g_return_val_if_fail(dl->have + length <= dl->size, FALSE);
   g_warn_if_fail(dl->u->active);

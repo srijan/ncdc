@@ -25,33 +25,7 @@
 
 
 #include "ncdc.h"
-#include <unistd.h>
-#include <errno.h>
-#include <limits.h>
 #include <stdlib.h>
-#include <fcntl.h>
-#ifdef HAVE_LINUX_SENDFILE
-# include <sys/sendfile.h>
-#elif HAVE_BSD_SENDFILE
-# include <sys/socket.h>
-# include <sys/uio.h>
-#endif
-
-
-
-/* High-level connection handling for message-based protocols. With some binary
- * transfer stuff mixed in.
- *
- * Implements the following:
- * - Async connecting to a hostname/ip + port
- * - Async message sending (end-of-message char is added automatically)
- * - Async message receiving ("message" = all bytes until end-of-message char)
- * - Sending a file over a socket
- * - Sending UDP messages
- *
- * Does not use the GIOStream interface, since that is inefficient and has too
- * many limitations to be useful.
- */
 
 
 // global network stats
@@ -65,49 +39,64 @@ struct ratecalc net_in, net_out;
 #define NETERR_RECV 1
 #define NETERR_SEND 2
 
+#define NET_RECV_BUF 8192
+#define NET_MAX_CMD  1048576
+
 struct net {
   GSocketConnection *conn;
-  GSocket *sock;
+
+  // Connecting
   gboolean connecting;
-  // input/output buffers
-  GString *in, *out;
-  GCancellable *cancel; // used to cancel a connect operation
-  guint in_src, out_src;
-  // sending a file
-  int file_fd;
-  gint64 file_left;
-  guint64 file_offset;
-  void (*send_cb)(struct net *);
-  // receiving raw data (a file, usually)
-  guint64 recv_left;
-  void (*recv_cb)(struct net *, int, char *, guint64); // don't confuse the name with cb_rcv...
-  // in/out rates
+  GCancellable *conn_can;
+
+  // Message termination character. ([0] = character, [1] = 0)
+  char eom[2];
+
+  // Receiving data
+  // raw receive buffer for _read_async()
+  GInputStream *in;
+  GCancellable *in_can;
+  char in_buf[NET_RECV_BUF];
+  // Regular messages
+  GString *in_msg;
+  void (*recv_msg_cb)(struct net *, char *);
+  // Receiving raw data
+  guint64 recv_raw_left;
+  void (*recv_raw_cb)(struct net *, char *, int, guint64);
+  // special hook that is called when data has arrived but before it is processed.
+  void (*recv_datain)(struct net *, char *data, int len);
+
+  // Sending data
+  GOutputStream *out;
+  GCancellable *out_can;
+  GString *out_buf;
+  GString *out_buf_old;
+  int out_queue_src;
+  guint64 file_left; // UNUSED
+
+  // In/out rates
   struct ratecalc *rate_in;
   struct ratecalc *rate_out;
-  // receive callback
-  void (*cb_rcv)(struct net *, char *);
-  // on-connect callback
+
+  // On-connect callback
   void (*cb_con)(struct net *);
+
   // Error callback. In the case of an error while connecting, cb_con will not
   // be called. Second argument is NETERR_* action. The GError does not have to
   // be freed. Will not be called in the case of G_IO_ERROR_CANCELLED. All
   // errors are fatal, and net_disconnect() should be called in the callback.
   void (*cb_err)(struct net *, int, GError *);
-  // special hook that is called when data has arrived but before it is processed.
-  void (*cb_datain)(struct net *, char *data);
-  // message termination character
-  char eom[2];
+
   // Whether this connection should be kept alive or not. When true, keepalive
   // packets will be sent. Otherwise, an error will be generated if there has
   // been no read activity within the last 30 seconds (or so).
   gboolean keepalive;
-  // Whether _connect() or _setsock() was used.
-  gboolean setsock;
-  // Don't use _set_timeout() on the socket, since that will throw a timeout
-  // even when we're actively writing to the socket. So we use our own timeout
-  // detection using a 5-second timer and a timestamp of the last action.
+
+  // We use our own timeout detection using a 5-second timer and a timestamp of
+  // the last successful action.
   guint timeout_src;
   time_t timeout_last;
+
   // some pointer for use by the user
   void *handle;
   // reference counter
@@ -115,255 +104,10 @@ struct net {
 };
 
 
-// g_socket_create_source() has a cancellable argument. But I can't tell from
-// the documentation that it does exactly what I want it to do, so let's just
-// use g_source_remove() manually.
-#define net_cancel(n) do {\
-    if((n)->in_src) {\
-      g_source_remove((n)->in_src);\
-      (n)->in_src = 0;\
-    }\
-    if((n)->out_src) {\
-      g_source_remove((n)->out_src);\
-      (n)->out_src = 0;\
-    }\
-    g_cancellable_cancel((n)->cancel);\
-    g_object_unref((n)->cancel);\
-    (n)->cancel = g_cancellable_new();\
-    (n)->connecting = FALSE;\
-  } while(0)
-
-
-// does this function block?
-#define net_disconnect(n) do {\
-    net_cancel(n);\
-    if((n)->conn) {\
-      g_debug("%s- Disconnected.", net_remoteaddr(n));\
-      g_object_unref((n)->conn);\
-      (n)->conn = NULL;\
-      g_string_truncate((n)->in, 0);\
-      g_string_truncate((n)->out, 0);\
-      (n)->recv_left = 0;\
-      (n)->recv_cb = NULL;\
-      if((n)->setsock) {\
-        g_object_unref((n)->sock);\
-        (n)->setsock = FALSE;\
-      }\
-      if((n)->file_left) {\
-        close((n)->file_fd);\
-        (n)->file_left = 0;\
-      }\
-      ratecalc_unregister((n)->rate_in);\
-      ratecalc_unregister((n)->rate_out);\
-      time(&(n)->timeout_last);\
-    }\
-  } while(0)
-
-
 #define net_ref(n) g_atomic_int_inc(&((n)->ref))
 
-#define net_unref(n) do {\
-    if(g_atomic_int_dec_and_test(&((n)->ref))) {\
-      net_disconnect(n);\
-      if((n)->file_left)\
-        close((n)->file_fd);\
-      if((n)->timeout_src)\
-        g_source_remove((n)->timeout_src);\
-      g_object_unref((n)->cancel);\
-      g_string_free((n)->out, TRUE);\
-      g_string_free((n)->in, TRUE);\
-      g_slice_free(struct ratecalc, (n)->rate_in);\
-      g_slice_free(struct ratecalc, (n)->rate_out);\
-      g_slice_free(struct net, n);\
-    }\
-  } while(0)
-
 
 #endif
-
-
-static void consume_input(struct net *n) {
-  char *sep;
-
-  // Make sure the command is consumed from the buffer before the callback is
-  // called, otherwise net_recvfile() can't do its job.
-  while(n->conn && (sep = memchr(n->in->str, n->eom[0], n->in->len))) {
-    // The n->in->str+1 is a hack to work around a bug in uHub 0.2.8 (possibly
-    // also other versions), where it would prefix some messages with a 0-byte.
-    char *msg = !n->in->str[0] && sep > n->in->str+1
-      ? g_strndup(n->in->str+1, sep - n->in->str - 1)
-      : g_strndup(n->in->str, sep - n->in->str);
-    g_string_erase(n->in, 0, 1 + sep - n->in->str);
-    g_debug("%s< %s", net_remoteaddr(n), msg);
-    if(msg[0])
-      n->cb_rcv(n, msg);
-    g_free(msg);
-  }
-}
-
-
-// catches and handles any errors from g_socket_receive or g_socket_send in a
-// input/output handler.
-#define handle_ioerr(n, src, ret, err, action) do {\
-    if(err && err->code == G_IO_ERROR_WOULD_BLOCK) {\
-      g_error_free(err);\
-      return TRUE;\
-    }\
-    if(err || ret == 0) {\
-      src = 0;\
-      if(!err)\
-        g_set_error_literal(&err, 1, 0, "Remote disconnected.");\
-      n->cb_err(n, action, err);\
-      g_error_free(err);\
-      return FALSE;\
-    }\
-  } while(0)
-
-
-static gboolean handle_input(GSocket *sock, GIOCondition cond, gpointer dat) {
-  static char rawbuf[102400]; // can be static under the assumption that all handle_inputs are run in a single thread.
-  GError *err = NULL;
-  struct net *n = dat;
-  time(&(n->timeout_last));
-
-  // receive raw data
-  if(n->recv_left > 0) {
-    gssize read = g_socket_receive(n->sock, rawbuf, 102400, NULL, &err);
-    handle_ioerr(n, n->in_src, read, err, NETERR_RECV);
-    ratecalc_add(&net_in, read);
-    ratecalc_add(n->rate_in, read);
-    int w = MIN(read, n->recv_left);
-    n->recv_left -= w;
-    n->recv_cb(n, w, rawbuf, n->recv_left);
-    if(read > w)
-      g_string_append_len(n->in, rawbuf+w, read-w);
-    return TRUE;
-  }
-
-  // we need to be able to access the net object after calling callbacks that
-  // may do an unref().
-  net_ref(n);
-
-  // make sure enough space is available in the input buffer (ugly hack, GString has no simple grow function)
-  if(n->in->allocated_len - n->in->len < 1024) {
-    // don't allow the buffer to grow beyond 1MB
-    if(n->in->len + 1024 > 1024*1024) {
-      n->in_src = 0;
-      g_set_error_literal(&err, 1, 0, "Buffer overflow.");
-      n->cb_err(n, NETERR_RECV, err);
-      g_error_free(err);
-      return FALSE;
-    }
-    gsize oldlen = n->in->len;
-    g_string_set_size(n->in, n->in->len+1024);
-    n->in->len = oldlen;
-  }
-
-  gssize read = g_socket_receive(n->sock, n->in->str + n->in->len, n->in->allocated_len - n->in->len - 1, NULL, &err);
-  handle_ioerr(n, n->in_src, read, err, NETERR_RECV);
-  ratecalc_add(&net_in, read);
-  ratecalc_add(n->rate_in, read);
-  n->in->len += read;
-  n->in->str[n->in->len] = 0;
-  if(n->cb_datain)
-    n->cb_datain(n, n->in->str + (n->in->len - read));
-  consume_input(n);
-  net_unref(n);
-  return TRUE;
-}
-
-
-// TODO: do this in a separate thread to avoid blocking on HDD reads
-static gboolean handle_sendfile(struct net *n) {
-#ifdef HAVE_SENDFILE
-
-#ifdef HAVE_LINUX_SENDFILE
-  off_t off = n->file_offset;
-  ssize_t r = sendfile(g_socket_get_fd(n->sock), n->file_fd, &off, MIN((size_t)n->file_left, INT_MAX));
-  if(r >= 0)
-    n->file_offset = off;
-#elif HAVE_BSD_SENDFILE
-  off_t len = 0;
-  gint64 r = sendfile(n->file_fd, g_socket_get_fd(n->sock), (off_t)n->file_offset, MIN((size_t)n->file_left, INT_MAX), NULL, &len, 0);
-  // a partial write results in an EAGAIN error on BSD, even though this isn't
-  // really an error condition at all.
-  if(r != -1 || (r == -1 && errno == EAGAIN)) {
-    r = len;
-    n->file_offset += r;
-  }
-#endif
-
-  if(r >= 0) {
-    n->file_left -= r;
-    ratecalc_add(&net_out, r);
-    ratecalc_add(n->rate_out, r);
-    return TRUE;
-
-  } else if(errno == EAGAIN || errno == EINTR)
-    return TRUE;
-
-  else if(errno == EPIPE || errno == ECONNRESET) {
-    n->out_src = 0;
-    GError *err = NULL;
-    g_set_error_literal(&err, 1, 0, "Remote disconnected.");
-    n->cb_err(n, NETERR_SEND, err);
-    g_error_free(err);
-    return FALSE;
-
-  // non-sendfile() fallback
-  } else if(errno == ENOTSUP || errno == ENOSYS || errno == EINVAL) {
-    g_message("sendfile() failed with `%s', using fallback.", g_strerror(errno));
-#endif // HAVE_SENDFILE
-    GError *err = NULL;
-    char buf[10240];
-    g_return_val_if_fail(lseek(n->file_fd, n->file_offset, SEEK_SET) != (off_t)-1, FALSE);
-    int r = read(n->file_fd, buf, 10240);
-    g_return_val_if_fail(r >= 0, FALSE);
-    gssize written = g_socket_send(n->sock, buf, r, NULL, &err);
-    handle_ioerr(n, n->out_src, written, err, NETERR_SEND);
-    ratecalc_add(&net_out, r);
-    ratecalc_add(n->rate_out, r);
-    n->file_offset += r;
-    n->file_left -= r;
-    return TRUE;
-
-#ifdef HAVE_SENDFILE
-  }
-  g_critical("sendfile() returned an unknown error: %d", errno);
-  return FALSE;
-#endif
-}
-
-
-static gboolean handle_output(GSocket *sock, GIOCondition cond, gpointer dat) {
-  struct net *n = dat;
-  time(&(n->timeout_last));
-
-  // send our buffer
-  if(n->out->len) {
-    GError *err = NULL;
-    gssize written = g_socket_send(n->sock, n->out->str, n->out->len, NULL, &err);
-    handle_ioerr(n, n->out_src, written, err, NETERR_SEND);
-    ratecalc_add(n->rate_out, written);
-    ratecalc_add(&net_out, written);
-    g_string_erase(n->out, 0, written);
-    if(n->out->len || n->file_left)
-      return TRUE;
-
-  // send a file
-  } else if(n->file_left) {
-    gboolean c = handle_sendfile(n) && (n->out->len || n->file_left);
-    if(!n->file_left) {
-      close(n->file_fd);
-      if(n->send_cb)
-        n->send_cb(n);
-    } if(c)
-      return TRUE;
-  }
-
-  n->out_src = 0;
-  return FALSE;
-}
 
 
 static gboolean handle_timer(gpointer dat) {
@@ -389,20 +133,128 @@ static gboolean handle_timer(gpointer dat) {
 }
 
 
+// When len new bytes have been received. We don't have to worry about n->ref
+// dropping to 0 within this function, the caller (that is, handle_read())
+// makes sure to have a reference.
+static void handle_input(struct net *n, char *buf, int len) {
+  if(n->recv_datain)
+    n->recv_datain(n, buf, len);
+
+  // If we're still receiving raw data, send that to the appropriate callbacks
+  // first.
+  if(len > 0 && n->recv_raw_left > 0) {
+    int w = MIN(len, n->recv_raw_left);
+    n->recv_raw_left -= w;
+    n->recv_raw_cb(n, buf, w, n->recv_raw_left);
+    len -= w;
+    buf += w;
+  }
+
+  if(!n->conn || len <= 0)
+    return;
+
+  // Check that the maximum command length isn't reached.
+  // (Actually, this should be checked after this command finishes, but oh well)
+  if(n->in_msg->len > NET_MAX_CMD) {
+    GError *err = NULL;
+    g_set_error_literal(&err, 1, 0, "Buffer overflow.");
+    n->cb_err(n, NETERR_RECV, err);
+    g_error_free(err);
+    return;
+  }
+
+  // Now we apparently have some data that needs to be interpreted as messages.
+  // Add to the message buffer and interpret it.
+  g_string_append_len(n->in_msg, buf, len);
+
+  // Make sure the message is consumed from n->in_msg before the callback is
+  // called, otherwise net_recvfile() can't do its job.
+  char *sep;
+  while(n->conn && (sep = memchr(n->in_msg->str, n->eom[0], n->in_msg->len))) {
+    // The n->in->str+1 is a hack to work around a bug in uHub 0.2.8 (possibly
+    // also other versions), where it would prefix some messages with a 0-byte.
+    char *msg = !n->in_msg->str[0] && sep > n->in_msg->str+1
+      ? g_strndup(n->in_msg->str+1, sep - n->in_msg->str - 1)
+      : g_strndup(n->in_msg->str, sep - n->in_msg->str);
+    g_string_erase(n->in_msg, 0, 1 + sep - n->in_msg->str);
+    g_debug("%s< %s", net_remoteaddr(n), msg);
+    if(msg[0])
+      n->recv_msg_cb(n, msg);
+    g_free(msg);
+  }
+}
+
+
+// Activates an asynchronous read, in case there's none active.
+#define setup_read(n) do {\
+    if(n->conn && !g_input_stream_has_pending(n->in))\
+      g_input_stream_read_async(n->in, n->in_buf, NET_RECV_BUF, G_PRIORITY_DEFAULT, n->in_can, handle_read, n);\
+  } while(0)
+
+
+// Called when an asynchronous read has finished. Checks for errors and calls
+// handle_input() on the received data.
+static void handle_read(GObject *src, GAsyncResult *res, gpointer dat) {
+  struct net *n = dat; // Don't dereference when result = G_IO_ERROR_CANCELLED
+
+  GError *err = NULL;
+  gssize r = g_input_stream_read_finish(G_INPUT_STREAM(src), res, &err);
+
+  if(r < 0) {
+    if(err->code != G_IO_ERROR_CANCELLED)
+      n->cb_err(n, NETERR_RECV, err);
+    g_error_free(err);
+  } else if(r == 0) {
+    g_set_error_literal(&err, 1, 0, "Remote disconnected.");
+    n->cb_err(n, NETERR_RECV, err);
+    g_error_free(err);
+  } else {
+    time(&(n->timeout_last));
+    ratecalc_add(&net_in, r);
+    ratecalc_add(n->rate_in, r);
+    net_ref(n);
+    handle_input(n, n->in_buf, r);
+    setup_read(n);
+    net_unref(n);
+  }
+}
+
+
+struct net *net_create(char term, void *han, gboolean keepalive, void (*rfunc)(struct net *, char *), void (*errfunc)(struct net *, int, GError *)) {
+  struct net *n = g_new0(struct net, 1);
+  n->ref = 1;
+  n->rate_in  = g_slice_new0(struct ratecalc);
+  n->rate_out = g_slice_new0(struct ratecalc);
+  ratecalc_init(n->rate_in);
+  ratecalc_init(n->rate_out);
+  n->conn_can = g_cancellable_new();
+  n->in_can   = g_cancellable_new();
+  n->out_can  = g_cancellable_new();
+  n->in_msg  = g_string_sized_new(1024);
+  n->out_buf = g_string_sized_new(1024);
+  n->eom[0] = term;
+  n->handle = han;
+  n->keepalive = keepalive;
+  n->recv_msg_cb = rfunc;
+  n->cb_err = errfunc;
+  n->timeout_src = g_timeout_add_seconds(5, handle_timer, n);
+  return n;
+}
+
+
 static void handle_setconn(struct net *n, GSocketConnection *conn) {
   n->conn = conn;
-  n->sock = g_socket_connection_get_socket(n->conn);
+  n->in  = g_io_stream_get_input_stream(G_IO_STREAM(n->conn));
+  n->out = g_io_stream_get_output_stream(G_IO_STREAM(n->conn));
+  setup_read(n);
+
 #if GLIB_CHECK_VERSION(2, 26, 0)
-  g_socket_set_timeout(n->sock, 0);
+  g_socket_set_timeout(g_socket_connection_get_socket(n->conn), 0);
 #endif
   time(&(n->timeout_last));
   if(n->keepalive)
-    g_socket_set_keepalive(n->sock, TRUE);
-  g_socket_set_blocking(n->sock, FALSE);
-  GSource *src = g_socket_create_source(n->sock, G_IO_IN, NULL);
-  g_source_set_callback(src, (GSourceFunc)handle_input, n, NULL);
-  n->in_src = g_source_attach(src, NULL);
-  g_source_unref(src);
+    g_socket_set_keepalive(g_socket_connection_get_socket(n->conn), TRUE);
+
   ratecalc_reset(n->rate_in);
   ratecalc_reset(n->rate_out);
   ratecalc_register(n->rate_in);
@@ -451,16 +303,63 @@ void net_connect(struct net *n, const char *addr, unsigned short defport, void (
 #if GLIB_CHECK_VERSION(2, 26, 0)
   g_socket_client_set_timeout(sc, 30);
 #endif
-  g_socket_client_connect_to_host_async(sc, addr, defport, n->cancel, handle_connect, n);
+  g_socket_client_connect_to_host_async(sc, addr, defport, n->conn_can, handle_connect, n);
   g_object_unref(sc);
   n->connecting = TRUE;
 }
 
 
-void net_setsock(struct net *n, GSocket *sock) {
-  g_return_if_fail(!n->conn);
-  handle_setconn(n, g_socket_connection_factory_create_connection(sock));
-  n->setsock = TRUE;
+void net_disconnect(struct net *n) {
+  if(!n->conn)
+    return;
+
+  n->connecting = FALSE;
+  if(n->out_queue_src) {
+    g_source_remove(n->out_queue_src);
+    n->out_queue_src = 0;
+  }
+
+#define cancel_and_reset(c) if(c) {\
+    g_cancellable_cancel(c);\
+    g_object_unref(c);\
+    c = g_cancellable_new();\
+  }
+  cancel_and_reset(n->conn_can);
+  cancel_and_reset(n->in_can);
+  cancel_and_reset(n->out_can);
+#undef cancel_and_reset
+
+  g_debug("%s- Disconnected.", net_remoteaddr(n));
+  g_object_unref(n->conn); // Does this block?
+  n->conn = NULL;
+  g_string_truncate(n->in_msg, 0);
+  n->recv_raw_left = 0;
+  n->recv_raw_cb = NULL;
+  g_string_truncate(n->out_buf, 0);
+  if(n->out_buf_old) {
+    g_string_free(n->out_buf_old, TRUE);
+    n->out_buf_old = NULL;
+  }
+  ratecalc_unregister(n->rate_in);
+  ratecalc_unregister(n->rate_out);
+  time(&n->timeout_last);
+}
+
+
+void net_unref(struct net *n) {
+  if(!g_atomic_int_dec_and_test(&((n)->ref)))
+    return;
+
+  net_disconnect(n);
+  g_source_remove(n->timeout_src);
+  g_object_unref(n->conn_can);
+  g_object_unref(n->in_can);
+  g_object_unref(n->out_can);
+  g_string_free(n->in_msg, TRUE);
+  g_string_free(n->out_buf, TRUE);
+  g_slice_free(struct ratecalc, n->rate_in);
+  g_slice_free(struct ratecalc, n->rate_out);
+  g_free(n);
 }
 
 
@@ -482,46 +381,83 @@ char *net_remoteaddr(struct net *n) {
 }
 
 
-struct net *net_create(char term, void *han, gboolean keepalive, void (*rfunc)(struct net *, char *), void (*errfunc)(struct net *, int, GError *)) {
-  struct net *n = g_slice_new0(struct net);
-  n->ref = 1;
-  n->rate_in  = g_slice_new0(struct ratecalc);
-  n->rate_out = g_slice_new0(struct ratecalc);
-  ratecalc_init(n->rate_in);
-  ratecalc_init(n->rate_out);
-  n->in  = g_string_sized_new(1024);
-  n->out = g_string_sized_new(1024);
-  n->cancel = g_cancellable_new();
-  n->eom[0] = term;
-  n->handle = han;
-  n->keepalive = keepalive;
-  n->cb_rcv = rfunc;
-  n->cb_err = errfunc;
-  n->timeout_src = g_timeout_add_seconds(5, handle_timer, n);
-  return n;
+// Receives `length' bytes from the socket and calls cb() on every read.
+void net_recvraw(struct net *n, guint64 length, void (*cb)(struct net *, char *, int, guint64)) {
+  n->recv_raw_left = length;
+  n->recv_raw_cb = cb;
+  // read stuff from the message buffer in case it's not empty.
+  if(n->in_msg->len >= 0) {
+    int w = MIN(n->in_msg->len, length);
+    n->recv_raw_left -= w;
+    n->recv_raw_cb(n, n->in_msg->str, w, n->recv_raw_left);
+    g_string_erase(n->in_msg, 0, w);
+  }
+  if(!n->recv_raw_left)
+    n->recv_raw_cb = NULL;
 }
 
-#define send_do(n) do {\
-    if(!n->out_src) {\
-      GSource *src = g_socket_create_source(n->sock, G_IO_OUT, NULL);\
-      g_source_set_callback(src, (GSourceFunc)handle_output, n, NULL);\
-      n->out_src = g_source_attach(src, NULL);\
-      g_source_unref(src);\
-    }\
-  } while (0)
 
-void net_send_raw(struct net *n, const char *msg, int len) {
+
+static gboolean setup_write(gpointer dat);
+
+static void handle_write(GObject *src, GAsyncResult *res, gpointer dat) {
+  struct net *n = dat; // Don't dereference when result = G_IO_ERROR_CANCELLED
+
+  GError *err = NULL;
+  gssize r = g_output_stream_write_finish(G_OUTPUT_STREAM(src), res, &err);
+
+  if(r < 0) {
+    if(err->code != G_IO_ERROR_CANCELLED)
+      n->cb_err(n, NETERR_SEND, err);
+    g_error_free(err);
+  } else {
+    time(&(n->timeout_last));
+    ratecalc_add(&net_out, r);
+    ratecalc_add(n->rate_out, r);
+    if(n->out_buf_old) {
+      g_string_free(n->out_buf_old, TRUE);
+      n->out_buf_old = NULL;
+    } else
+      g_string_erase(n->out_buf, 0, r);
+    setup_write(n);
+  }
+}
+
+
+static gboolean setup_write(gpointer dat) {
+  struct net *n = dat;
+  if(n->out_buf->len && n->conn && !g_output_stream_has_pending(n->out))
+    g_output_stream_write_async(n->out, n->out_buf->str, n->out_buf->len, G_PRIORITY_DEFAULT, n->out_can, handle_write, n);
+  if(n->out_queue_src) {
+    g_source_remove(n->out_queue_src);
+    n->out_queue_src = 0;
+  }
+  return FALSE;
+}
+
+
+void net_sendraw(struct net *n, const char *buf, int len) {
   if(!n->conn)
     return;
-  g_string_append_len(n->out, msg, len);
-  send_do(n);
+  // Don't write to the output buffer when an asynchronous write is in
+  // progress. Otherwise we may risk the write thread to read invalid memory.
+  if(g_output_stream_has_pending(n->out)) {
+    n->out_buf_old = n->out_buf;
+    n->out_buf = g_string_sized_new(1024);
+  }
+  g_string_append_len(n->out_buf, buf, len);
+
+  // Queue a setup_write() from an idle source. This ensures that batch calls
+  // to net_sendraw() will combine stuff into a single buffer before writing it.
+  if(!g_output_stream_has_pending(n->out) && !n->out_queue_src)
+    n->out_queue_src = g_idle_add_full(G_PRIORITY_LOW, setup_write, n, NULL);
 }
 
 
 void net_send(struct net *n, const char *msg) {
   g_debug("%s> %s", net_remoteaddr(n), msg);
-  net_send_raw(n, msg, strlen(msg));
-  net_send_raw(n, n->eom, 1);
+  net_sendraw(n, msg, strlen(msg));
+  net_sendraw(n, n->eom, 1);
 }
 
 
@@ -534,33 +470,9 @@ void net_sendf(struct net *n, const char *fmt, ...) {
   g_free(str);
 }
 
-
-// TODO: error reporting?
-// Note: the net_send() family shouldn't be used while a file is being sent.
-// cb() will be called when the requested data has been sent successfully.
 void net_sendfile(struct net *n, const char *path, guint64 offset, guint64 length, void (*cb)(struct net *)) {
-  g_return_if_fail(!n->file_left);
-  g_return_if_fail((n->file_fd = open(path, O_RDONLY)) >= 0);
-  n->send_cb = cb;
-  n->file_offset = offset;
-  n->file_left = length;
-  send_do(n);
-}
-
-
-// Receives `length' bytes from the socket and calls cb() on every read.
-void net_recvfile(struct net *n, guint64 length, void (*cb)(struct net *, int, char *, guint64)) {
-  n->recv_left = length;
-  n->recv_cb = cb;
-  // read stuff from the buffer in case it's not empty
-  if(n->in->len >= 0) {
-    int w = MIN(n->in->len, length);
-    n->recv_left -= w;
-    n->recv_cb(n, w, n->in->str, n->recv_left);
-    g_string_erase(n->in, 0, w);
-  }
-  if(!n->recv_left)
-    n->recv_cb = NULL;
+  g_warning("net_sendfile() not implemented at the moment!");
+  // TODO!
 }
 
 

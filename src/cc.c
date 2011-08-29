@@ -359,7 +359,7 @@ static void xfer_log_add(struct cc *cc) {
   else
     base32_encode(cc->last_hash, tth);
 
-  guint64 transfer_size = cc->last_length - (cc->dl ? cc->net->recv_left : cc->net->file_left);
+  guint64 transfer_size = cc->last_length - (cc->dl ? cc->net->recv_raw_left : cc->net->file_left);
 
   char *nick = adc_escape(cc->nick, FALSE);
   char *file = adc_escape(cc->last_file, FALSE);
@@ -468,10 +468,10 @@ void cc_download(struct cc *cc) {
 }
 
 
-static void handle_recvfile(struct net *n, int read, char *buf, guint64 left) {
+static void handle_recvfile(struct net *n, char *buf, int read, guint64 left) {
   struct cc *cc = n->handle;
   struct dl *dl = g_hash_table_lookup(dl_queue, cc->last_hash);
-  if(dl && !dl_received(dl, read, buf)) {
+  if(dl && !dl_received(dl, buf, read)) {
     g_set_error_literal(&cc->err, 1, 0, "Download error.");
     cc_disconnect(cc);
     return;
@@ -489,7 +489,7 @@ static void handle_recvfile(struct net *n, int read, char *buf, guint64 left) {
 }
 
 
-static void handle_recvtth(struct net *n, int read, char *buf, guint64 left) {
+static void handle_recvtth(struct net *n, char *buf, int read, guint64 left) {
   struct cc *cc = n->handle;
   struct dl *dl = g_hash_table_lookup(dl_queue, cc->last_hash);
   if(dl) {
@@ -519,11 +519,11 @@ static void handle_adcsnd(struct cc *cc, gboolean tthl, guint64 start, guint64 b
     g_return_if_fail(dl->have == start);
     if(!dl->size)
       cc->last_size = dl->size = bytes;
-    net_recvfile(cc->net, bytes, handle_recvfile);
+    net_recvraw(cc->net, bytes, handle_recvfile);
   } else {
     g_return_if_fail(start == 0 && bytes > 0 && (bytes%24) == 0 && bytes < 48*1024);
     cc->tthl_dat = g_malloc(bytes);
-    net_recvfile(cc->net, bytes, handle_recvtth);
+    net_recvraw(cc->net, bytes, handle_recvtth);
   }
   time(&cc->last_start);
 }
@@ -558,7 +558,7 @@ static void handle_adcget(struct cc *cc, char *type, char *id, guint64 start, gi
     else {
       // no need to adc_escape(id) here, since it cannot contain any special characters
       net_sendf(cc->net, cc->adc ? "CSND tthl %s 0 %d" : "$ADCSND tthl %s 0 %d", id, len);
-      net_send_raw(cc->net, dat, len);
+      net_sendraw(cc->net, dat, len);
       free(dat);
     }
     return;
@@ -586,7 +586,7 @@ static void handle_adcget(struct cc *cc, char *type, char *id, guint64 start, gi
     }
     char *eid = adc_escape(id, !cc->adc);
     net_sendf(cc->net, cc->adc ? "CSND list %s 0 %d" : "$ADCSND list %s 0 %d", eid, buf->len);
-    net_send_raw(cc->net, buf->str, buf->len);
+    net_sendraw(cc->net, buf->str, buf->len);
     g_free(eid);
     g_string_free(buf, TRUE);
     return;
@@ -1224,9 +1224,12 @@ void cc_adc_connect(struct cc *cc, struct hub_user *u, unsigned short port, char
 }
 
 
-static void handle_detectprotocol(struct net *net, char *dat) {
+/* TODO: rewrite to use GSocketConnection or something.
+
+static void handle_detectprotocol(struct net *net, char *dat, int len) {
+  g_return_if_fail(len > 0);
   struct cc *cc = net->handle;
-  net->cb_datain = NULL;
+  net->recv_datain = NULL;
   if(dat[0] == 'C') {
     cc->adc = TRUE;
     net->eom[0] = '\n';
@@ -1234,13 +1237,16 @@ static void handle_detectprotocol(struct net *net, char *dat) {
   // otherwise, assume defaults (= NMDC)
 }
 
+*/
 
 static void cc_incoming(struct cc *cc, GSocket *sock) {
+  /* TODO!
   net_setsock(cc->net, sock);
   cc->active = TRUE;
-  cc->net->cb_datain = handle_detectprotocol;
+  cc->net->recv_datain = handle_detectprotocol;
   cc->state = CCS_HANDSHAKE;
   strncpy(cc->remoteaddr, net_remoteaddr(cc->net), 23);
+  */
 }
 
 

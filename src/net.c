@@ -69,10 +69,20 @@ struct net {
   // Sending data
   GOutputStream *out;
   GCancellable *out_can;
+  // Regular data
   GString *out_buf;
   GString *out_buf_old;
   int out_queue_src;
-  guint64 file_left; // UNUSED
+  // Sending a file.
+  // A file upload will start when out_buf->len == 0 && file_fn.
+  // file_fn will be set to NULL when file_in is known.
+  // file_left will be updated from the file transfer thread.
+  int file_left;
+  GFileInputStream *file_in;
+  GCancellable *file_can; // copy + ref of out_can in a certain point of time
+  GOutputStream *file_out; // copy + ref of n->out
+  GError *file_err;
+  void (*file_cb)(struct net *);
 
   // In/out rates
   struct ratecalc *rate_in;
@@ -96,6 +106,7 @@ struct net {
   // the last successful action.
   guint timeout_src;
   time_t timeout_last;
+  int timeout_left;
 
   // some pointer for use by the user
   void *handle;
@@ -106,6 +117,7 @@ struct net {
 
 #define net_ref(n) g_atomic_int_inc(&((n)->ref))
 
+#define net_file_left(n) g_atomic_int_get(&(n)->file_left)
 
 #endif
 
@@ -116,6 +128,13 @@ static gboolean handle_timer(gpointer dat) {
 
   if(!n->conn)
     return TRUE;
+
+  // if file_left has changed, that means there has been some activity.
+  // (timeout_last isn't updated from the file transfer thread)
+  if(net_file_left(n) != n->timeout_left) {
+    n->timeout_last = t;
+    n->timeout_left = net_file_left(n);
+  }
 
   // keepalive? send an empty command every 2 minutes of inactivity
   if(n->keepalive && n->timeout_last < t-120)
@@ -187,36 +206,39 @@ static void handle_input(struct net *n, char *buf, int len) {
 
 // Activates an asynchronous read, in case there's none active.
 #define setup_read(n) do {\
-    if(n->conn && !g_input_stream_has_pending(n->in))\
+    if(n->conn && !g_input_stream_has_pending(n->in)) {\
       g_input_stream_read_async(n->in, n->in_buf, NET_RECV_BUF, G_PRIORITY_DEFAULT, n->in_can, handle_read, n);\
+      net_ref(n);\
+      g_object_ref(n->in);\
+    }\
   } while(0)
 
 
 // Called when an asynchronous read has finished. Checks for errors and calls
 // handle_input() on the received data.
 static void handle_read(GObject *src, GAsyncResult *res, gpointer dat) {
-  struct net *n = dat; // Don't dereference when result = G_IO_ERROR_CANCELLED
+  struct net *n = dat;
 
   GError *err = NULL;
   gssize r = g_input_stream_read_finish(G_INPUT_STREAM(src), res, &err);
+  g_object_unref(src);
 
   if(r < 0) {
-    if(err->code != G_IO_ERROR_CANCELLED)
+    if(n->conn && err->code != G_IO_ERROR_CANCELLED)
       n->cb_err(n, NETERR_RECV, err);
     g_error_free(err);
-  } else if(r == 0) {
+  } else if(n->conn && r == 0) {
     g_set_error_literal(&err, 1, 0, "Remote disconnected.");
     n->cb_err(n, NETERR_RECV, err);
     g_error_free(err);
-  } else {
+  } else if(n->conn) {
     time(&(n->timeout_last));
     ratecalc_add(&net_in, r);
     ratecalc_add(n->rate_in, r);
-    net_ref(n);
     handle_input(n, n->in_buf, r);
     setup_read(n);
-    net_unref(n);
   }
+  net_unref(n);
 }
 
 
@@ -264,22 +286,21 @@ static void handle_setconn(struct net *n, GSocketConnection *conn) {
 
 
 static void handle_connect(GObject *src, GAsyncResult *res, gpointer dat) {
-  struct net *n = dat; // make sure to not dereference this when _finish() returns G_IO_ERROR_CANCELLED
+  struct net *n = dat;
 
   GError *err = NULL;
   GSocketConnection *conn = g_socket_client_connect_to_host_finish(G_SOCKET_CLIENT(src), res, &err);
 
   if(!conn) {
-    if(err->code != G_IO_ERROR_CANCELLED) {
+    if(n->connecting && err->code != G_IO_ERROR_CANCELLED)
       n->cb_err(n, NETERR_CONN, err);
-      n->connecting = FALSE;
-    }
     g_error_free(err);
-  } else {
-    n->connecting = FALSE;
+  } else if(n->connecting) {
     handle_setconn(n, conn);
     n->cb_con(n);
   }
+  n->connecting = FALSE;
+  net_unref(n);
 }
 
 
@@ -306,6 +327,7 @@ void net_connect(struct net *n, const char *addr, unsigned short defport, void (
   g_socket_client_connect_to_host_async(sc, addr, defport, n->conn_can, handle_connect, n);
   g_object_unref(sc);
   n->connecting = TRUE;
+  net_ref(n);
 }
 
 
@@ -330,6 +352,8 @@ void net_disconnect(struct net *n) {
 #undef cancel_and_reset
 
   g_debug("%s- Disconnected.", net_remoteaddr(n));
+  n->out = NULL;
+  n->in = NULL;
   g_object_unref(n->conn); // Does this block?
   n->conn = NULL;
   g_string_truncate(n->in_msg, 0);
@@ -340,6 +364,15 @@ void net_disconnect(struct net *n) {
     g_string_free(n->out_buf_old, TRUE);
     n->out_buf_old = NULL;
   }
+  if(n->file_in) {
+    g_object_unref(n->file_in);
+    n->file_in = NULL;
+  }
+  if(n->file_err) {
+    g_error_free(n->file_err);
+    n->file_err = NULL;
+  }
+  n->file_left = 0;
   ratecalc_unregister(n->rate_in);
   ratecalc_unregister(n->rate_out);
   time(&n->timeout_last);
@@ -398,19 +431,122 @@ void net_recvraw(struct net *n, guint64 length, void (*cb)(struct net *, char *,
 
 
 
+
+
+// The following functions are somewhat similar to g_output_stream_splice(),
+// except that this solution DOES, in fact, allow fetching of transfer
+// progress. It updates the rate calculation objects and writes to n->file_left.
+
+static GThreadPool *file_pool = NULL; // initialized in net_init_global();
+
+
+static gboolean file_done(gpointer dat) {
+  struct net *n = dat;
+
+  n->file_left = 0;
+  g_object_unref(n->file_can);
+  g_object_unref(n->file_out);
+  n->file_out = NULL;
+  n->file_can = NULL;
+
+  if(n->file_err) {
+    if(n->conn && n->file_err->code != G_IO_ERROR_CANCELLED)
+      n->cb_err(n, NETERR_SEND, n->file_err);
+    g_error_free(n->file_err);
+    n->file_err = NULL;
+  } else if(n->file_cb && n->conn)
+    n->file_cb(n);
+
+  if(n->file_in) {
+    g_object_unref(n->file_in);
+    n->file_in = NULL;
+  }
+  net_unref(n);
+  return FALSE;
+}
+
+
+// Inspired by glib:gio/goutputstream.c:g_output_stream_real_splice().
+// This thread has a _ref() on the net struct, so we don't have to worry about
+// that dissappearing. Most of the file_* fields are now owned by this thread,
+// except for file_left, which is shared through the use of g_atomic_int. If
+// n->file_can is cancelled, we shouldn't touch any of the fields anymore,
+// since net_disconnect() has already taken care of cleaning up for us.
+static void file_thread(gpointer dat, gpointer udat) {
+  struct net *n = dat;
+  char buf[8192];
+
+  if(g_cancellable_is_cancelled(n->file_can)) {
+    g_set_error_literal(&n->file_err, 1, G_IO_ERROR_CANCELLED, "Operation cancelled");
+    goto file_thread_done;
+  }
+
+  gboolean res = TRUE;
+  int left = g_atomic_int_get(&n->file_left);
+  int r, w;
+  while(res && left > 0) {
+    r = g_input_stream_read(G_INPUT_STREAM(n->file_in), buf, MIN(left, sizeof(buf)), n->file_can, &n->file_err);
+    if(r < 0)
+      break;
+
+    if(r == 0) {
+      g_set_error_literal(&n->file_err, 1, 0, "Unexpected EOF.");
+      break;
+    }
+
+    // Don't use write_all() here, screws up the granularity of the rate
+    // calculation and file_left.
+    char *p = buf;
+    while(r > 0) {
+      w = g_output_stream_write(n->file_out, p, r, n->file_can, &n->file_err);
+      if(w <= 0) {
+        res = FALSE;
+        break;
+      }
+      r -= w;
+      left -= w;
+      p += w;
+      ratecalc_add(&net_out, w);
+      ratecalc_add(n->rate_out, w);
+      g_atomic_int_set(&n->file_left, left);
+      // TODO: last_action needs to be updated as well, but can't really do that from a thread
+    }
+  }
+
+file_thread_done:
+  g_idle_add(file_done, n);
+}
+
+
+static void file_start(struct net *n) {
+  g_return_if_fail(n->file_in && !n->file_can);
+  n->file_can = n->out_can;
+  n->file_out = n->out;
+  n->file_err = NULL;
+  g_object_ref(n->file_can);
+  g_object_ref(n->file_out);
+  net_ref(n);
+  g_thread_pool_push(file_pool, n, NULL);
+}
+
+
+
+
 static gboolean setup_write(gpointer dat);
 
+
 static void handle_write(GObject *src, GAsyncResult *res, gpointer dat) {
-  struct net *n = dat; // Don't dereference when result = G_IO_ERROR_CANCELLED
+  struct net *n = dat;
 
   GError *err = NULL;
   gssize r = g_output_stream_write_finish(G_OUTPUT_STREAM(src), res, &err);
+  g_object_unref(src);
 
   if(r < 0) {
-    if(err->code != G_IO_ERROR_CANCELLED)
+    if(n->conn && err->code != G_IO_ERROR_CANCELLED)
       n->cb_err(n, NETERR_SEND, err);
     g_error_free(err);
-  } else {
+  } else if(n->conn) {
     time(&(n->timeout_last));
     ratecalc_add(&net_out, r);
     ratecalc_add(n->rate_out, r);
@@ -421,17 +557,23 @@ static void handle_write(GObject *src, GAsyncResult *res, gpointer dat) {
       g_string_erase(n->out_buf, 0, r);
     setup_write(n);
   }
+  net_unref(n);
 }
 
 
 static gboolean setup_write(gpointer dat) {
   struct net *n = dat;
-  if(n->out_buf->len && n->conn && !g_output_stream_has_pending(n->out))
-    g_output_stream_write_async(n->out, n->out_buf->str, n->out_buf->len, G_PRIORITY_DEFAULT, n->out_can, handle_write, n);
-  if(n->out_queue_src) {
-    g_source_remove(n->out_queue_src);
+  if(n->out_queue_src)
     n->out_queue_src = 0;
-  }
+  if(!n->conn || g_output_stream_has_pending(n->out) || n->file_can)
+    return FALSE;
+
+  if(n->out_buf->len) {
+    g_output_stream_write_async(n->out, n->out_buf->str, n->out_buf->len, G_PRIORITY_DEFAULT, n->out_can, handle_write, n);
+    g_object_ref(n->out);
+    net_ref(n);
+  } else if(n->file_in)
+    file_start(n);
   return FALSE;
 }
 
@@ -439,6 +581,7 @@ static gboolean setup_write(gpointer dat) {
 void net_sendraw(struct net *n, const char *buf, int len) {
   if(!n->conn)
     return;
+  g_return_if_fail(!n->file_left && !n->file_in);
   // Don't write to the output buffer when an asynchronous write is in
   // progress. Otherwise we may risk the write thread to read invalid memory.
   if(g_output_stream_has_pending(n->out)) {
@@ -470,9 +613,30 @@ void net_sendf(struct net *n, const char *fmt, ...) {
   g_free(str);
 }
 
-void net_sendfile(struct net *n, const char *path, guint64 offset, guint64 length, void (*cb)(struct net *)) {
-  g_warning("net_sendfile() not implemented at the moment!");
-  // TODO!
+
+void net_sendfile(struct net *n, const char *path, guint64 offset, int length, void (*cb)(struct net *)) {
+  // Open file
+  GError *err = NULL;
+  GFile *fn = g_file_new_for_path(path);
+  GFileInputStream *fis = g_file_read(fn, NULL, &err);
+  g_object_unref(fn);
+
+  if(!err)
+    g_seekable_seek(G_SEEKABLE(fis), offset, G_SEEK_SET, NULL, &err);
+
+  if(err) {
+    n->cb_err(n, NETERR_SEND, err);
+    g_error_free(err);
+    if(fis)
+      g_object_unref(fis);
+    return;
+  }
+
+  // Set state and setup write
+  n->file_in = fis;
+  n->file_left = length;
+  n->file_cb = cb;
+  setup_write(n);
 }
 
 
@@ -570,6 +734,8 @@ void net_init_global() {
   ratecalc_init(&net_out);
   ratecalc_register(&net_in);
   ratecalc_register(&net_out);
+
+  file_pool = g_thread_pool_new(file_thread, NULL, -1, FALSE, NULL);
 
   // TODO: IPv6?
   net_udp_sock = g_socket_new(G_SOCKET_FAMILY_IPV4, G_SOCKET_TYPE_DATAGRAM, G_SOCKET_PROTOCOL_UDP, NULL);

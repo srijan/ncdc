@@ -359,7 +359,7 @@ static void xfer_log_add(struct cc *cc) {
   else
     base32_encode(cc->last_hash, tth);
 
-  guint64 transfer_size = cc->last_length - (cc->dl ? cc->net->recv_raw_left : cc->net->file_left);
+  guint64 transfer_size = cc->last_length - (cc->dl ? cc->net->recv_raw_left : net_file_left(cc->net));
 
   char *nick = adc_escape(cc->nick, FALSE);
   char *file = adc_escape(cc->last_file, FALSE);
@@ -648,13 +648,15 @@ static void handle_adcget(struct cc *cc, char *type, char *id, guint64 start, gi
   if(request_slot(cc, needslot)) {
     g_free(cc->last_file);
     cc->last_file = vpath;
-    cc->last_length = bytes;
+    cc->last_length = MIN(bytes, G_MAXINT-1);
     cc->last_offset = start;
     cc->last_size = st.st_size;
     if(f)
       memcpy(cc->last_hash, f->tth, 24);
     char *tmp = adc_escape(id, !cc->adc);
-    net_sendf(cc->net, cc->adc ? "CSND file %s %"G_GUINT64_FORMAT" %"G_GINT64_FORMAT : "$ADCSND file %s %"G_GUINT64_FORMAT" %"G_GINT64_FORMAT, tmp, start, bytes);
+    net_sendf(cc->net,
+      cc->adc ? "CSND file %s %"G_GUINT64_FORMAT" %"G_GINT64_FORMAT : "$ADCSND file %s %"G_GUINT64_FORMAT" %"G_GINT64_FORMAT,
+      tmp, start, bytes);
     net_sendfile(cc->net, path, start, bytes, handle_sendcomplete);
     g_free(tmp);
     cc->state = CCS_TRANSFER;

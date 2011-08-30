@@ -1389,7 +1389,6 @@ struct search_r *search_parse_nmdc(struct hub *hub, char *msg) {
     struct ui_tab *t;
     for(n=ui_tabs; n; n=n->next) {
       t = n->data;
-      // TODO: cache net_remoteaddr()? Or even create a lookup table for it?
       if(t->type == UIT_HUB && t->hub->nick_valid && !t->hub->adc && strcmp(tmp, net_remoteaddr(t->hub->net)) == 0)
         break;
     }

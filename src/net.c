@@ -44,6 +44,7 @@ struct ratecalc net_in, net_out;
 
 struct net {
   GSocketConnection *conn;
+  char addr[50];
 
   // Connecting
   gboolean connecting;
@@ -118,6 +119,8 @@ struct net {
 #define net_ref(n) g_atomic_int_inc(&((n)->ref))
 
 #define net_file_left(n) g_atomic_int_get(&(n)->file_left)
+
+#define net_remoteaddr(n) ((n)->addr)
 
 #endif
 
@@ -260,6 +263,7 @@ struct net *net_create(char term, void *han, gboolean keepalive, void (*rfunc)(s
   n->recv_msg_cb = rfunc;
   n->cb_err = errfunc;
   n->timeout_src = g_timeout_add_seconds(5, handle_timer, n);
+  strcpy(n->addr, "(not connected)");
   return n;
 }
 
@@ -281,6 +285,21 @@ void net_setconn(struct net *n, GSocketConnection *conn) {
   ratecalc_reset(n->rate_out);
   ratecalc_register(n->rate_in);
   ratecalc_register(n->rate_out);
+
+  // get/cache address
+  GInetSocketAddress *addr = G_INET_SOCKET_ADDRESS(g_socket_connection_get_remote_address(n->conn, NULL));
+  if(!addr) {
+    g_warning("g_socket_connection_get_remote_address() returned NULL");
+    strcpy(n->addr, "(not connected)");
+  } else {
+    char *ip = g_inet_address_to_string(g_inet_socket_address_get_address(addr));
+    g_snprintf(n->addr, sizeof(n->addr), "%s:%d",
+        strncmp("::ffff:", ip, 7) == 0 ? ip+7 : ip,
+        g_inet_socket_address_get_port(addr));
+    g_free(ip);
+    g_object_unref(addr);
+  }
+
   g_debug("%s- Connected.", net_remoteaddr(n));
 }
 
@@ -352,6 +371,7 @@ void net_disconnect(struct net *n) {
 #undef cancel_and_reset
 
   g_debug("%s- Disconnected.", net_remoteaddr(n));
+  strcpy(n->addr, "(not connected)");
   n->out = NULL;
   n->in = NULL;
   g_object_unref(n->conn); // Does this block?
@@ -393,24 +413,6 @@ void net_unref(struct net *n) {
   g_slice_free(struct ratecalc, n->rate_in);
   g_slice_free(struct ratecalc, n->rate_out);
   g_free(n);
-}
-
-
-char *net_remoteaddr(struct net *n) {
-  static char a[100];
-  if(!n->conn)
-    return "(not connected)";
-
-  GInetSocketAddress *addr = G_INET_SOCKET_ADDRESS(g_socket_connection_get_remote_address(n->conn, NULL));
-  if(!addr) {
-    g_warning("net_remoteaddr: g_socket_connection_get_remote_address() returned NULL");
-    return "(not connected)";
-  }
-  char *ip = g_inet_address_to_string(g_inet_socket_address_get_address(addr));
-  g_snprintf(a, 100, "%s:%d", ip, g_inet_socket_address_get_port(addr));
-  g_free(ip);
-  g_object_unref(addr);
-  return a;
 }
 
 

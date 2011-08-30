@@ -1226,8 +1226,6 @@ void cc_adc_connect(struct cc *cc, struct hub_user *u, unsigned short port, char
 }
 
 
-/* TODO: rewrite to use GSocketConnection or something.
-
 static void handle_detectprotocol(struct net *net, char *dat, int len) {
   g_return_if_fail(len > 0);
   struct cc *cc = net->handle;
@@ -1239,16 +1237,13 @@ static void handle_detectprotocol(struct net *net, char *dat, int len) {
   // otherwise, assume defaults (= NMDC)
 }
 
-*/
 
-static void cc_incoming(struct cc *cc, GSocket *sock) {
-  /* TODO!
-  net_setsock(cc->net, sock);
+static void cc_incoming(struct cc *cc, GSocketConnection *conn) {
+  net_setconn(cc->net, conn);
   cc->active = TRUE;
   cc->net->recv_datain = handle_detectprotocol;
   cc->state = CCS_HANDSHAKE;
   strncpy(cc->remoteaddr, net_remoteaddr(cc->net), 23);
-  */
 }
 
 
@@ -1300,12 +1295,12 @@ void cc_free(struct cc *cc) {
 // Active mode
 
 
-GSocket *cc_listen = NULL;     // TCP listen socket. NULL if we aren't active.
-GSocket *cc_listen_udp = NULL; // UDP listen socket.
-char    *cc_listen_ip = NULL;  // human-readable string. This is the remote IP, not the one we bind to.
-guint16  cc_listen_port = 0;
+GSocketListener *cc_listen = NULL;     // TCP listen object. NULL if we aren't active.
+GSocket         *cc_listen_udp = NULL; // UDP listen socket.
+char            *cc_listen_ip = NULL;  // human-readable string. This is the remote IP, not the one we bind to.
+guint16          cc_listen_port = 0;   // Port used for both UDP and TCP
 
-static int cc_listen_tcp_src = 0;
+static GCancellable *cc_listen_tcp_can = NULL;
 static int cc_listen_udp_src = 0;
 
 
@@ -1314,28 +1309,35 @@ static void cc_listen_stop() {
     return;
   g_free(cc_listen_ip);
   cc_listen_ip = NULL;
-  g_source_remove(cc_listen_tcp_src);
-  g_source_remove(cc_listen_udp_src);
+
+  g_cancellable_cancel(cc_listen_tcp_can);
+  g_object_unref(cc_listen_tcp_can);
+  cc_listen_tcp_can = NULL;
+  g_socket_listener_close(cc_listen);
   g_object_unref(cc_listen);
+  cc_listen = NULL;
+
+  g_source_remove(cc_listen_udp_src);
   g_object_unref(cc_listen_udp);
-  cc_listen = cc_listen_udp = FALSE;
+  cc_listen_udp = NULL;
 }
 
 
-static gboolean listen_tcp_handle(GSocket *sock, GIOCondition cond, gpointer dat) {
+static void listen_tcp_handle(GObject *src, GAsyncResult *res, gpointer dat) {
   GError *err = NULL;
-  GSocket *s = g_socket_accept(sock, NULL, &err);
+  GSocketConnection *s = g_socket_listener_accept_finish(G_SOCKET_LISTENER(src), res, NULL, &err);
+
   if(!s) {
-    if(err->code != G_IO_ERROR_WOULD_BLOCK) {
+    if(cc_listen && err->code != G_IO_ERROR_CANCELLED) {
       ui_mf(ui_main, 0, "Listen error: %s. Switching to passive mode.", err->message);
       cc_listen_stop();
       hub_global_nfochange();
     }
     g_error_free(err);
-    return FALSE;
+  } else {
+    cc_incoming(cc_create(NULL), s);
+    g_socket_listener_accept_async(cc_listen, cc_listen_tcp_can, listen_tcp_handle, NULL);
   }
-  cc_incoming(cc_create(NULL), s);
-  return TRUE;
 }
 
 
@@ -1422,7 +1424,7 @@ static gboolean listen_udp_handle(GSocket *sock, GIOCondition cond, gpointer dat
 
 
 // TODO: option to bind to a specific IP, for those who want that functionality
-static GSocket *listen_sock_create(int port, gboolean tcp, GError **err) {
+static GSocket *listen_udp_create(int port, GError **err) {
   GError *tmperr = NULL;
 
   // get local address
@@ -1431,9 +1433,7 @@ static GSocket *listen_sock_create(int port, gboolean tcp, GError **err) {
   g_object_unref(laddr);
 
   // create the socket
-  GSocket *s = g_socket_new(G_SOCKET_FAMILY_IPV4,
-    tcp ? G_SOCKET_TYPE_STREAM : G_SOCKET_TYPE_DATAGRAM,
-    tcp ? G_SOCKET_PROTOCOL_TCP : G_SOCKET_PROTOCOL_UDP, NULL);
+  GSocket *s = g_socket_new(G_SOCKET_FAMILY_IPV4, G_SOCKET_TYPE_DATAGRAM, G_SOCKET_PROTOCOL_UDP, NULL);
   g_socket_set_blocking(s, FALSE);
 
   // bind to the address
@@ -1445,9 +1445,19 @@ static GSocket *listen_sock_create(int port, gboolean tcp, GError **err) {
     return NULL;
   }
 
-  // for TCP: listen()
-  if(tcp && !g_socket_listen(s, &tmperr)) {
-    g_propagate_error(err, tmperr);
+  return s;
+}
+
+
+// TODO: same as for listen_udp_create
+static GSocketListener *listen_tcp_create(int *port, GError **err) {
+  GSocketListener *s = g_socket_listener_new();
+  if(*port == 0) {
+    if(!(*port = g_socket_listener_add_any_inet_port(s, NULL, err))) {
+      g_object_unref(s);
+      return NULL;
+    }
+  } else if(!g_socket_listener_add_inet_port(s, *port, NULL, err)) {
     g_object_unref(s);
     return NULL;
   }
@@ -1468,35 +1478,29 @@ gboolean cc_listen_start() {
   // can be 0, in which case it'll be randomly assigned
   int port = g_key_file_get_integer(conf_file, "global", "active_port", NULL);
 
-  // Open TCP listen socket
-  GSocket *tcp = listen_sock_create(port, TRUE, &err);
+  // Open TCP listen socket (and determine the port if it was 0)
+  GSocketListener *tcp = listen_tcp_create(&port, &err);
   if(!tcp) {
     ui_mf(ui_main, 0, "Error creating TCP listen socket: %s", err->message);
     g_error_free(err);
     return FALSE;
   }
 
-  // The port could have changed (in case it was 0), so re-fetch it and use
-  // that for the UDP port as well.
-  GSocketAddress *addr = g_socket_get_local_address(tcp, NULL);
-  port = g_inet_socket_address_get_port(G_INET_SOCKET_ADDRESS(addr));
-  g_object_unref(addr);
-
   // Open UDP listen socket
-  GSocket *udp = listen_sock_create(port, FALSE, &err);
+  GSocket *udp = listen_udp_create(port, &err);
   if(!udp) {
     ui_mf(ui_main, 0, "Error creating UDP listen socket: %s", err->message);
+    g_object_unref(tcp);
     g_error_free(err);
     return FALSE;
   }
 
-  // attach incoming connections handler to the event loop
-  GSource *src = g_socket_create_source(tcp, G_IO_IN, NULL);
-  g_source_set_callback(src, (GSourceFunc)listen_tcp_handle, NULL, NULL);
-  cc_listen_tcp_src = g_source_attach(src, NULL);
-  g_source_unref(src);
-  // and start receiving incoming UDP messages
-  src = g_socket_create_source(udp, G_IO_IN, NULL);
+  // start accepting incoming TCP connections
+  cc_listen_tcp_can = g_cancellable_new();
+  g_socket_listener_accept_async(tcp, cc_listen_tcp_can, listen_tcp_handle, NULL);
+
+  // start receiving incoming UDP messages
+  GSource *src = g_socket_create_source(udp, G_IO_IN, NULL);
   g_source_set_callback(src, (GSourceFunc)listen_udp_handle, NULL, NULL);
   cc_listen_udp_src = g_source_attach(src, NULL);
   g_source_unref(src);

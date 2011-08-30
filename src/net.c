@@ -264,7 +264,7 @@ struct net *net_create(char term, void *han, gboolean keepalive, void (*rfunc)(s
 }
 
 
-static void handle_setconn(struct net *n, GSocketConnection *conn) {
+void net_setconn(struct net *n, GSocketConnection *conn) {
   n->conn = conn;
   n->in  = g_io_stream_get_input_stream(G_IO_STREAM(n->conn));
   n->out = g_io_stream_get_output_stream(G_IO_STREAM(n->conn));
@@ -296,7 +296,7 @@ static void handle_connect(GObject *src, GAsyncResult *res, gpointer dat) {
       n->cb_err(n, NETERR_CONN, err);
     g_error_free(err);
   } else if(n->connecting) {
-    handle_setconn(n, conn);
+    net_setconn(n, conn);
     n->cb_con(n);
   }
   n->connecting = FALSE;

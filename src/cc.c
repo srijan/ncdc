@@ -1197,10 +1197,11 @@ void cc_nmdc_connect(struct cc *cc, const char *addr) {
 }
 
 
-void cc_adc_connect(struct cc *cc, struct hub_user *u, unsigned short port, char *token) {
+void cc_adc_connect(struct cc *cc, struct hub_user *u, unsigned short port, gboolean tls, char *token) {
   g_return_if_fail(cc->state == CCS_CONN);
   g_return_if_fail(cc->hub);
   g_return_if_fail(u && u->active && u->ip4);
+  g_return_if_fail(!tls || have_tls_support);
   cc->adc = TRUE;
   cc->token = g_strdup(token);
   memcpy(cc->cid, u->cid, 8);
@@ -1221,7 +1222,7 @@ void cc_adc_connect(struct cc *cc, struct hub_user *u, unsigned short port, char
   if(!cc->token)
     return;
   // connect
-  net_connect(cc->net, cc->remoteaddr, 0, FALSE, handle_connect);
+  net_connect(cc->net, cc->remoteaddr, 0, tls, handle_connect);
   g_clear_error(&(cc->err));
 }
 

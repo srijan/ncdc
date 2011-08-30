@@ -36,6 +36,8 @@ struct hub_user {
   gboolean isjoined : 1; // managed by ui_hub_userchange()
   gboolean active : 1;
   gboolean hasudp4 : 1;
+  gboolean hasadcs : 1;
+  gboolean hasadc0 : 1;
   unsigned char h_norm;
   unsigned char h_reg;
   unsigned char h_op;
@@ -93,6 +95,7 @@ struct hub {
   guint64 nfo_share;
   guint32 nfo_ip4;
   unsigned short nfo_port;
+  gboolean nfo_sup_tls;
   // whether we've fetched the complete user list (and their $MyINFO's)
   gboolean received_first; // true if one precondition for joincomplete is satisfied.
   gboolean joincomplete;
@@ -381,6 +384,8 @@ static void user_adc_nfo(struct hub *hub, struct hub_user *u, struct adc_cmd *cm
     case P('S','U'): // supports
       u->active = !!strstr(p, "TCP4") || !!strstr(p, "TCP6");
       u->hasudp4 = !!strstr(p, "UDP4");
+      u->hasadc0 = !!strstr(p, "ADC0");
+      u->hasadcs = !!strstr(p, "ADCS");
       break;
     case P('C','T'): // client type (only used to figure out u->isop)
       u->isop = (strtol(p, NULL, 10) & (4 | 8 | 16 | 32)) > 0;
@@ -461,11 +466,17 @@ void hub_opencc(struct hub *hub, struct hub_user *u) {
   if(hub->adc)
     g_snprintf(token, 19, "%"G_GUINT32_FORMAT, g_random_int());
 
+  char *proto = "";
+  if(hub->adc) {
+    int p = conf_tls_policy(hub->tab->name);
+    proto = p == CONF_TLSP_DISABLE ? "ADC/1.0" : u->hasadcs ? "ADCS/1.0" : u->hasadc0 ? "ADC0/0.10" : "ADC/1.0";
+  }
+
   // we're active, send CTM
   if(cc_listen) {
     if(hub->adc) {
       GString *c = adc_generate('D', ADCC_CTM, hub->sid, u->sid);
-      g_string_append_printf(c, " ADC/1.0 %d %s", cc_listen_port, token);
+      g_string_append_printf(c, " %s %d %s", proto, cc_listen_port, token);
       net_send(hub->net, c->str);
       g_string_free(c, TRUE);
     } else
@@ -475,7 +486,7 @@ void hub_opencc(struct hub *hub, struct hub_user *u) {
   } else {
     if(hub->adc) {
       GString *c = adc_generate('D', ADCC_RCM, hub->sid, u->sid);
-      g_string_append_printf(c, " ADC/1.0 %s", token);
+      g_string_append_printf(c, " %s %s", proto, token);
       net_send(hub->net, c->str);
       g_string_free(c, TRUE);
     } else
@@ -543,6 +554,7 @@ void hub_search(struct hub *hub, struct search_q *q) {
 
 #define streq(a) ((!a && !hub->nfo_##a) || (a && hub->nfo_##a && strcmp(a, hub->nfo_##a) == 0))
 #define eq(a) (a == hub->nfo_##a)
+#define beq(a) (!!a == !!hub->nfo_##a)
 
 void hub_send_nfo(struct hub *hub) {
   if(!hub->net->conn)
@@ -554,6 +566,7 @@ void hub_send_nfo(struct hub *hub) {
   guint64 share;
   guint32 ip4;
   unsigned short port;
+  gboolean sup_tls;
 
   desc = conf_hub_get(string, hub->tab->name, "description");
   conn = conf_hub_get(string, hub->tab->name, "connection");
@@ -582,10 +595,11 @@ void hub_send_nfo(struct hub *hub) {
   ip4 = cc_listen ? ip4_pack(cc_listen_ip) : 0;
   port = cc_listen ? cc_listen_port : 0;
   share = fl_local_list_size;
+  sup_tls = conf_tls_policy(hub->tab->name) == CONF_TLSP_DISABLE ? FALSE : TRUE;
 
   // check whether we need to make any further effort
   if(hub->nick_valid && streq(desc) && streq(conn) && streq(mail) && eq(slots)
-      && eq(h_norm) && eq(h_reg) && eq(h_op) && eq(share) && eq(ip4) && eq(port)) {
+      && eq(h_norm) && eq(h_reg) && eq(h_op) && eq(share) && eq(ip4) && eq(port) && beq(sup_tls)) {
     g_free(desc);
     g_free(conn);
     g_free(mail);
@@ -605,9 +619,13 @@ void hub_send_nfo(struct hub *hub) {
       g_string_append_printf(cmd, " ID%s PD%s VEncdc\\s%s", cid, pid, VERSION);
       adc_append(cmd, "NI", hub->nick);
     }
-    if(f || !eq(ip4)) {
+    if(f || !eq(ip4))
       g_string_append_printf(cmd, " I4%s", ip4_unpack(ip4)); // ip4 = 0 == 0.0.0.0, which is exactly what we want
-      g_string_append(cmd, ip4 ? " SUTCP4,UDP4" : " SU");
+    if(f || !eq(ip4) || !beq(sup_tls)) {
+      g_string_append_printf(cmd, " SU%s%s%s",
+        ip4 ? "TCP4,UDP4" : "",
+        ip4 && sup_tls ? "," : "",
+        sup_tls ? "ADCS" : "");
     }
     if((f || !eq(port))) {
       if(port)
@@ -658,6 +676,7 @@ void hub_send_nfo(struct hub *hub) {
   hub->nfo_share = share;
   hub->nfo_ip4 = ip4;
   hub->nfo_port = port;
+  hub->nfo_sup_tls = sup_tls;
 }
 
 #undef eq
@@ -821,6 +840,11 @@ adc_search_cleanup:
 }
 
 
+// Many ways to say the same thing
+#define is_adcs_proto(p)  (strcmp(p, "ADCS/1.0") == 0 || strcmp(p, "ADCS/0.10") == 0 || strcmp(p, "ADC0/0.10") == 0)
+#define is_adc_proto(p)   (strcmp(p, "ADC/1.0") == 0  || strcmp(p, "ADC/0.10") == 0)
+#define is_valid_proto(p) (is_adc_proto(p) || is_adcs_proto(p))
+
 static void adc_handle(struct hub *hub, char *msg) {
   struct adc_cmd cmd;
   GError *err = NULL;
@@ -952,8 +976,7 @@ static void adc_handle(struct hub *hub, char *msg) {
   case ADCC_CTM:
     if(cmd.argc < 3 || cmd.type != 'D' || cmd.dest != hub->sid)
       g_warning("Invalid message from %s: %s", net_remoteaddr(hub->net), msg);
-    // ADC/0.10 is still used in many (slightly outdated) clients :(
-    else if(strcmp(cmd.argv[0], "ADC/1.0") != 0 && strcmp(cmd.argv[0], "ADC/0.10") != 0) {
+    else if(conf_tls_policy(hub->tab->name) == CONF_TLSP_DISABLE ? !is_adc_proto(cmd.argv[0]) : !is_valid_proto(cmd.argv[0])) {
       GString *r = adc_generate('D', ADCC_STA, hub->sid, cmd.source);
       g_string_append(r, " 141 Unknown\\protocol");
       adc_append(r, "PR", cmd.argv[0]);
@@ -974,14 +997,15 @@ static void adc_handle(struct hub *hub, char *msg) {
         net_send(hub->net, r->str);
         g_string_free(r, TRUE);
       } else
-        cc_adc_connect(cc_create(hub), u, port, cmd.argv[2]);
+        cc_adc_connect(cc_create(hub), u, port, is_adcs_proto(cmd.argv[0]), cmd.argv[2]);
     }
     break;
 
+  // TODO: ADCS
   case ADCC_RCM:
     if(cmd.argc < 2 || cmd.type != 'D' || cmd.dest != hub->sid)
       g_warning("Invalid message from %s: %s", net_remoteaddr(hub->net), msg);
-    else if(strcmp(cmd.argv[0], "ADC/1.0") != 0 && strcmp(cmd.argv[0], "ADC/0.10") != 0) {
+    else if(!is_adc_proto(cmd.argv[0])) {
       GString *r = adc_generate('D', ADCC_STA, hub->sid, cmd.source);
       g_string_append(r, " 141 Unknown\\protocol");
       adc_append(r, "PR", cmd.argv[0]);
@@ -1075,6 +1099,10 @@ static void adc_handle(struct hub *hub, char *msg) {
 
   g_strfreev(cmd.argv);
 }
+
+#undef is_adcs_proto
+#undef is_adc_proto
+#undef is_valid_proto
 
 
 static void nmdc_search(struct hub *hub, char *from, int size_m, guint64 size, int type, char *query) {

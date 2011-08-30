@@ -110,7 +110,22 @@ char conf_pid[24];
   !conf_file ? TRUE : !g_key_file_has_key(conf_file, "log", "log_debug", NULL) ? FALSE :\
     g_key_file_get_boolean(conf_file, "log", "log_debug", NULL))
 
+
+#define CONF_TLSP_DISABLE 0
+#define CONF_TLSP_ALLOW   1
+#define CONF_TLSP_PREFER  2
+
+#define conf_tls_policy(hub) (\
+  !have_tls_support ? CONF_TLSP_DISABLE\
+    : g_key_file_has_key(conf_file, hub, "tls_policy", NULL)\
+    ? g_key_file_get_integer(conf_file, hub, "tls_policy", NULL)\
+    : g_key_file_has_key(conf_file, "global", "tls_policy", NULL)\
+    ? g_key_file_get_integer(conf_file, "global", "tls_policy", NULL)\
+    : CONF_TLSP_ALLOW)
+
 #endif
+
+char *conf_tlsp_list[] = { "disabled", "allow", "prefer" };
 
 
 static void generate_pid() {

@@ -595,35 +595,72 @@ static void set_color_sug(char *val, char **sug) {
 }
 
 
+static void get_tls_policy(char *group, char *key) {
+  ui_mf(NULL, 0, "%s.%s = %s%s", group, key,
+    conf_tlsp_list[conf_tls_policy(group)], have_tls_support ? "" : " (not supported)");
+}
+
+
+static void set_tls_policy(char *group, char *key, char *val) {
+  int old = conf_tls_policy(group);
+  if(!val)
+    UNSET(group, key);
+  else {
+    int p =
+      strcmp(val, "0") == 0 || strcmp(val, conf_tlsp_list[0]) == 0 ? 0 :
+      strcmp(val, "1") == 0 || strcmp(val, conf_tlsp_list[1]) == 0 ? 1 :
+      strcmp(val, "2") == 0 || strcmp(val, conf_tlsp_list[2]) == 0 ? 2 : -1;
+    if(p < 0)
+      ui_m(NULL, 0, "Invalid TLS policy.");
+    else {
+      g_key_file_set_integer(conf_file, group, key, p);
+      conf_save();
+      get_tls_policy(group, key);
+    }
+  }
+  if(old != conf_tls_policy(group))
+    hub_global_nfochange();
+}
+
+
+static void set_tls_policy_sug(char *val, char **sug) {
+  int i = 0, j = 0, len = strlen(val);
+  for(i=0; i<=2; i++)
+    if(g_ascii_strncasecmp(val, conf_tlsp_list[i], len) == 0 && strlen(conf_tlsp_list[i]) != len)
+      sug[j++] = g_strdup(conf_tlsp_list[i]);
+}
+
+
 // the settings list
 // TODO: help text / documentation?
 static struct setting settings[] = {
-  { "active",        "global", get_bool_f,        set_active,        NULL             },
-  { "active_ip",     "global", get_string,        set_active_ip,     NULL             },
-  { "active_port",   "global", get_int,           set_active_port,   NULL,            },
-  { "autoconnect",   NULL,     get_bool_f,        set_autoconnect,   set_bool_sug     }, // may not be used in "global"
-  { "autorefresh",   "global", get_autorefresh,   set_autorefresh,   NULL             }, // in minutes, 0 = disabled
-  { "backlog",       NULL,     get_backlog,       set_backlog,       NULL,            }, // number of lines, 0 = disabled
+  { "active",        "global", get_bool_f,        set_active,        NULL               },
+  { "active_ip",     "global", get_string,        set_active_ip,     NULL               },
+  { "active_port",   "global", get_int,           set_active_port,   NULL,              },
+  { "autoconnect",   NULL,     get_bool_f,        set_autoconnect,   set_bool_sug       }, // may not be used in "global"
+  { "autorefresh",   "global", get_autorefresh,   set_autorefresh,   NULL               }, // in minutes, 0 = disabled
+  { "backlog",       NULL,     get_backlog,       set_backlog,       NULL,              }, // number of lines, 0 = disabled
 #define C(n, a,b,c) { "color_" G_STRINGIFY(n), "color", get_color, set_color, set_color_sug },
   UI_COLORS
 #undef C
-  { "connection",    NULL,     get_string,        set_userinfo,      NULL             },
-  { "description",   NULL,     get_string,        set_userinfo,      NULL             },
-  { "download_dir",  "global", get_download_dir,  set_download_dir,  path_suggest     },
-  { "download_slots","global", get_download_slots,set_download_slots,NULL,            },
-  { "email",         NULL,     get_string,        set_userinfo,      NULL             },
-  { "encoding",      NULL,     get_encoding,      set_encoding,      set_encoding_sug },
-  { "hubname",       NULL,     get_hubname,       set_hubname,       NULL             }, // makes no sense in "global"
-  { "log_debug",     "log",    get_bool_f,        set_bool_f,        set_bool_sug     },
-  { "log_downloads", "log",    get_bool_t,        set_bool_t,        set_bool_sug     },
-  { "log_uploads",   "log",    get_bool_t,        set_bool_t,        set_bool_sug     },
-  { "minislots",     "global", get_minislots,     set_minislots,     NULL             },
-  { "minislot_size", "global", get_minislot_size, set_minislot_size, NULL             },
-  { "nick",          NULL,     get_string,        set_nick,          NULL             }, // global.nick may not be /unset
-  { "password",      NULL,     get_password,      set_password,      NULL             }, // may not be used in "global" (obviously)
-  { "share_hidden",  "global", get_bool_f,        set_bool_f,        set_bool_sug     },
-  { "show_joinquit", NULL,     get_bool_f,        set_bool_f,        set_bool_sug     },
-  { "slots",         "global", get_slots,         set_slots,         NULL             },
+  { "connection",    NULL,     get_string,        set_userinfo,      NULL               },
+  { "description",   NULL,     get_string,        set_userinfo,      NULL               },
+  { "download_dir",  "global", get_download_dir,  set_download_dir,  path_suggest       },
+  { "download_slots","global", get_download_slots,set_download_slots,NULL,              },
+  { "email",         NULL,     get_string,        set_userinfo,      NULL               },
+  { "encoding",      NULL,     get_encoding,      set_encoding,      set_encoding_sug   },
+  { "hubname",       NULL,     get_hubname,       set_hubname,       NULL               }, // makes no sense in "global"
+  { "log_debug",     "log",    get_bool_f,        set_bool_f,        set_bool_sug       },
+  { "log_downloads", "log",    get_bool_t,        set_bool_t,        set_bool_sug       },
+  { "log_uploads",   "log",    get_bool_t,        set_bool_t,        set_bool_sug       },
+  { "minislots",     "global", get_minislots,     set_minislots,     NULL               },
+  { "minislot_size", "global", get_minislot_size, set_minislot_size, NULL               },
+  { "nick",          NULL,     get_string,        set_nick,          NULL               }, // global.nick may not be /unset
+  { "password",      NULL,     get_password,      set_password,      NULL               }, // may not be used in "global" (obviously)
+  { "share_hidden",  "global", get_bool_f,        set_bool_f,        set_bool_sug       },
+  { "show_joinquit", NULL,     get_bool_f,        set_bool_f,        set_bool_sug       },
+  { "slots",         "global", get_slots,         set_slots,         NULL               },
+  { "tls_policy",    NULL,     get_tls_policy,    set_tls_policy,    set_tls_policy_sug },
   { NULL }
 };
 

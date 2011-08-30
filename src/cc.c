@@ -1192,7 +1192,7 @@ static void handle_connect(struct net *n) {
 void cc_nmdc_connect(struct cc *cc, const char *addr) {
   g_return_if_fail(cc->state == CCS_CONN);
   strncpy(cc->remoteaddr, addr, 23);
-  net_connect(cc->net, addr, 0, handle_connect);
+  net_connect(cc->net, addr, 0, FALSE, handle_connect);
   g_clear_error(&(cc->err));
 }
 
@@ -1221,7 +1221,7 @@ void cc_adc_connect(struct cc *cc, struct hub_user *u, unsigned short port, char
   if(!cc->token)
     return;
   // connect
-  net_connect(cc->net, cc->remoteaddr, 0, handle_connect);
+  net_connect(cc->net, cc->remoteaddr, 0, FALSE, handle_connect);
   g_clear_error(&(cc->err));
 }
 

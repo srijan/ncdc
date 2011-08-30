@@ -1549,14 +1549,23 @@ void hub_connect(struct hub *hub) {
   // need to handle both. No protocol indicator is assumed to be NMDC. No port
   // is assumed to indicate 411.
   hub->adc = FALSE;
+  gboolean tls = FALSE;
+
   if(strncmp(addr, "dchub://", 8) == 0)
     addr += 8;
   else if(strncmp(addr, "nmdc://", 7) == 0)
     addr += 7;
-  else if(strncmp(addr, "adc://", 6) == 0) {
+  else if(strncmp(addr, "nmdcs://", 7) == 0) {
+    addr += 7;
+    tls = TRUE;
+  } else if(strncmp(addr, "adc://", 6) == 0) {
     addr += 6;
     hub->adc = TRUE;
+  } else if(strncmp(addr, "adcs://", 7) == 0) {
+    addr += 7;
+    hub->adc = tls = TRUE;
   }
+
   if(addr[strlen(addr)-1] == '/')
     addr[strlen(addr)-1] = 0;
 
@@ -1569,8 +1578,17 @@ void hub_connect(struct hub *hub) {
     hub->joincomplete_timer = 0;
   }
 
-  ui_mf(hub->tab, 0, "Connecting to %s...", addr);
-  net_connect(hub->net, addr, 411, handle_connect);
+  if(tls && !have_tls_support) {
+#if TLS_SUPPORT
+    ui_m(hub->tab, 0, "Can't connect to TLS hubs. Make sure you have glib-networking and gnutls installed.");
+#else
+    ui_m(hub->tab, 0, "This version of ncdc does not support TLS. Recompile with a newer glib version to enable.");
+#endif
+  } else {
+    ui_mf(hub->tab, 0, "Connecting to %s...", addr);
+    net_connect(hub->net, addr, 411, tls, handle_connect);
+  }
+
   g_free(oaddr);
 }
 

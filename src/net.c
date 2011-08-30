@@ -274,7 +274,7 @@ void net_setconn(struct net *n, GSocketConnection *conn) {
   n->out = g_io_stream_get_output_stream(G_IO_STREAM(n->conn));
   setup_read(n);
 
-#if GLIB_CHECK_VERSION(2, 26, 0)
+#if TIMEOUT_SUPPORT
   g_socket_set_timeout(g_socket_connection_get_socket(n->conn), 0);
 #endif
   time(&(n->timeout_last));
@@ -319,11 +319,12 @@ static void handle_connect(GObject *src, GAsyncResult *res, gpointer dat) {
     n->cb_con(n);
   }
   n->connecting = FALSE;
+  g_object_unref(src);
   net_unref(n);
 }
 
 
-void net_connect(struct net *n, const char *addr, unsigned short defport, void (*cb)(struct net *)) {
+void net_connect(struct net *n, const char *addr, unsigned short defport, gboolean tls, void (*cb)(struct net *)) {
   g_return_if_fail(!n->conn);
   n->cb_con = cb;
 
@@ -339,12 +340,19 @@ void net_connect(struct net *n, const char *addr, unsigned short defport, void (
   }
 
   GSocketClient *sc = g_socket_client_new();
+
+#if TLS_SUPPORT
+  if(tls) {
+    g_socket_client_set_tls(sc, TRUE);
+    g_socket_client_set_tls_validation_flags(sc, 0); // TODO: make configurable or require user input
+  }
+#endif
+
   // set a timeout on the connect, regardless of the value of keepalive
-#if GLIB_CHECK_VERSION(2, 26, 0)
+#if TIMEOUT_SUPPORT
   g_socket_client_set_timeout(sc, 30);
 #endif
   g_socket_client_connect_to_host_async(sc, addr, defport, n->conn_can, handle_connect, n);
-  g_object_unref(sc);
   n->connecting = TRUE;
   net_ref(n);
 }

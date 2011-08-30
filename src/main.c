@@ -40,6 +40,8 @@
 // global variables
 GMainLoop *main_loop;
 
+gboolean have_tls_support;
+
 
 // input handling declarations
 
@@ -379,6 +381,14 @@ int main(int argc, char **argv) {
   conf_init();
   hub_init_global();
   net_init_global();
+
+  // Detect whether we can use TLS
+#if TLS_SUPPORT
+  GTlsBackend *backend = g_tls_backend_get_default();
+  have_tls_support = g_tls_backend_supports_tls(backend);
+#else
+  have_tls_support = FALSE;
+#endif
 
   // setup logging
   char *errlog = g_build_filename(conf_dir, "stderr.log", NULL);

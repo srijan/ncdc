@@ -39,6 +39,8 @@
 #include <ncurses.h>
 #endif
 
+#define TLS_SUPPORT     GLIB_CHECK_VERSION(2, 28, 0)
+#define TIMEOUT_SUPPORT GLIB_CHECK_VERSION(2, 26, 0)
 
 // forward declaration for data types
 // (some of these remain incomplete, others are defined in interfaces)

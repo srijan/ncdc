@@ -350,6 +350,15 @@ void net_connect(struct net *n, const char *addr, unsigned short defport, void (
 }
 
 
+// Calls when an async close() has finished. This doesn't do anything but
+// release the resources of the connection. This function is also unaware of
+// any net struct.
+static void handle_close(GObject *src, GAsyncResult *res, gpointer dat) {
+  g_io_stream_close_finish(G_IO_STREAM(src), res, NULL);
+  g_object_unref(src);
+}
+
+
 void net_disconnect(struct net *n) {
   if(!n->conn)
     return;
@@ -372,9 +381,9 @@ void net_disconnect(struct net *n) {
 
   g_debug("%s- Disconnected.", net_remoteaddr(n));
   strcpy(n->addr, "(not connected)");
+  g_io_stream_close_async(G_IO_STREAM(n->conn), G_PRIORITY_DEFAULT, NULL, handle_close, NULL);
   n->out = NULL;
   n->in = NULL;
-  g_object_unref(n->conn); // Does this block?
   n->conn = NULL;
   g_string_truncate(n->in_msg, 0);
   n->recv_raw_left = 0;

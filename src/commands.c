@@ -597,7 +597,7 @@ static void set_color_sug(char *val, char **sug) {
 
 static void get_tls_policy(char *group, char *key) {
   ui_mf(NULL, 0, "%s.%s = %s%s", group, key,
-    conf_tlsp_list[conf_tls_policy(group)], have_tls_support ? "" : " (not supported)");
+    conf_tlsp_list[conf_tls_policy(group)], conf_certificate ? "" : " (not supported)");
 }
 
 
@@ -605,6 +605,9 @@ static void set_tls_policy(char *group, char *key, char *val) {
   int old = conf_tls_policy(group);
   if(!val)
     UNSET(group, key);
+  else if(!conf_certificate)
+    ui_mf(NULL, 0, "This option can't be modified: %s.",
+      !have_tls_support ? "no TLS support available" : "no client certificate available");
   else {
     int p =
       strcmp(val, "0") == 0 || strcmp(val, conf_tlsp_list[0]) == 0 ? 0 :

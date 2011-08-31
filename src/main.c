@@ -378,9 +378,6 @@ int main(int argc, char **argv) {
   // init stuff
   g_thread_init(NULL);
   g_type_init();
-  conf_init();
-  hub_init_global();
-  net_init_global();
 
   // Detect whether we can use TLS
 #if TLS_SUPPORT
@@ -389,6 +386,10 @@ int main(int argc, char **argv) {
 #else
   have_tls_support = FALSE;
 #endif
+
+  conf_init();
+  hub_init_global();
+  net_init_global();
 
   // setup logging
   char *errlog = g_build_filename(conf_dir, "stderr.log", NULL);

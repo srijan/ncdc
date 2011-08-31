@@ -272,6 +272,7 @@ static void set_active_ip(char *group, char *key, char *val) {
   g_key_file_set_string(conf_file, group, key, val);
   conf_save();
   get_string(group, key);
+  cc_listen_start();
 }
 
 

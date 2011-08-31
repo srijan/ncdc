@@ -1535,7 +1535,10 @@ gboolean cc_listen_start() {
   cc_listen_port = port;
   cc_listen_ip = g_key_file_get_string(conf_file, "global", "active_ip", NULL);
 
-  ui_mf(ui_main, 0, "Listening on port %d (%s).", cc_listen_port, cc_listen_ip);
+  if(conf_certificate)
+    ui_mf(ui_main, 0, "Listening on port TCP+UDP port %d and TCP port %d, remote IP is %s.", cc_listen_port, cc_listen_port+1, cc_listen_ip);
+  else
+    ui_mf(ui_main, 0, "Listening on port TCP+UDP port %d, remote IP is.", cc_listen_port, cc_listen_ip);
   hub_global_nfochange();
   return TRUE;
 }

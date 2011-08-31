@@ -469,17 +469,18 @@ void hub_opencc(struct hub *hub, struct hub_user *u) {
   char *proto = proto =                        !hub->adc ? "" :
     conf_tls_policy(hub->tab->name) != CONF_TLSP_PREFER ? "ADC/1.0" :
                                              u->hasadcs ? "ADCS/1.0" :
-                                             u->hasadc0 ? "ADC0/0.10" : "ADC/1.0";
+                                             u->hasadc0 ? "ADCS/0.10" : "ADC/1.0";
 
   // we're active, send CTM
   if(cc_listen) {
+    int port = strcmp(proto, "ADCS/1.0") == 0 || strcmp(proto, "ADCS/0.10") == 0 ? cc_listen_port+1 : cc_listen_port;
     if(hub->adc) {
       GString *c = adc_generate('D', ADCC_CTM, hub->sid, u->sid);
-      g_string_append_printf(c, " %s %d %s", proto, cc_listen_port, token);
+      g_string_append_printf(c, " %s %d %s", proto, port, token);
       net_send(hub->net, c->str);
       g_string_free(c, TRUE);
     } else
-      net_sendf(hub->net, "$ConnectToMe %s %s:%d", u->name_hub, cc_listen_ip, cc_listen_port);
+      net_sendf(hub->net, "$ConnectToMe %s %s:%d", u->name_hub, cc_listen_ip, port);
 
   // we're passive, send RCM
   } else {
@@ -624,7 +625,7 @@ void hub_send_nfo(struct hub *hub) {
       g_string_append_printf(cmd, " SU%s%s%s",
         ip4 ? "TCP4,UDP4" : "",
         ip4 && sup_tls ? "," : "",
-        sup_tls ? "ADCS" : "");
+        sup_tls ? "ADC0" : "");
     }
     if((f || !eq(port))) {
       if(port)
@@ -1000,11 +1001,10 @@ static void adc_handle(struct hub *hub, char *msg) {
     }
     break;
 
-  // TODO: ADCS
   case ADCC_RCM:
     if(cmd.argc < 2 || cmd.type != 'D' || cmd.dest != hub->sid)
       g_warning("Invalid message from %s: %s", net_remoteaddr(hub->net), msg);
-    else if(!is_adc_proto(cmd.argv[0])) {
+    else if(conf_tls_policy(hub->tab->name) == CONF_TLSP_DISABLE ? !is_adc_proto(cmd.argv[0]) : !is_valid_proto(cmd.argv[0])) {
       GString *r = adc_generate('D', ADCC_STA, hub->sid, cmd.source);
       g_string_append(r, " 141 Unknown\\protocol");
       adc_append(r, "PR", cmd.argv[0]);
@@ -1025,7 +1025,7 @@ static void adc_handle(struct hub *hub, char *msg) {
       else {
         GString *r = adc_generate('D', ADCC_CTM, hub->sid, cmd.source);
         adc_append(r, NULL, cmd.argv[0]);
-        g_string_append_printf(r, " %d", cc_listen_port);
+        g_string_append_printf(r, " %d", is_adcs_proto(cmd.argv[0]) ? cc_listen_port+1 : cc_listen_port);
         adc_append(r, NULL, cmd.argv[1]);
         net_send(hub->net, r->str);
         g_string_free(r, TRUE);

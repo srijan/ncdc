@@ -1296,7 +1296,7 @@ void cc_free(struct cc *cc) {
 // Active mode
 
 
-GSocketListener *cc_listen = NULL;     // TCP listen object. NULL if we aren't active.
+GSocketListener *cc_listen = NULL;     // TCP and TLS listen object. NULL if we aren't active.
 GSocket         *cc_listen_udp = NULL; // UDP listen socket.
 char            *cc_listen_ip = NULL;  // human-readable string. This is the remote IP, not the one we bind to.
 guint16          cc_listen_port = 0;   // Port used for both UDP and TCP
@@ -1326,7 +1326,8 @@ static void cc_listen_stop() {
 
 static void listen_tcp_handle(GObject *src, GAsyncResult *res, gpointer dat) {
   GError *err = NULL;
-  GSocketConnection *s = g_socket_listener_accept_finish(G_SOCKET_LISTENER(src), res, NULL, &err);
+  GObject *istls = NULL;
+  GSocketConnection *s = g_socket_listener_accept_finish(G_SOCKET_LISTENER(src), res, &istls, &err);
 
   if(!s) {
     if(cc_listen && err->code != G_IO_ERROR_CANCELLED) {
@@ -1336,6 +1337,16 @@ static void listen_tcp_handle(GObject *src, GAsyncResult *res, gpointer dat) {
     }
     g_error_free(err);
   } else {
+#if TLS_SUPPORT
+    if(istls && conf_certificate) {
+      GIOStream *tls = g_tls_server_connection_new(G_IO_STREAM(s), conf_certificate, NULL);
+      g_return_if_fail(tls);
+      GSocketConnection *wrap = g_tcp_wrapper_connection_new(tls, g_socket_connection_get_socket(s));
+      g_object_unref(tls);
+      g_object_unref(s);
+      s = wrap;
+    }
+#endif
     cc_incoming(cc_create(NULL), s);
     g_socket_listener_accept_async(cc_listen, cc_listen_tcp_can, listen_tcp_handle, NULL);
   }
@@ -1453,6 +1464,7 @@ static GSocket *listen_udp_create(int port, GError **err) {
 // TODO: same as for listen_udp_create
 static GSocketListener *listen_tcp_create(int *port, GError **err) {
   GSocketListener *s = g_socket_listener_new();
+  // TCP port
   if(*port == 0) {
     if(!(*port = g_socket_listener_add_any_inet_port(s, NULL, err))) {
       g_object_unref(s);
@@ -1461,6 +1473,17 @@ static GSocketListener *listen_tcp_create(int *port, GError **err) {
   } else if(!g_socket_listener_add_inet_port(s, *port, NULL, err)) {
     g_object_unref(s);
     return NULL;
+  }
+
+  // TLS port (use a bogus GCancellable object to differenciate betwen the two)
+  if(s && conf_certificate) {
+    GCancellable *t = g_cancellable_new();
+    gboolean r = g_socket_listener_add_inet_port(s, *port+1, G_OBJECT(t), err);
+    g_object_unref(t);
+    if(!r) {
+      g_object_unref(s);
+      return NULL;
+    }
   }
   return s;
 }

@@ -466,11 +466,10 @@ void hub_opencc(struct hub *hub, struct hub_user *u) {
   if(hub->adc)
     g_snprintf(token, 19, "%"G_GUINT32_FORMAT, g_random_int());
 
-  char *proto = "";
-  if(hub->adc) {
-    int p = conf_tls_policy(hub->tab->name);
-    proto = p == CONF_TLSP_DISABLE ? "ADC/1.0" : u->hasadcs ? "ADCS/1.0" : u->hasadc0 ? "ADC0/0.10" : "ADC/1.0";
-  }
+  char *proto = proto =                        !hub->adc ? "" :
+    conf_tls_policy(hub->tab->name) != CONF_TLSP_PREFER ? "ADC/1.0" :
+                                             u->hasadcs ? "ADCS/1.0" :
+                                             u->hasadc0 ? "ADC0/0.10" : "ADC/1.0";
 
   // we're active, send CTM
   if(cc_listen) {

@@ -652,6 +652,26 @@ gboolean tiger_hash_equal(gconstpointer a, gconstpointer b) {
 }
 
 
+#if TLS_SUPPORT
+
+// Calculates the SHA-256 digest of a certificate. This digest can be used for
+// the KEYP ADC extension and general verification.
+void certificate_sha256(GTlsCertificate *cert, char *digest) {
+  GValue val = {};
+  g_value_init(&val, G_TYPE_BYTE_ARRAY);
+  g_object_get_property(G_OBJECT(cert), "certificate", &val);
+  GByteArray *dat = g_value_get_boxed(&val);
+
+  GChecksum *ctx = g_checksum_new(G_CHECKSUM_SHA256);
+  g_checksum_update(ctx, dat->data, dat->len);
+  gsize len = 32;
+  g_checksum_get_digest(ctx, (guchar *)digest, &len);
+  g_checksum_free(ctx);
+  g_boxed_free(G_TYPE_BYTE_ARRAY, dat);
+}
+
+#endif
+
 
 // like realpath(), but also expands ~
 char *path_expand(const char *path) {
@@ -829,11 +849,12 @@ char **file_tail(const char *fn, int n) {
 #endif
 
 
-// from[24] (binary) -> to[39] (ascii - no padding zero will be added)
-void base32_encode(const char *from, char *to) {
+// Generic base32 encoder.
+// from[len] (binary) -> to[ceil(len*8/5)] (ascii)
+void base32_encode_dat(const char *from, char *to, int len) {
   static char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
   int i, bits = 0, idx = 0, value = 0;
-  for(i=0; i<24; i++) {
+  for(i=0; i<len; i++) {
     value = (value << 8) | (unsigned char)from[i];
     bits += 8;
     while(bits > 5) {
@@ -843,6 +864,12 @@ void base32_encode(const char *from, char *to) {
   }
   if(bits > 0)
     to[idx++] = alphabet[(value << (5-bits)) & 0x1F];
+}
+
+
+// from[24] (binary) -> to[39] (ascii - no padding zero will be added)
+void base32_encode(const char *from, char *to) {
+  base32_encode_dat(from, to, 24);
 }
 
 

@@ -1239,8 +1239,8 @@ static void handle_detectprotocol(struct net *net, char *dat, int len) {
 }
 
 
-static void cc_incoming(struct cc *cc, GSocketConnection *conn) {
-  net_setconn(cc->net, conn);
+static void cc_incoming(struct cc *cc, GSocketConnection *conn, gboolean tls) {
+  net_setconn(cc->net, conn, tls, TRUE);
   cc->active = TRUE;
   cc->net->recv_datain = handle_detectprotocol;
   cc->state = CCS_HANDSHAKE;
@@ -1337,17 +1337,7 @@ static void listen_tcp_handle(GObject *src, GAsyncResult *res, gpointer dat) {
     }
     g_error_free(err);
   } else {
-#if TLS_SUPPORT
-    if(istls && conf_certificate) {
-      GIOStream *tls = g_tls_server_connection_new(G_IO_STREAM(s), conf_certificate, NULL);
-      g_return_if_fail(tls);
-      GSocketConnection *wrap = g_tcp_wrapper_connection_new(tls, g_socket_connection_get_socket(s));
-      g_object_unref(tls);
-      g_object_unref(s);
-      s = wrap;
-    }
-#endif
-    cc_incoming(cc_create(NULL), s);
+    cc_incoming(cc_create(NULL), s, istls ? TRUE : FALSE);
     g_socket_listener_accept_async(cc_listen, cc_listen_tcp_can, listen_tcp_handle, NULL);
   }
 }

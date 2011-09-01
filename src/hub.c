@@ -1567,6 +1567,31 @@ static void handle_connect(struct net *n) {
 }
 
 
+#if TLS_SUPPORT
+
+// TODO: actually validate certificate via user interaction
+static gboolean handle_accept_cert(GTlsConnection *conn, GTlsCertificate *cert, GTlsCertificateFlags errors, gpointer dat) {
+  struct net *n = dat;
+  struct hub *hub = n->handle;
+  char raw[32];
+  certificate_sha256(cert, raw);
+  char enc[53] = {};
+  base32_encode_dat(raw, enc, 32);
+
+  // Store key print in config file
+  char *old = g_key_file_get_string(conf_file, hub->tab->name, "hubkp", NULL);
+  if(!old || strcmp(old, enc) != 0) {
+    g_key_file_set_string(conf_file, hub->tab->name, "hubkp", enc);
+    conf_save();
+  }
+  if(old)
+    g_free(old);
+  return TRUE;
+}
+
+#endif
+
+
 void hub_connect(struct hub *hub) {
   char *oaddr = conf_hub_get(string, hub->tab->name, "hubaddr");
   char *addr = oaddr;
@@ -1613,6 +1638,9 @@ void hub_connect(struct hub *hub) {
 #endif
   } else {
     ui_mf(hub->tab, 0, "Connecting to %s...", addr);
+#if TLS_SUPPORT
+    hub->net->conn_accept_cert = handle_accept_cert;
+#endif
     net_connect(hub->net, addr, 411, tls, handle_connect);
   }
 

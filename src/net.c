@@ -45,10 +45,14 @@ struct ratecalc net_in, net_out;
 struct net {
   GSocketConnection *conn;
   char addr[50];
+  gboolean tls;
 
   // Connecting
   gboolean connecting;
   GCancellable *conn_can;
+#if TLS_SUPPORT
+  gboolean (*conn_accept_cert)(GTlsConnection *, GTlsCertificate *, GTlsCertificateFlags, gpointer);
+#endif
 
   // Message termination character. ([0] = character, [1] = 0)
   char eom[2];
@@ -268,7 +272,36 @@ struct net *net_create(char term, void *han, gboolean keepalive, void (*rfunc)(s
 }
 
 
-void net_setconn(struct net *n, GSocketConnection *conn) {
+void net_setconn(struct net *n, GSocketConnection *conn, gboolean tls, gboolean serv) {
+  n->tls = FALSE;
+#if TLS_SUPPORT
+  if(tls && have_tls_support) {
+    n->tls = TRUE;
+    // Create a tls connection and wrap it around a tcp wrapper to make it a socketconnection again
+    GIOStream *tls = serv
+      ? g_tls_server_connection_new(G_IO_STREAM(conn), conf_certificate, NULL)
+      : g_tls_client_connection_new(G_IO_STREAM(conn), NULL, NULL);
+    g_return_if_fail(tls);
+    g_tls_connection_set_use_system_certdb(G_TLS_CONNECTION(tls), FALSE);
+    if(!serv) {
+      if(n->conn_accept_cert)
+        g_signal_connect(tls, "accept-certificate", G_CALLBACK(n->conn_accept_cert), n);
+      else
+        g_tls_client_connection_set_validation_flags(G_TLS_CLIENT_CONNECTION(tls), 0);
+      // allow the server to fetch our certificate if it wants to
+      if(conf_certificate)
+        g_tls_connection_set_certificate(G_TLS_CONNECTION(tls), conf_certificate);
+    }
+    // wrap
+    GSocketConnection *wrap = g_tcp_wrapper_connection_new(tls, g_socket_connection_get_socket(conn));
+    g_object_unref(tls);
+    g_object_unref(conn);
+    conn = wrap;
+  }
+  // The original TLS connection can be obtained again using:
+  //   G_TLS_CONNECTION(g_tcp_wrapper_connection_get_base_io_stream(G_TCP_WRAPPER_CONNECTION(conn)))
+#endif
+
   n->conn = conn;
   n->in  = g_io_stream_get_input_stream(G_IO_STREAM(n->conn));
   n->out = g_io_stream_get_output_stream(G_IO_STREAM(n->conn));
@@ -315,7 +348,7 @@ static void handle_connect(GObject *src, GAsyncResult *res, gpointer dat) {
       n->cb_err(n, NETERR_CONN, err);
     g_error_free(err);
   } else if(n->connecting) {
-    net_setconn(n, conn);
+    net_setconn(n, conn, n->tls, FALSE);
     n->cb_con(n);
   }
   n->connecting = FALSE;
@@ -327,6 +360,7 @@ static void handle_connect(GObject *src, GAsyncResult *res, gpointer dat) {
 void net_connect(struct net *n, const char *addr, unsigned short defport, gboolean tls, void (*cb)(struct net *)) {
   g_return_if_fail(!n->conn);
   n->cb_con = cb;
+  n->tls = tls;
 
   // From g_socket_client_connect_to_host() documentation:
   //   "In general, host_and_port is expected to be provided by the user"
@@ -340,14 +374,6 @@ void net_connect(struct net *n, const char *addr, unsigned short defport, gboole
   }
 
   GSocketClient *sc = g_socket_client_new();
-
-#if TLS_SUPPORT
-  if(tls) {
-    g_socket_client_set_tls(sc, TRUE);
-    g_socket_client_set_tls_validation_flags(sc, 0); // TODO: make configurable or require user input
-  }
-#endif
-
   // set a timeout on the connect, regardless of the value of keepalive
 #if TIMEOUT_SUPPORT
   g_socket_client_set_timeout(sc, 30);

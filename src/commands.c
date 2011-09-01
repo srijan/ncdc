@@ -917,18 +917,49 @@ static void c_help_sug(char *args, char **sug) {
 }
 
 
-static void c_connect_set_hubaddr(char *addr) {
-  // make sure it's a full address in the form of "dchub://hostname:port/"
-  // (doesn't check for validness)
-  GString *a = g_string_new(addr);
-  if(strncmp(a->str, "dchub://", 8) != 0 && strncmp(a->str, "nmdc://", 7) != 0 && strncmp(a->str, "nmdcs://", 8) != 0
-      && strncmp(a->str, "adcs://", 7) != 0 && strncmp(a->str, "adc://", 6) != 0)
-    g_string_prepend(a, "dchub://");
-  if(a->str[a->len-1] != '/')
-    g_string_append_c(a, '/');
+static gboolean c_connect_set_hubaddr(char *addr) {
+  // Validate and parse
+  GRegex *reg = g_regex_new(
+    //   1 - proto                2 - host             3 - port                       4 - kp
+    "^(?:(dchub|nmdcs?|adcs?)://)?([^ :/<>\\(\\)]+)(?::([0-9]+))?(?:/|/\\?kp=SHA256\\/([a-zA-Z2-7]{52}))?$",
+    0, 0, NULL);
+  g_assert(reg);
+  GMatchInfo *nfo;
+  if(!g_regex_match(reg, addr, 0, &nfo)) {
+    ui_m(NULL, 0, "Invalid URL format."); // not very specific
+    g_regex_unref(reg);
+    return FALSE;
+  }
+  g_regex_unref(reg);
+  char *proto = g_match_info_fetch(nfo, 1);
+  char *kp = g_match_info_fetch(nfo, 4);
+
+  if(kp && *kp && strcmp(proto, "adcs") != 0 && strcmp(proto, "nmdcs") != 0) {
+    ui_m(NULL, 0, "Keyprint is only valid for adcs:// or nmdcs:// URLs.");
+    g_match_info_free(nfo);
+    g_free(proto);
+    g_free(kp);
+    return FALSE;
+  }
+
+  char *host = g_match_info_fetch(nfo, 2);
+  char *port = g_match_info_fetch(nfo, 3);
+  g_match_info_free(nfo);
+
+  // Reconstruct (without the kp) and save
+  GString *a = g_string_new("");
+  g_string_printf(a, "%s://%s:%s/", !proto || !*proto ? "dchub" : proto, host, !port || !*port ? "411" : port);
   g_key_file_set_string(conf_file, tab->name, "hubaddr", a->str);
-  conf_save();
   g_string_free(a, TRUE);
+  if(kp && *kp)
+    g_key_file_set_string(conf_file, tab->name, "hubkp", kp);
+  conf_save();
+
+  g_free(proto);
+  g_free(kp);
+  g_free(host);
+  g_free(port);
+  return TRUE;
 }
 
 
@@ -938,9 +969,9 @@ static void c_connect(char *args) {
   else if(tab->hub->net->connecting || tab->hub->net->conn)
     ui_m(NULL, 0, "Already connected (or connecting). You may want to /disconnect first.");
   else {
-    if(args[0])
-      c_connect_set_hubaddr(args);
-    if(!g_key_file_has_key(conf_file, tab->name, "hubaddr", NULL))
+    if(args[0] && !c_connect_set_hubaddr(args))
+      ;
+    else if(!g_key_file_has_key(conf_file, tab->name, "hubaddr", NULL))
       ui_m(NULL, 0, "No hub address configured. Use '/connect <address>' to do so.");
     else
       hub_connect(tab->hub);
@@ -1033,11 +1064,8 @@ static void c_open(char *args) {
       tab = n->data;
     }
     // Save address and (re)connect when necessary
-    if(addr) {
-      c_connect_set_hubaddr(addr);
-      if(conn)
-        c_reconnect("");
-    }
+    if(addr && c_connect_set_hubaddr(addr) && conn)
+      c_reconnect("");
   }
 }
 

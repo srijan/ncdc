@@ -850,9 +850,12 @@ char **file_tail(const char *fn, int n) {
 
 #if INTERFACE
 
+// Tests whether a string is a valid base32-encoded string.
+#define isbase32(s) (strspn(s, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ234567") == strlen(s))
+
 // Test whether a string is a valid TTH hash. I.e., whether it is a
 // base32-encoded 39-character string.
-#define istth(s) (strlen(s) == 39 && strspn(s, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ234567") == 39)
+#define istth(s) (strlen(s) == 39 && isbase32(s))
 
 #endif
 

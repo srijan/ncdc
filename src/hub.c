@@ -56,6 +56,9 @@ struct hub_user {
   char cid[8];   // for ADC - only the first 8 bytes of the CID, for simple verification purposes
   guint64 uid;
   guint64 sharesize;
+#if TLS_SUPPORT
+  char *kp;      // ADC with KEYP, 32 bytes slice-alloc'ed
+#endif
   GSequenceIter *iter; // used by ui_userlist_*
 }
 
@@ -165,6 +168,10 @@ static void user_free(gpointer dat) {
   if(u->hub->adc && u->sid)
     g_hash_table_remove(u->hub->sessions, GINT_TO_POINTER(u->sid));
   // free
+#if TLS_SUPPORT
+  if(u->kp)
+    g_slice_free1(32, u->kp);
+#endif
   g_free(u->name_hub);
   g_free(u->name);
   g_free(u->desc);
@@ -390,6 +397,21 @@ static void user_adc_nfo(struct hub *hub, struct hub_user *u, struct adc_cmd *cm
     case P('C','T'): // client type (only used to figure out u->isop)
       u->isop = (strtol(p, NULL, 10) & (4 | 8 | 16 | 32)) > 0;
       break;
+#if TLS_SUPPORT
+    case P('K','P'): // keyprint
+      if(!have_tls_support)
+        break;
+      if(u->kp) {
+        g_slice_free1(32, u->kp);
+        u->kp = NULL;
+      }
+      if(strncmp(p, "SHA256/", 7) == 0 && strlen(p+7) == 52 && isbase32(p+7)) {
+        u->kp = g_slice_alloc(32);
+        base32_decode(p+7, u->kp);
+      } else
+        g_message("Invalid KP field in INF for %s on %s (%s)", u->name, net_remoteaddr(hub->net), p);
+      break;
+#endif
     }
   }
 

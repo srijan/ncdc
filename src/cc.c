@@ -52,6 +52,9 @@ struct cc_expect {
   guint64 uid;
   char cid[8];  // ADC
   char *token;  // ADC
+#if TLS_SUPPORT
+  char *kp;     // ADC - slice-alloc'ed with 32 bytes
+#endif
   time_t added;
   int timeout_src;
   gboolean adc : 1;
@@ -71,6 +74,10 @@ static void cc_expect_rm(GList *n, struct cc *success) {
   if(e->dl)
     dl_queue_expect(e->uid, NULL);
   g_source_remove(e->timeout_src);
+#if TLS_SUPPORT
+  if(e->kp)
+    g_slice_free1(32, e->kp);
+#endif
   g_free(e->token);
   g_free(e->nick);
   g_slice_free(struct cc_expect, e);
@@ -98,6 +105,12 @@ void cc_expect_add(struct hub *hub, struct hub_user *u, char *t, gboolean dl) {
     memcpy(e->cid, u->cid, 8);
   } else
     e->nick = g_strdup(u->name_hub);
+#if TLS_SUPPORT
+  if(u->kp) {
+    e->kp = g_slice_alloc(32);
+    memcpy(e->kp, u->kp, 32);
+  }
+#endif
   if(t)
     e->token = g_strdup(t);
   if(e->dl)
@@ -108,9 +121,9 @@ void cc_expect_add(struct hub *hub, struct hub_user *u, char *t, gboolean dl) {
 }
 
 
-// Checks the expects list for the current connection, sets cc->dl, cc->uid and
-// cc->hub and removes it from the expects list. cc->cid and cc->token must be
-// known.
+// Checks the expects list for the current connection, sets cc->dl, cc->uid,
+// cc->hub and cc->kp_user and removes it from the expects list. cc->cid and
+// cc->token must be known.
 static gboolean cc_expect_adc_rm(struct cc *cc) {
   GList *n;
   for(n=cc_expected->head; n; n=n->next) {
@@ -118,6 +131,10 @@ static gboolean cc_expect_adc_rm(struct cc *cc) {
     if(e->adc && memcmp(cc->cid, e->cid, 8) == 0 && strcmp(cc->token, e->token) == 0) {
       cc->uid = e->uid;
       cc->hub = e->hub;
+#if TLS_SUPPORT
+      cc->kp_user = e->kp;
+      e->kp = NULL;
+#endif
       cc_expect_rm(n, cc);
       return TRUE;
     }
@@ -187,6 +204,10 @@ struct cc {
   guint64 last_offset;
   time_t last_start;
   char last_hash[24];
+#if TLS_SUPPORT
+  char *kp_real;  // (ADC) slice-alloc'ed with 32 bytes. This is the actually calculated keyprint.
+  char *kp_user;  // (ADC) This is the keyprint from the users' INF
+#endif
   GError *err;
   GSequenceIter *iter;
 };
@@ -773,6 +794,18 @@ static void adc_handle(struct cc *cc, char *msg) {
           handle_id(cc, u);
       } else
         memcpy(cc->cid, cid, 24);
+      // Perform keyprint validation
+#if TLS_SUPPORT
+      if(cc->kp_real && cc->kp_user && memcmp(cc->kp_real, cc->kp_user, 32) != 0) {
+        g_set_error_literal(&cc->err, 1, 0, "Protocol error.");
+        char user[53] = {}, real[53] = {};
+        base32_encode_dat(cc->kp_user, user, 32);
+        base32_encode_dat(cc->kp_real, real, 32);
+        g_warning("CC:%s: Client keyprint does not match TLS keyprint: %s != %s", net_remoteaddr(cc->net), user, real);
+        cc_disconnect(cc);
+      } else if(cc->kp_real && cc->kp_user)
+        g_debug("CC:%s: Client authenticated using KEYP.", net_remoteaddr(cc->net));
+#endif
       if(cc->dl && cc->state == CCS_IDLE)
         cc_download(cc);
     }
@@ -1154,10 +1187,29 @@ static void handle_cmd(struct net *n, char *cmd) {
 }
 
 
+#if TLS_SUPPORT
+
+// Simply stores the keyprint of the certificate in cc->kp_real, it will be
+// checked when receiving CINF.
+static gboolean handle_accept_cert(GTlsConnection *conn, GTlsCertificate *cert, GTlsCertificateFlags errors, gpointer dat) {
+  struct net *n = dat;
+  struct cc *c = n->handle;
+  if(!c->kp_real)
+    c->kp_real = g_slice_alloc(32);
+  certificate_sha256(cert, c->kp_real);
+  return TRUE;
+}
+
+#endif
+
+
 // Hub may be unknown when this is an incoming connection
 struct cc *cc_create(struct hub *hub) {
   struct cc *cc = g_new0(struct cc, 1);
   cc->net = net_create('|', cc, FALSE, handle_cmd, handle_error);
+#if TLS_SUPPORT
+  cc->net->conn_accept_cert = handle_accept_cert;
+#endif
   cc->hub = hub;
   cc->iter = g_sequence_append(cc_list, cc);
   cc->state = CCS_CONN;
@@ -1214,6 +1266,12 @@ void cc_adc_connect(struct cc *cc, struct hub_user *u, unsigned short port, gboo
   strncat(cc->remoteaddr, tmp, 23-strlen(cc->remoteaddr));
   // check whether this was as a reply to a RCM from us
   cc_expect_adc_rm(cc);
+#if TLS_SUPPORT
+  if(!cc->kp_user && u->kp) {
+    cc->kp_user = g_slice_alloc(32);
+    memcpy(cc->kp_user, u->kp, 32);
+  }
+#endif
   // check / update user info
   handle_id(cc, u);
   // handle_id() can do a cc_disconnect() when it discovers a duplicate
@@ -1281,6 +1339,12 @@ void cc_free(struct cc *cc) {
   net_unref(cc->net);
   if(cc->err)
     g_error_free(cc->err);
+#if TLS_SUPPORT
+  if(cc->kp_real)
+    g_slice_free1(32, cc->kp_real);
+  if(cc->kp_user)
+    g_slice_free1(32, cc->kp_user);
+#endif
   g_free(cc->tthl_dat);
   g_free(cc->nick_raw);
   g_free(cc->nick);

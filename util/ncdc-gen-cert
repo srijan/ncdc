@@ -52,7 +52,15 @@ TMP=`mktemp /tmp/ncdc.XXXXX`
 
 # gnutls / certtool
 if which certtool >/dev/null 2>&1; then
-  echo "expiration_days = $DAYS" >$TMP
+  echo "
+expiration_days = $DAYS
+cn=Unknown
+unit=Unknown
+organization=Unknown
+locality=Unknown
+state=Unknown
+country=UN
+" >$TMP
   certtool --generate-privkey --outfile "$KEYFILE" &&
     certtool --load-privkey "$KEYFILE" --generate-self-signed --template $TMP --outfile "$CRTFILE"
   ret=$?
@@ -62,12 +70,18 @@ if which certtool >/dev/null 2>&1; then
 elif which openssl >/dev/null 2>&1; then
   echo "
 [ req ]
-prompt = yes
+prompt = no
 distinguished_name = req_distinguished_name
 
 [ req_distinguished_name ]
+CN=Unknown
+OU=Unknown
+O=Unknown
+L=Unknown
+ST=Unknown
+C=UN
 " >$TMP
-  openssl req -x509 -config $TMP -new -newkey rsa:1024 -nodes -days $DAYS -subj '/' -keyout "$KEYFILE" -out "$CRTFILE"
+  openssl req -x509 -config $TMP -new -newkey rsa:1024 -nodes -days $DAYS -keyout "$KEYFILE" -out "$CRTFILE"
   ret=$?
 
 

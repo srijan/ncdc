@@ -138,6 +138,9 @@ GTlsCertificate *conf_certificate = NULL;
 char *conf_certificate = NULL;
 #endif
 
+// Base32-encoded keyprint of our own certificate
+char *conf_certificate_kp = NULL;
+
 
 #if TLS_SUPPORT
 
@@ -208,6 +211,11 @@ static void conf_load_cert() {
       err->message, cert_file, key_file);
     exit(1);
     g_error_free(err);
+  } else {
+    conf_certificate_kp = g_malloc0(53);
+    char raw[32];
+    certificate_sha256(conf_certificate, raw);
+    base32_encode_dat(raw, conf_certificate_kp, 32);
   }
 
   g_free(cert_file);

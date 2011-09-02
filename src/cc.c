@@ -1394,7 +1394,7 @@ static void listen_tcp_handle(GObject *src, GAsyncResult *res, gpointer dat) {
   GSocketConnection *s = g_socket_listener_accept_finish(G_SOCKET_LISTENER(src), res, &istls, &err);
 
   if(!s) {
-    if(cc_listen && err->code != G_IO_ERROR_CANCELLED) {
+    if(cc_listen && err->code != G_IO_ERROR_CANCELLED && err->code != G_IO_ERROR_CLOSED) {
       ui_mf(ui_main, 0, "Listen error: %s. Switching to passive mode.", err->message);
       cc_listen_stop();
       hub_global_nfochange();
@@ -1403,7 +1403,9 @@ static void listen_tcp_handle(GObject *src, GAsyncResult *res, gpointer dat) {
   } else {
     cc_incoming(cc_create(NULL), s, istls ? TRUE : FALSE);
     g_socket_listener_accept_async(cc_listen, cc_listen_tcp_can, listen_tcp_handle, NULL);
+    g_object_ref(cc_listen);
   }
+  g_object_unref(cc_listen);
 }
 
 
@@ -1576,6 +1578,7 @@ gboolean cc_listen_start() {
   // start accepting incoming TCP connections
   cc_listen_tcp_can = g_cancellable_new();
   g_socket_listener_accept_async(tcp, cc_listen_tcp_can, listen_tcp_handle, NULL);
+  g_object_ref(tcp);
 
   // start receiving incoming UDP messages
   GSource *src = g_socket_create_source(udp, G_IO_IN, NULL);

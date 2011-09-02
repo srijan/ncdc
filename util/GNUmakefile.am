@@ -1,1 +1,1 @@
-bin_SCRIPTS=ncdc-gen-cert
+dist_bin_SCRIPTS=ncdc-gen-cert

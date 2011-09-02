@@ -633,10 +633,14 @@ static void file_start(struct net *n) {
   n->file_can = n->out_can;
   n->file_out = n->out;
   n->file_err = NULL;
+#if TLS_SUPPORT
   if(!n->tls && !G_IS_TCP_WRAPPER_CONNECTION(n->conn)) {
+#endif
     n->file_outsock = g_socket_connection_get_socket(n->conn);
     g_object_ref(n->file_outsock);
+#if TLS_SUPPORT
   }
+#endif
   g_object_ref(n->file_can);
   g_object_ref(n->file_out);
   net_ref(n);

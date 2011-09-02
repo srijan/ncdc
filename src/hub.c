@@ -661,9 +661,10 @@ void hub_send_nfo(struct hub *hub) {
       g_string_append_printf(cmd, " I4%s", ip4_unpack(ip4)); // ip4 = 0 == 0.0.0.0, which is exactly what we want
     if(f || !eq(ip4) || !beq(sup_tls)) {
       // The KEYP spec doesn't say anything about the SU field, but Jucy adds KEY0 so let's just follow.
-      g_string_append_printf(cmd, " SUKEY0%s%s",
-        ip4 ? ",TCP4,UDP4" : "",
-        sup_tls ? ",ADC0" : "");
+      g_string_append_printf(cmd, " SU%s%s%s",
+        ip4 ? "TCP4,UDP4" : "",
+        ip4 && sup_tls ? "," : "",
+        sup_tls ? "KEY0,ADC0" : "");
     }
     if((f || !eq(port))) {
       if(port)

@@ -946,15 +946,23 @@ static gboolean c_connect_set_hubaddr(char *addr) {
   char *port = g_match_info_fetch(nfo, 3);
   g_match_info_free(nfo);
 
+  char *old = g_key_file_get_string(conf_file, tab->name, "hubaddr", NULL);
+
   // Reconstruct (without the kp) and save
   GString *a = g_string_new("");
   g_string_printf(a, "%s://%s:%s/", !proto || !*proto ? "dchub" : proto, host, !port || !*port ? "411" : port);
   g_key_file_set_string(conf_file, tab->name, "hubaddr", a->str);
-  g_string_free(a, TRUE);
+
+  // Save kp if specified, or throw it away if the URL changed
   if(kp && *kp)
     g_key_file_set_string(conf_file, tab->name, "hubkp", kp);
+  else if(old && strcmp(old, a->str) != 0)
+    g_key_file_remove_key(conf_file, tab->name, "hubkp", NULL);
+
   conf_save();
 
+  g_string_free(a, TRUE);
+  g_free(old);
   g_free(proto);
   g_free(kp);
   g_free(host);
@@ -1023,6 +1031,30 @@ static void c_reconnect(char *args) {
       hub_disconnect(tab->hub, FALSE);
     c_connect(""); // also checks for the existence of "hubaddr"
   }
+}
+
+
+static void c_accept(char *args) {
+  if(args[0])
+    ui_m(NULL, 0, "This command does not accept any arguments.");
+  else if(tab->type != UIT_HUB)
+    ui_m(NULL, 0, "This command can only be used on hub tabs.");
+#if TLS_SUPPORT
+  else if(!tab->hub->kp)
+    ui_m(NULL, 0, "Nothing to accept.");
+  else {
+    char enc[53] = {};
+    base32_encode_dat(tab->hub->kp, enc, 32);
+    g_key_file_set_string(conf_file, tab->name, "hubkp", enc);
+    conf_save();
+    g_slice_free1(32, tab->hub->kp);
+    tab->hub->kp = NULL;
+    hub_connect(tab->hub);
+  }
+#else
+  else
+    ui_m(NULL, 0, "No TLS support.");
+#endif
 }
 
 
@@ -1584,6 +1616,11 @@ c_search_clean:
 
 // definition of the command list
 static struct cmd cmds[] = {
+  { "accept", c_accept, NULL,
+    NULL, "Accept the TLS certificate of a hub.",
+    "This command is used only when the keyprint of the TLS certificate of a hub"
+    " does not match the keyprint stored in the configuration file."
+  },
   { "browse", c_browse, c_msg_sug,
     "[[-f] <user>]", "Download and browse someone's file list.",
     "Without arguments, this opens a new tab where you can browse your own file list.\n"

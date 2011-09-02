@@ -64,34 +64,46 @@ struct hub_user {
 
 
 struct hub {
-  gboolean adc; // TRUE = ADC, FALSE = NMDC protocol.
-  int state;    // ADC_S_* (ADC only)
-  struct ui_tab *tab; // to get name (for config) and for logging & setting of title
+  gboolean adc;            // TRUE = ADC, FALSE = NMDC protocol.
+  int state;               // (ADC) ADC_S_*
+  struct ui_tab *tab;
   struct net *net;
-  // nick as used in this connection, NULL when not sent yet
-  char *nick_hub; // in hub encoding (NMDC only)
-  char *nick;     // UTF-8
-  int sid;        // session ID (ADC only)
-  // TRUE is the above nick has also been validated (and we're properly logged in)
-  gboolean nick_valid;
-  gboolean isreg; // whether we used a password to login
-  gboolean isop;  // whether we're an OP or not
-  char *hubname;  // UTF-8, or NULL when unknown
-  char *hubname_hub; // in hub encoding (NMDC only)
-  // user list, key = username (in hub encoding for NMDC), value = struct hub_user *
-  GHashTable *users;
-  GHashTable *sessions; // user list, with sid as index (ADC only)
+
+  // Hub info / config
+  guint64 id;              // "hubid" number
+  char *hubname;           // UTF-8, or NULL when unknown
+  char *hubname_hub;       // (NMDC) in hub encoding
+
+  // Our user info
+  char *nick_hub;          // (NMDC) in hub encoding
+  char *nick;              // UTF-8
+  int sid;                 // (ADC) session ID
+  gboolean nick_valid : 1; // TRUE is the above nick has also been validated (and we're properly logged in)
+  gboolean isreg : 1;      // whether we used a password to login
+  gboolean isop : 1;       // whether we're an OP or not
+
+  // User list information
   int sharecount;
   guint64 sharesize;
-  // what we and the hub support
+  GHashTable *users;       // key = username (in hub encoding for NMDC)
+  GHashTable *sessions;    // (ADC) key = sid
+
+  // (NMDC) what we and the hub support
   gboolean supports_nogetinfo;
-  // MyINFO send timer (event loop source id)
-  guint nfo_timer;
-  // reconnect timer (30 sec.)
-  guint reconnect_timer;
+
+  // Timers
+  guint nfo_timer;         // hub_send_nfo() timer
+  guint reconnect_timer;   // reconnect timer (30 sec.)
+
   // ADC login info
   char *gpa_salt;
   int gpa_salt_len;
+
+#if TLS_SUPPORT
+  // TLS certificate verification
+  char *kp;                // NULL if it matches config, 32 bytes slice-alloced otherwise
+#endif
+
   // last info we sent to the hub
   char *nfo_desc, *nfo_conn, *nfo_mail;
   unsigned char nfo_slots, nfo_h_norm, nfo_h_reg, nfo_h_op;
@@ -99,11 +111,11 @@ struct hub {
   guint32 nfo_ip4;
   unsigned short nfo_port;
   gboolean nfo_sup_tls;
-  // whether we've fetched the complete user list (and their $MyINFO's)
-  gboolean received_first; // true if one precondition for joincomplete is satisfied.
-  gboolean joincomplete;
-  guint joincomplete_timer;
-  guint64 id; // "hubid" number
+
+  // userlist fetching detection
+  gboolean received_first;  // true if one precondition for joincomplete is satisfied.
+  gboolean joincomplete;    // if we have the userlist
+  guint joincomplete_timer; // fallback timer which ensures joincomplete is set at some point
 };
 
 
@@ -1542,6 +1554,13 @@ static void handle_error(struct net *n, int action, GError *err) {
   if(err->code == G_IO_ERROR_CANCELLED)
     return;
 
+#if TLS_SUPPORT
+  if(hub->kp) {
+    hub_disconnect(hub, FALSE);
+    return;
+  }
+#endif
+
   switch(action) {
   case NETERR_CONN:
     ui_mf(hub->tab, 0, "Could not connect to hub: %s. Wating 30 seconds before retrying.", err->message);
@@ -1596,24 +1615,47 @@ static void handle_connect(struct net *n) {
 
 #if TLS_SUPPORT
 
-// TODO: actually validate certificate via user interaction
 static gboolean handle_accept_cert(GTlsConnection *conn, GTlsCertificate *cert, GTlsCertificateFlags errors, gpointer dat) {
   struct net *n = dat;
   struct hub *hub = n->handle;
+
+  // Get keyprint
   char raw[32];
   certificate_sha256(cert, raw);
   char enc[53] = {};
   base32_encode_dat(raw, enc, 32);
 
-  // Store key print in config file
+  // Get configured keyprint
   char *old = g_key_file_get_string(conf_file, hub->tab->name, "hubkp", NULL);
-  if(!old || strcmp(old, enc) != 0) {
+
+  // No keyprint? Then assume first-use trust and save it to the config file.
+  if(!old) {
+    ui_mf(hub->tab, 0, "No previous TLS keyprint known. Storing `%s' for future validation.", enc);
     g_key_file_set_string(conf_file, hub->tab->name, "hubkp", enc);
     conf_save();
+    return TRUE;
   }
-  if(old)
+
+  // Keyprint matches? no problems!
+  if(strcmp(old, enc) == 0) {
     g_free(old);
-  return TRUE;
+    return TRUE;
+  }
+
+  // Keyprint doesn't match... now we have a problem!
+  hub->kp = g_slice_alloc(32);
+  memcpy(hub->kp, raw, 32);
+  ui_mf(hub->tab, UIP_HIGH,
+    "\nWARNING: The TLS certificate of this hub has changed!\n"
+    "Old keyprint: %s\n"
+    "New keyprint: %s\n"
+    "This can mean two things:\n"
+    "- The hub you are connecting to is NOT the same as the one you intended to connect to.\n"
+    "- The hub owner has changed the TLS certificate.\n"
+    "If you accept the new keyprint and wish continue connecting, type `/accept'.\n",
+    old, enc);
+  g_free(old);
+  return FALSE;
 }
 
 #endif
@@ -1671,6 +1713,13 @@ void hub_connect(struct hub *hub) {
     net_connect(hub->net, addr, 411, tls, handle_connect);
   }
 
+#if TLS_SUPPORT
+  if(hub->kp) {
+    g_slice_free1(32, hub->kp);
+    hub->kp = NULL;
+  }
+#endif
+
   g_free(oaddr);
 }
 
@@ -1713,6 +1762,10 @@ void hub_free(struct hub *hub) {
   hub_disconnect(hub, FALSE);
   cc_remove_hub(hub);
   net_unref(hub->net);
+#if TLS_SUPPORT
+  if(hub->kp)
+    g_slice_free1(32, hub->kp);
+#endif
   g_free(hub->nfo_desc);
   g_free(hub->nfo_conn);
   g_free(hub->nfo_mail);

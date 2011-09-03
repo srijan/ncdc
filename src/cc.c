@@ -1595,7 +1595,7 @@ gboolean cc_listen_start() {
   if(conf_certificate)
     ui_mf(ui_main, 0, "Listening on port TCP+UDP port %d and TCP port %d, remote IP is %s.", cc_listen_port, cc_listen_port+1, cc_listen_ip);
   else
-    ui_mf(ui_main, 0, "Listening on port TCP+UDP port %d, remote IP is.", cc_listen_port, cc_listen_ip);
+    ui_mf(ui_main, 0, "Listening on port TCP+UDP port %d, remote IP is %s.", cc_listen_port, cc_listen_ip);
   hub_global_nfochange();
   return TRUE;
 }

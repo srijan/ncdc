@@ -1,3 +1,10 @@
+0.9 - 2011-09-03
+	- Added TLS support (adcs://, nmdcs://, and ADC client-to-client)
+	- Added tls_policy setting
+	- Added KEYP support for ADC
+	- Added warning when a hub changes TLS certificate
+	- Display exact listen ports when enabling active mode
+
 0.8 - 2011-08-26
 	- Added transfer log
 	- Added log_downloads and log_uploads settings

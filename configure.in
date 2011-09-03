@@ -1,5 +1,5 @@
 
-AC_INIT([ncdc], [0.8g], [projects@yorhel.nl])
+AC_INIT([ncdc], [0.9g], [projects@yorhel.nl])
 AC_CONFIG_SRCDIR([src/ncdc.h])
 AC_CONFIG_HEADER([config.h])
 AM_INIT_AUTOMAKE([foreign])

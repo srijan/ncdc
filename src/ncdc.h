@@ -71,6 +71,7 @@ struct ui_textinput;
 #include "hub.h"
 #include "main.h"
 #include "net.h"
+#include "set.h"
 #include "tth.h"
 #include "ui.h"
 #include "ui_util.h"

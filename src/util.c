@@ -636,6 +636,17 @@ void str_arg2_split(char *str, char **first, char **second) {
 }
 
 
+// Validates a hub name
+gboolean is_valid_hubname(const char *name) {
+  const char *tmp;
+  int len = 0;
+  for(tmp=name; *tmp; tmp = g_utf8_next_char(tmp))
+    if(++len && !g_unichar_isalnum(g_utf8_get_char(tmp)))
+      break;
+  return !*tmp && len && len <= 25;
+}
+
+
 guint64 rand_64() {
   // g_rand_new() uses four bytes from /dev/urandom when it's available. Doing
   // that twice (i.e. reading 8 bytes) should generate enough randomness for a

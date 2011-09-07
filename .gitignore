@@ -16,5 +16,6 @@ stamp-h1
 *.o
 *.h
 !src/ncdc.h
+!src/doc.h
 ncdc
 INSTALL

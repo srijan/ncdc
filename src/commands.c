@@ -29,14 +29,14 @@
 #include <stdlib.h>
 #include <errno.h>
 
+#define DOC_CMD
+#include "doc.h"
 
 struct cmd {
   char name[16];
   void (*f)(char *);
   void (*suggest)(char *, char **);
-  char *args;
-  char *sum;
-  char *desc;
+  struct doc_cmd *doc;
 };
 // tentative definition of the cmd list
 static struct cmd cmds[];
@@ -46,11 +46,27 @@ static struct cmd cmds[];
 // binary search, but I doubt the performance difference really matters.
 static struct cmd *getcmd(const char *name) {
   struct cmd *c;
-  for(c=cmds; c->f; c++)
+  for(c=cmds; *c->name; c++)
     if(strcmp(c->name, name) == 0)
       break;
   return c->f ? c : NULL;
 }
+
+
+// Get documentation for a command. May be slow at first, but caches the doc
+// structure later on.
+static struct doc_cmd *getdoc(struct cmd *cmd) {
+  struct doc_cmd empty = { "", NULL, "No documentation available." };
+  if(cmd->doc)
+    return cmd->doc;
+  struct doc_cmd *i = (struct doc_cmd *)doc_cmds;
+  for(; *i->name; i++)
+    if(strcmp(i->name, cmd->name) == 0)
+      break;
+  cmd->doc = *i->name ? i : &empty;
+  return cmd->doc;
+}
+
 
 
 static void c_quit(char *args) {
@@ -127,7 +143,7 @@ static void c_help(char *args) {
   if(!args[0]) {
     ui_m(NULL, 0, "\nAvailable commands:");
     for(c=cmds; c->f; c++)
-      ui_mf(NULL, 0, " /%s - %s", c->name, c->sum);
+      ui_mf(NULL, 0, " /%s - %s", c->name, getdoc(c)->sum);
     ui_m(NULL, 0, "");
 
   // list information on a particular command
@@ -135,8 +151,12 @@ static void c_help(char *args) {
     c = getcmd(args);
     if(!c)
       ui_mf(NULL, 0, "\nUnknown command '%s'.", args);
-    else
-      ui_mf(NULL, 0, "\nUsage: /%s %s\n  %s\n\n%s\n", c->name, c->args ? c->args : "", c->sum, c->desc);
+    else {
+      struct doc_cmd *d = getdoc(c);
+      ui_mf(NULL, 0, "\nUsage: /%s %s\n  %s\n", c->name, d->args ? d->args : "", d->sum);
+      if(d->desc)
+        ui_mf(NULL, 0, "%s\n", d->desc);
+    }
   }
 }
 
@@ -863,200 +883,37 @@ c_search_clean:
 
 // definition of the command list
 static struct cmd cmds[] = {
-  { "accept", c_accept, NULL,
-    NULL, "Accept the TLS certificate of a hub.",
-    "This command is used only when the keyprint of the TLS certificate of a hub"
-    " does not match the keyprint stored in the configuration file."
-  },
-  { "browse", c_browse, c_msg_sug,
-    "[[-f] <user>]", "Download and browse someone's file list.",
-    "Without arguments, this opens a new tab where you can browse your own file list.\n"
-    "Note that changes to your list are not immediately visible in the browser."
-    " You need to re-open the tab to get the latest version of your list.\n\n"
-    "With arguments, the user list of the specified user will be downloaded (if"
-    " it has not been downloaded already) and the browse tab will open once it's"
-    " complete. The `-f' flag can be used to force the file list to be (re-)downloaded."
-  },
-  { "clear", c_clear, NULL,
-    NULL, "Clear the display.",
-    "Clears the log displayed on the screen. Does not affect the log files in any way.\n"
-    "Ctrl+l is a shortcut for this command."
-  },
-  { "close", c_close, NULL,
-    NULL, "Close the current tab.",
-    "When closing a hub tab, you will be disconnected from the hub.\n"
-    "Alt+c is a shortcut for this command."
-  },
-  { "connect", c_connect, c_connect_sug,
-    "[<address>]", "Connect to a hub.",
-    "If no address is specified, will connect to the hub you last used on the current tab.\n"
-    "The address should be in the form of `dchub://host:port/' or `host:port'.\n"
-    "The `:port' part is in both cases optional and defaults to :411.\n\n"
-    "Note that this command can only be used on hub tabs. If you want to open a new"
-    " connection to a hub, you need to use /open first. For example:\n"
-    "  /open testhub\n"
-    "  /connect dchub://dc.some-test-hub.com/\n"
-    "See `/help open' for more information."
-  },
-  { "connections", c_connections, NULL,
-    NULL, "Display the connection list.",
-    "Opens a new tab with the connection list."
-  },
-  { "disconnect", c_disconnect, NULL,
-    NULL, "Disconnect from a hub.",
-    "Closes the connection with the hub."
-  },
-  { "gc", c_gc, NULL,
-    NULL, "Perform some garbage collection.",
-    "Cleans up unused data and reorganizes existing data to allow more efficient storage and usage.\n"
-    "Currently, the only thing being cleaned up is the hashdata.dat file.\n\n"
-    "This command may take some time to complete, and will fully block ncdc while it is running.\n"
-    "You won't have to perform this command very often."
-  },
-  { "grant", c_grant, c_msg_sug,
-    "[<user>]", "Grant someone a slot.",
-    "Granting a slot to someone allows the user to download from you even if you have no free slots.\n\n"
-    "The slot will be granted for as long as ncdc stays open. If you restart"
-    " ncdc, the user will have to wait for a regular slot. Unless, of course, you"
-    " /grant a slot again.\n\n"
-    "Note that a granted slot is specific to a single hub. If the user is also"
-    " on other hubs, he/she will not be granted a slot on those hubs."
-  },
-  { "help", c_help, c_help_sug,
-    "[<command>]", "Request information on commands.",
-    "Use /help without arguments to list all the available commands.\n"
-    "Use /help <command> to get information about a particular command."
-  },
-  { "kick", c_kick, c_msg_sug,
-    "<user>", "Kick a user from the hub.",
-    "You need to be an OP to be able to use this command."
-  },
-  { "me", c_me, c_say_sug,
-    "<message>", "Chat in third person.",
-    "This allows you to talk in third person. Most clients will display your message as something like:\n"
-    "  * Nick is doing something\n\n"
-    "Note that this command only works correctly on ADC hubs. The NMDC protocol"
-    " does not have this feature, and your message will be sent as-is, including the /me."
-  },
-  { "msg", c_msg, c_msg_sug,
-    "<user> [<message>]", "Send a private message.",
-    "Send a private message to a user on the currently opened hub.\n"
-    "When no message is given, the tab will be opened but no message will be sent."
-  },
-  { "nick", c_nick, NULL,
-    "[<nick>]", "Alias for `/set nick'.",
-    ""
-  },
-  { "open", c_open, c_open_sug,
-    "[-n] <name> [<address>]", "Open a new hub tab and connect to the hub.",
-    "Opens a new tab to use for a hub. The name is a (short) personal name you"
-    " use to identify the hub, and will be used for storing hub-specific"
-    " configuration.\n\n"
-    "If you have specified an address or have previously connected to a hub"
-    " from a tab with the same name, /open will automatically connect to"
-    " the hub. Use the `-n' flag to disable this behaviour.\n\n"
-    "See `/help connect' for more information on connecting to a hub."
-  },
-  { "password", c_password, NULL,
-    "<password>", "Send your password to the hub.",
-    "The /password command can be used to send a password to the hub without saving it to the config file.\n"
-    "If you wish to login automatically without having to type /password every time, use '/set password <password>'."
-    " Be warned, however, that your password will be saved unencrypted in this case."
-  },
-  { "pm", c_msg, c_msg_sug,
-    "<user> [<message>]", "Alias for /msg",
-    ""
-  },
-  { "queue", c_queue, NULL,
-    NULL, "Open the download queue.",
-    ""
-  },
-  { "quit", c_quit, NULL,
-    NULL, "Quit ncdc.",
-    "You can also just hit ctrl+c, which is equivalent."
-  },
-  { "reconnect", c_reconnect, NULL,
-    NULL, "Shortcut for /disconnect and /connect",
-    "When your nick or the hub encoding have been changed, the new settings will be used after the reconnect."
-  },
-  { "refresh", c_refresh, fl_local_suggest,
-    "[<path>]", "Refresh file list.",
-    "Initiates a refresh. If no argument is given, the complete list will be refreshed."
-    " Otherwise only the specified directory will be refreshed.\n\n"
-    "The path argument can be either an absolute filesystem path or a virtual path within your share."
-  },
-  { "say", c_say, c_say_sug,
-    "<message>", "Send a chat message.",
-    "You normally don't have to use the /say command explicitly, any command not staring"
-    " with '/' will automatically imply `/say <command>'. For example, typing `hello.'"
-    " in the command line is equivalent to `/say hello.'.\n\n"
-    "Using the /say command explicitly may be useful to send message starting with '/' to"
-    " the chat, for example `/say /help is what you are looking for'."
-  },
-  { "search", c_search, NULL,
-    "[options] <query>", "Search for files.",
-    "Performs a file search, opening a new tab with the results.\n\n"
-    "Available options:\n"
-    "  -hub      Search the current hub only. (default)\n"
-    "  -all      Search all connected hubs.\n"
-    "  -le  <s>  Size of the file must be less than <s>.\n"
-    "  -ge  <s>  Size of the file must be larger than <s>.\n"
-    "  -t   <t>  File must be of type <t>. (see below)\n"
-    "  -tth <h>  TTH root of this file must match <h>.\n\n"
-    "File sizes (<s> above) accept the following suffixes: G (GiB), M (MiB) and K (KiB).\n\n"
-    "The following file types can be used with the -t option:\n"
-    "  1  any      Any file or directory. (default)\n"
-    "  2  audio    Audio files.\n"
-    "  3  archive  (Compressed) archives.\n"
-    "  4  doc      Text documents.\n"
-    "  5  exe      Windows executables.\n"
-    "  6  img      Image files.\n"
-    "  7  video    Videos files.\n"
-    "  8  dir      Directories.\n"
-    "Note that file type matching is done using the file extension, and is not very reliable."
-  },
-  { "set", c_set, c_set_sug,
-    "[<key> [<value>]]", "Get or set configuration variables.",
-    "Use /set without arguments to get a list of configuration variables.\n"
-    "/set <key> without value will print out the current value."
-  },
-  { "share", c_share, c_share_sug,
-    "[<name> <path>]", "Add a directory to your share.",
-    "Use /share without arguments to get a list of shared directories.\n"
-    "When called with a name and a path, the path will be added to your share.\n"
-    "Note that shell escaping may be used in the name. For example, to add a"
-    " directory with the name `Fun Stuff', you could do the following:\n"
-    "  /share \"Fun Stuff\" /path/to/fun/stuff\n"
-    "Or:\n"
-    "  /share Fun\\ Stuff /path/to/fun/stuff\n\n"
-    "The full path to the directory will not be visible to others, only the name you give it will be public.\n"
-    "An initial `/refresh' is done automatically on the added directory."
-  },
-  { "unset", c_unset, c_set_sugkey,
-    "<key>", "Unset a configuration variable.",
-    "This command will reset the variable back to its default value."
-  },
-  { "unshare", c_unshare, c_unshare_sug,
-    "[<name>]", "Remove a directory from your share.",
-    "Use /unshare without arguments to get a list of shared directories.\n"
-    "To remove a single directory from your share, use `/unshare <name>'.\n"
-    "To remove all directories from your share, use `/unshare /'.\n\n"
-    "Note: All hash data for the removed directories will be thrown away. All"
-    " files will be re-hashed again when the directory is later re-added."
-  },
-  { "userlist", c_userlist, NULL,
-    NULL, "Open the user list.",
-    "Opens the user list of the currently selected hub. Can also be accessed using Alt+u."
-  },
-  { "version", c_version, NULL,
-    NULL, "Display version information.",
-    ""
-  },
-  { "whois", c_whois, c_msg_sug,
-    "<user>", "Locate a user in the user list.",
-    "This will open the user list and select the given user."
-  },
-  { "", NULL }
+  { "accept",      c_accept,      NULL             },
+  { "browse",      c_browse,      c_msg_sug        },
+  { "clear",       c_clear,       NULL             },
+  { "close",       c_close,       NULL             },
+  { "connect",     c_connect,     c_connect_sug    },
+  { "connections", c_connections, NULL             },
+  { "disconnect",  c_disconnect,  NULL             },
+  { "gc",          c_gc,          NULL             },
+  { "grant",       c_grant,       c_msg_sug        },
+  { "help",        c_help,        c_help_sug       },
+  { "kick",        c_kick,        c_msg_sug        },
+  { "me",          c_me,          c_say_sug        },
+  { "msg",         c_msg,         c_msg_sug        },
+  { "nick",        c_nick,        NULL             },
+  { "open",        c_open,        c_open_sug       },
+  { "password",    c_password,    NULL             },
+  { "pm",          c_msg,         c_msg_sug        },
+  { "queue",       c_queue,       NULL             },
+  { "quit",        c_quit,        NULL             },
+  { "reconnect",   c_reconnect,   NULL             },
+  { "refresh",     c_refresh,     fl_local_suggest },
+  { "say",         c_say,         c_say_sug        },
+  { "search",      c_search,      NULL             },
+  { "set",         c_set,         c_set_sug        },
+  { "share",       c_share,       c_share_sug      },
+  { "unset",       c_unset,       c_set_sugkey     },
+  { "unshare",     c_unshare,     c_unshare_sug    },
+  { "userlist",    c_userlist,    NULL             },
+  { "version",     c_version,     NULL             },
+  { "whois",       c_whois,       c_msg_sug        },
+  { "" }
 };
 
 

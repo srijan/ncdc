@@ -277,6 +277,7 @@ struct net *net_create(char term, void *han, gboolean keepalive, void (*rfunc)(s
   n->keepalive = keepalive;
   n->recv_msg_cb = rfunc;
   n->cb_err = errfunc;
+  time(&(n->timeout_last));
   n->timeout_src = g_timeout_add_seconds(5, handle_timer, n);
   strcpy(n->addr, "(not connected)");
   return n;
@@ -392,6 +393,7 @@ void net_connect(struct net *n, const char *addr, unsigned short defport, gboole
   g_socket_client_connect_to_host_async(sc, addr, defport, n->conn_can, handle_connect, n);
   n->connecting = TRUE;
   net_ref(n);
+  time(&(n->timeout_last));
 }
 
 

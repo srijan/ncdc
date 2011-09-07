@@ -164,6 +164,86 @@ static gboolean cc_expect_nmdc_rm(struct cc *cc) {
 
 
 
+// Throttling of GET file offset, for buggy clients that keep requesting the
+// same file+offset. Throttled to 1 request per hour, with an allowed burst of 10.
+
+#define THROTTLE_INTV 3600
+#define THROTTLE_BURST 10
+
+struct throttle_get {
+  char ip[40];  // no port
+  char tth[24];
+  guint64 offset;
+  time_t throttle;
+};
+
+static GHashTable *throttle_list; // initialized in cc_init_global()
+
+
+static guint throttle_hash(gconstpointer key) {
+  const struct throttle_get *t = key;
+  guint *tth = (guint *)t->tth;
+  return *tth + g_str_hash(t->ip) + (gint)t->offset;
+}
+
+
+static gboolean throttle_equal(gconstpointer a, gconstpointer b) {
+  const struct throttle_get *x = a;
+  const struct throttle_get *y = b;
+  return strcmp(x->ip, y->ip) == 0 && memcmp(x->tth, y->tth, 24) == 0 && x->offset == y->offset;
+}
+
+
+static void throttle_free(gpointer dat) {
+  g_slice_free(struct throttle_get, dat);
+}
+
+
+static gboolean throttle_check(struct cc *cc, char *tth, guint64 offset) {
+  // construct a key
+  struct throttle_get key;
+  strncpy(key.ip, net_remoteaddr(cc->net), 40);
+  if(strchr(key.ip, ':'))
+    *(strchr(key.ip, ':')) = 0;
+  memcpy(key.tth, tth, 24);
+  key.offset = offset;
+  time(&key.throttle);
+
+  // lookup
+  struct throttle_get *val = g_hash_table_lookup(throttle_list, &key);
+  // value present and above threshold, throttle!
+  if(val && val->throttle-key.throttle > THROTTLE_BURST*THROTTLE_INTV)
+    return TRUE;
+  // value present and below threshold, update throttle value
+  if(val) {
+    val->throttle = MAX(key.throttle, val->throttle+THROTTLE_INTV);
+    return FALSE;
+  }
+  // value not present, add it
+  val = g_slice_dup(struct throttle_get, &key);
+  g_hash_table_insert(throttle_list, val, val);
+  return FALSE;
+}
+
+
+static gboolean throttle_purge_func(gpointer key, gpointer val, gpointer dat) {
+  struct throttle_get *v = val;
+  time_t *t = dat;
+  return v->throttle < *t ? TRUE : FALSE;
+}
+
+
+// Purge old throttle items from the throttle_list. Called from a timer that is
+// initialized in cc_init_global().
+static gboolean throttle_purge(gpointer dat) {
+  time_t t = time(NULL);
+  int r = g_hash_table_foreach_remove(throttle_list, throttle_purge_func, &t);
+  g_debug("throttle_purge: Purged %d items, %d items left.", r, g_hash_table_size(throttle_list));
+  return TRUE;
+}
+
+
+
 
 
 // Main C-C objects
@@ -284,6 +364,9 @@ void cc_init_global() {
   cc_expected = g_queue_new();
   cc_list = g_sequence_new(NULL);
   cc_granted = g_hash_table_new_full(g_int64_hash, g_int64_equal, g_free, NULL);
+
+  throttle_list = g_hash_table_new_full(throttle_hash, throttle_equal, NULL, throttle_free);
+  g_timeout_add_seconds_full(G_PRIORITY_LOW, 3600, throttle_purge, NULL, NULL);
 }
 
 
@@ -562,7 +645,7 @@ static void handle_sendcomplete(struct net *net) {
 //  50: Generic internal error
 //  51: File not available
 //  53: No slots
-// Handles both ADC GET and the NMDC $ADCGET
+// Handles both ADC GET and the NMDC $ADCGET. May do a cc_disconnect() on fatal error.
 static void handle_adcget(struct cc *cc, char *type, char *id, guint64 start, gint64 bytes, GError **err) {
   // tthl
   if(strcmp(type, "tthl") == 0) {
@@ -664,6 +747,15 @@ static void handle_adcget(struct cc *cc, char *type, char *id, guint64 start, gi
     bytes = st.st_size-start;
   if(needslot && st.st_size < conf_minislot_size())
     needslot = FALSE;
+
+  if(f && throttle_check(cc, f->tth, start)) {
+    g_message("CC:%s: File upload throttled: %s offset %"G_GUINT64_FORMAT, net_remoteaddr(cc->net), vpath, start);
+    g_set_error_literal(err, 1, 50, "Action throttled");
+    cc_disconnect(cc);
+    g_free(path);
+    g_free(vpath);
+    return;
+  }
 
   // send
   if(request_slot(cc, needslot)) {
@@ -824,11 +916,13 @@ static void adc_handle(struct cc *cc, char *msg) {
       GError *err = NULL;
       handle_adcget(cc, cmd.argv[0], cmd.argv[1], start, len, &err);
       if(err) {
-        GString *r = adc_generate('C', ADCC_STA, 0, 0);
-        g_string_append_printf(r, " 1%02d", err->code);
-        adc_append(r, NULL, err->message);
-        net_send(cc->net, r->str);
-        g_string_free(r, TRUE);
+        if(cc->state != CCS_DISCONN) {
+          GString *r = adc_generate('C', ADCC_STA, 0, 0);
+          g_string_append_printf(r, " 1%02d", err->code);
+          adc_append(r, NULL, err->message);
+          net_send(cc->net, r->str);
+          g_string_free(r, TRUE);
+        }
         g_propagate_error(&cc->err, err);
       }
     }
@@ -1141,10 +1235,12 @@ static void nmdc_handle(struct cc *cc, char *cmd) {
       GError *err = NULL;
       handle_adcget(cc, type, un_id, st, by, &err);
       if(err) {
-        if(err->code != 53)
-          net_sendf(cc->net, "$Error %s", err->message);
-        else
-          net_send(cc->net, "$MaxedOut");
+        if(cc->state != CCS_DISCONN) {
+          if(err->code != 53)
+            net_sendf(cc->net, "$Error %s", err->message);
+          else
+            net_send(cc->net, "$MaxedOut");
+        }
         g_propagate_error(&cc->err, err);
       }
     }

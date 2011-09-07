@@ -1,0 +1,25 @@
+.TH ncdc-gen-cert 1 "September 2011" "ncdc-0.9g"
+.SH NAME
+ncdc-gen-cert \- Generate client certificate for ncdc
+
+.SH SYNOPSIS
+.B ncdc-gen-cert
+.RI [ directory ]
+
+.SH DESCRIPTION
+ncdc-gen-cert will generate the TLS certificate for use by ncdc. You normally
+don't have to run this script, as ncdc will do this automatically on start-up.
+
+ncdc-gen-cert accepts one argument: the path to ncdc's session directory. If
+this argument is not given or empty, $NCDC_DIR or "$HOME/.ncdc" will be used
+instead. This is the same as not providing a -c argument to ncdc(1).
+
+.SH AUTHOR
+ncdc is written by Yoran Heling <projects@yorhel.nl>
+.br
+Web:
+.UR
+http://dev.yorhel.nl/ncdc
+
+.SH SEE ALSO
+ncdc(1)

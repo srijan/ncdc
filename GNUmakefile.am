@@ -1,2 +1,2 @@
-SUBDIRS=src util
+SUBDIRS=doc src util
 EXTRA_DIST = ChangeLog

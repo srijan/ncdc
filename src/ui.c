@@ -964,7 +964,7 @@ static void ui_conn_key(guint64 key) {
   case INPT_CHAR('d'): // d - disconnect
     if(!cc)
       ui_m(NULL, 0, "Nothing selected.");
-    else if(!cc->net->conn)
+    else if(!cc->net->conn && !cc->net->connecting)
       ui_m(NULL, 0, "Not connected.");
     else
       cc_disconnect(cc);

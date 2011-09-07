@@ -9,6 +9,7 @@ ncdc_SOURCES =\
 	hub.c\
 	main.c\
 	net.c\
+	proto.c\
 	set.c\
 	tth.c\
 	ui.c\

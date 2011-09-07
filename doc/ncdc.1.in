@@ -1,4 +1,4 @@
-.TH ncdc 1 "September 2011" "ncdc-0.9g"
+.TH ncdc 1 "September 2011" "@version@"
 .SH NAME
 ncdc \- Ncurses Direct Connect Client
 
@@ -32,6 +32,12 @@ Display ncdc version.
 .SH ENVIRONMENT 
 $NCDC_DIR is used to determine the session dir, it is only honoured if \fB-c\fP
 is not set on the command line.
+
+.SH INTERACTIVE COMMANDS
+The following is the list of commands that can be used within ncdc. The /help
+command can also be used get a list of available commands and to access this
+documentation.
+@commands@
 
 .SH FILES
 $NCDC_DIR corresponds to the session dir set via -c, environment variable

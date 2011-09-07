@@ -17,5 +17,7 @@ stamp-h1
 *.h
 !src/ncdc.h
 !src/doc.h
-ncdc
+src/ncdc
+doc/gendoc
+doc/ncdc.1
 INSTALL

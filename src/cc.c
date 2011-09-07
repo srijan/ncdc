@@ -845,6 +845,47 @@ static void adc_handle(struct cc *cc, char *msg) {
       handle_adcsnd(cc, strcmp(cmd.argv[0], "tthl") == 0, g_ascii_strtoull(cmd.argv[2], NULL, 0), g_ascii_strtoull(cmd.argv[3], NULL, 0));
     break;
 
+  case ADCC_GFI:
+    if(cmd.argc < 2 || strcmp(cmd.argv[0], "file") != 0) {
+      g_message("CC:%s: Invalid command: %s", net_remoteaddr(cc->net), msg);
+    } else if(cc->dl || cc->state != CCS_IDLE) {
+      g_set_error_literal(&cc->err, 1, 0, "Protocol error.");
+      g_message("CC:%s: Received message in wrong state: %s", net_remoteaddr(cc->net), msg);
+      cc_disconnect(cc);
+    } else {
+      // Get file
+      struct fl_list *f = NULL;
+      if(cmd.argv[1][0] == '/' && fl_local_list) {
+        f = fl_list_from_path(fl_local_list, cmd.argv[1]);
+      } else if(strncmp(cmd.argv[1], "TTH/", 4) == 0 && istth(cmd.argv[1]+4)) {
+        char root[24];
+        base32_decode(cmd.argv[1]+4, root);
+        GSList *l = fl_local_from_tth(root);
+        f = l ? l->data : NULL;
+      }
+      // Generate response
+      GString *r;
+      if(!f) {
+        r = adc_generate('C', ADCC_STA, 0, 0);
+        g_string_append_printf(r, " 151 File Not Available");
+      } else {
+        r = adc_generate('C', ADCC_RES, 0, 0);
+        g_string_append_printf(r, " SL%d SI%"G_GUINT64_FORMAT, conf_slots() - cc_slots_in_use(NULL), f->size);
+        char *path = fl_list_path(f);
+        adc_append(r, "FN", path);
+        g_free(path);
+        if(f->isfile) {
+          char tth[40] = {};
+          base32_encode(f->tth, tth);
+          g_string_append_printf(r, " TR%s", tth);
+        } else
+          g_string_append_c(r, '/');
+      }
+      net_send(cc->net, r->str);
+      g_string_free(r, TRUE);
+    }
+    break;
+
   case ADCC_STA:
     if(cmd.argc < 2 || strlen(cmd.argv[0]) != 3) {
       g_message("CC:%s: Invalid command: %s", net_remoteaddr(cc->net), msg);

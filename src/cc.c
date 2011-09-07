@@ -171,8 +171,8 @@ static gboolean cc_expect_nmdc_rm(struct cc *cc) {
 #define THROTTLE_BURST 10
 
 struct throttle_get {
-  char ip[40];  // no port
   char tth[24];
+  guint64 uid;
   guint64 offset;
   time_t throttle;
 };
@@ -183,14 +183,14 @@ static GHashTable *throttle_list; // initialized in cc_init_global()
 static guint throttle_hash(gconstpointer key) {
   const struct throttle_get *t = key;
   guint *tth = (guint *)t->tth;
-  return *tth + g_str_hash(t->ip) + (gint)t->offset;
+  return *tth + (gint)t->offset + (gint)t->uid;
 }
 
 
 static gboolean throttle_equal(gconstpointer a, gconstpointer b) {
   const struct throttle_get *x = a;
   const struct throttle_get *y = b;
-  return strcmp(x->ip, y->ip) == 0 && memcmp(x->tth, y->tth, 24) == 0 && x->offset == y->offset;
+  return x->uid == y->uid && memcmp(x->tth, y->tth, 24) == 0 && x->offset == y->offset;
 }
 
 
@@ -202,10 +202,8 @@ static void throttle_free(gpointer dat) {
 static gboolean throttle_check(struct cc *cc, char *tth, guint64 offset) {
   // construct a key
   struct throttle_get key;
-  strncpy(key.ip, net_remoteaddr(cc->net), 40);
-  if(strchr(key.ip, ':'))
-    *(strchr(key.ip, ':')) = 0;
   memcpy(key.tth, tth, 24);
+  key.uid = cc->uid;
   key.offset = offset;
   time(&key.throttle);
 

@@ -55,20 +55,6 @@ static void gen_cmd() {
 
 
 int main(int argc, char **argv) {
-  /*
-  if(argc != 2) {
-    fprintf(stderr, "Invalid argument.");
-    return 1;
-  }
-  if(strcmp(argv[1], "cmd") == 0)
-    gen_cmd();
-  else {
-    fprintf(stderr, "Invalid argument.");
-    return 1;
-  }
-  return 0;
-  */
-
   if(argc != 1) {
     fprintf(stderr, "This command does not accept any commandline arguments.");
     return 1;
@@ -84,7 +70,7 @@ int main(int argc, char **argv) {
         gen_cmd();
         t += 10;
       } else if(strncmp(m, "@version@", 9) == 0) {
-        printf("%s", PACKAGE_VERSION);
+        printf("%s-%s", PACKAGE, VERSION);
         t += 9;
       } else {
         fputc('@', stdout);

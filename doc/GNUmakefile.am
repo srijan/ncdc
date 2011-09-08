@@ -1,12 +1,10 @@
-dist_man_MANS=ncdc-gen-cert.1
-
-man_MANS=ncdc.1
-EXTRA_DIST=ncdc.1.in
-CLEANFILES=ncdc.1
+man_MANS=ncdc.1 ncdc-gen-cert.1
+EXTRA_DIST=ncdc.1.in ncdc-gen-cert.1.in
+CLEANFILES=${man_MANS}
 
 noinst_PROGRAMS=gendoc
 gendoc_SOURCES=gendoc.c
 
-ncdc.1: gendoc ncdc.1.in
-	./gendoc <ncdc.1.in >ncdc.1
+${man_MANS}: %.1: %.1.in gendoc
+	./gendoc <$< >$@
 

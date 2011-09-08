@@ -138,6 +138,10 @@ static void c_msg(char *args) {
 
 
 static void c_help(char *args) {
+  char *sec = strchr(args, ' ');
+  if(sec)
+    *(sec++) = 0;
+
   struct cmd *c;
   // list available commands
   if(!args[0]) {
@@ -147,7 +151,7 @@ static void c_help(char *args) {
     ui_m(NULL, 0, "");
 
   // list information on a particular command
-  } else {
+  } else if(!sec) {
     c = getcmd(args);
     if(!c)
       ui_mf(NULL, 0, "\nUnknown command '%s'.", args);
@@ -157,11 +161,24 @@ static void c_help(char *args) {
       if(d->desc)
         ui_mf(NULL, 0, "%s\n", d->desc);
     }
-  }
+
+  // list information on a setting
+  } else if(strcmp(args, "set") == 0) {
+    c_help_set(sec);
+
+  } else
+    ui_mf(NULL, 0, "\nUnknown help section `%s'.", args);
 }
 
 
 static void c_help_sug(char *args, char **sug) {
+  // help set ..
+  if(strncmp(args, "set ", 4) == 0) {
+    c_set_sugkey(args+4, sug);
+    strv_prefix(sug, "set ", NULL);
+    return;
+  }
+  // help command
   int i = 0, len = strlen(args);
   struct cmd *c;
   for(c=cmds; i<20 && c->f; c++)

@@ -30,6 +30,7 @@
 #include "config.h"
 
 #define DOC_CMD
+#define DOC_SET
 #include "../src/doc.h"
 
 
@@ -54,6 +55,16 @@ static void gen_cmd() {
 }
 
 
+static void gen_set() {
+  const struct doc_set *s = doc_sets;
+  for(; s->name; s++) {
+    printf(".TP\n\\fB%s\\fP %s\n.br\n", s->name, s->type);
+    out_string(s->desc);
+    printf("\n");
+  }
+}
+
+
 int main(int argc, char **argv) {
   if(argc != 1) {
     fprintf(stderr, "This command does not accept any commandline arguments.");
@@ -68,6 +79,9 @@ int main(int argc, char **argv) {
       t = m;
       if(strncmp(m, "@commands@", 10) == 0) {
         gen_cmd();
+        t += 10;
+      } else if(strncmp(m, "@settings@", 10) == 0) {
+        gen_set();
         t += 10;
       } else if(strncmp(m, "@version@", 9) == 0) {
         printf("%s-%s", PACKAGE, VERSION);

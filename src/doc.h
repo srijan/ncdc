@@ -85,9 +85,10 @@ static const struct doc_cmd {
   "Note that a granted slot is specific to a single hub. If the user is also"
   " on other hubs, he/she will not be granted a slot on those hubs."
 },
-{ "help", "[<command>]", "Request information on commands.",
-  "Use /help without arguments to list all the available commands.\n"
-  "Use /help <command> to get information about a particular command."
+{ "help", "[<command>|set <key>]", "Request information on commands.",
+  "To get a list of available commands, use /help without arguments.\n"
+  "To get information on a particular command, use /help <command>.\n"
+  "To get information on a configuration setting, use /help set <setting>."
 },
 { "kick", "<user>", "Kick a user from the hub.",
   "Kick a user from the hub. This command only works on NMDC hubs, and you need"
@@ -169,8 +170,13 @@ static const struct doc_cmd {
   "  8  dir      Directories.\n"
   "Note that file type matching is done using file extensions, and is not very reliable."
 },
+// TODO: document that some settings can be set on a per-hub basis?
 { "set", "[<key> [<value>]]", "Get or set configuration variables.",
-  NULL
+  "Get or set configuration variables. Use without arguments to get a list of "
+  " all settings and their current value. Changes to the settings are"
+  " automatically saved to the config file, and will not be lost after"
+  " restarting ncdc.\n\n"
+  "To get information on a particular setting, use `/help set <key>'."
 },
 { "share", "[<name> <path>]", "Add a directory to your share.",
   "Use /share without arguments to get a list of shared directories.\n"
@@ -208,3 +214,62 @@ static const struct doc_cmd {
 
 #endif // DOC_CMD
 
+
+
+#ifdef DOC_SET
+
+static const struct doc_set {
+  char const *name, *type, *desc;
+} doc_sets[] = {
+
+{ "active", "<boolean>",
+  "Enables or disables active mode. Make sure to set `active_ip' and"
+  " `active_port' before enabling active mode."
+},
+{ "active_ip", "<string>",
+  "Your public IP address for use in active mode. It is important that other"
+  " clients can reach you using this IP address. If you connect to a hub on the"
+  " internet, this should be your internet (WAN) IP. Likewise, if you connect"
+  " to a hub on your LAN, this should be your LAN IP.\n\n"
+  "Note that this setting is global for ncdc: it is currently not possible to"
+  " use a single instance of ncdc to connect to both internet and LAN hubs, if"
+  " you are not reachable on the same IP with both networks. In that case you can"
+  " either use passive mode or run two separate instances of ncdc."
+},
+{ "active_port", "<integer>",
+  "The listen port for incoming connections in active mode. Set to `0' to"
+  " automatically assign a random port. If TLS support is available, another"
+  " TCP port will be opened on the configured port + 1. Ncdc will tell you"
+  " exactly on which ports it is listening for incoming packets. If you are"
+  " behind a router or firewall, make sure that you have configured it to"
+  " forward and allow these ports."
+},
+/*
+{ "autoconnect",
+{ "autorefresh",
+{ "backlog",
+// TODO: color_*?
+{ "connection",
+{ "description",
+{ "download_dir",
+{ "download_slots",
+{ "email",
+{ "encoding",
+{ "hubname",
+{ "log_debug",
+{ "log_downloads",
+{ "log_uploads",
+{ "minislots",
+{ "minislot_size",
+{ "nick",
+{ "password",
+{ "share_hidden",
+{ "show_joinquit",
+{ "slots",
+{ "tls_policy",
+*/
+
+{ NULL }
+};
+
+#endif // DOC_SET

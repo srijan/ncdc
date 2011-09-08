@@ -39,6 +39,12 @@ command can also be used get a list of available commands and to access this
 documentation.
 @commands@
 
+.SH SETTINGS
+The following is a list of configuration settings. These settings can be
+changed and queried using the `/set' command, and are stored in the config.ini
+file in the session directory.
+@settings@
+
 .SH FILES
 $NCDC_DIR corresponds to the session dir set via -c, environment variable
 $NCDC_DIR or $HOME/.ncdc.

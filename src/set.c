@@ -29,6 +29,9 @@
 #include <stdlib.h>
 #include <errno.h>
 
+#define DOC_SET
+#include "doc.h"
+
 
 // set options
 struct setting {
@@ -37,6 +40,7 @@ struct setting {
   void (*get)(char *, char *);
   void (*set)(char *, char *, char *);
   void (*suggest)(char *, char **);
+  struct doc_set *doc;
 };
 
 
@@ -612,7 +616,6 @@ static void set_tls_policy_sug(char *val, char **sug) {
 
 
 // the settings list
-// TODO: help text / documentation?
 static struct setting settings[] = {
   { "active",        "global", get_bool_f,        set_active,        NULL               },
   { "active_ip",     "global", get_string,        set_active_ip,     NULL               },
@@ -652,6 +655,18 @@ static struct setting *getsetting(const char *name) {
     if(strcmp(s->name, name) == 0)
       break;
   return s->name ? s : NULL;
+}
+
+
+// Get documentation for a setting. May return NULL.
+static struct doc_set *getdoc(struct setting *s) {
+  if(s->doc)
+    return s->doc;
+  struct doc_set *i = (struct doc_set *)doc_sets;
+  for(; i->name; i++)
+    if(strcmp(i->name, s->name) == 0)
+      return i;
+  return NULL;
 }
 
 
@@ -782,5 +797,18 @@ void c_set_sug(char *args, char **sug) {
       strv_prefix(sug, args, " ", NULL);
     }
   }
+}
+
+
+// TODO: special case color_*?
+void c_help_set(char *args) {
+  struct setting *s = getsetting(args);
+  struct doc_set *d = s ? getdoc(s) : NULL;
+  if(!s)
+    ui_mf(NULL, 0, "\nUnknown setting `%s'.", args);
+  else if(!d)
+    ui_mf(NULL, 0, "\nNo documentation available for %s.", args);
+  else
+    ui_mf(NULL, 0, "\nSetting: %s.%s %s\n\n%s\n", !s->group ? "#hub" : s->group, s->name, d->type, d->desc);
 }
 

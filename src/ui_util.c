@@ -37,9 +37,6 @@
 
 // colors
 
-// TODO: make these colors configurable
-
-
 #if INTERFACE
 
 #define COLOR_DEFAULT (-1)
@@ -407,12 +404,15 @@ static int ui_logwindow_calc_wrap(char *str, int cols, int indent, int *rows, in
   if(curcols+t_w > cols) {\
     if(++cur >= 200)\
       break;\
-    if(ind && !*ind_row)\
+    if(ind && !*ind_row) {\
       *ind_row = cur-1;\
-    curcols = *ind_row ? 0 : indent;\
+      indent = 0;\
+    }\
+    curcols = indent;\
   }\
+  if(!(cur > 1 && j == i && curcols == indent))\
+    curcols += t_w;\
   i += b;\
-  curcols += t_w;\
   rows[cur] = i;
 
   while(str[i] && cur < 200) {
@@ -426,8 +426,9 @@ static int ui_logwindow_calc_wrap(char *str, int cols, int indent, int *rows, in
     if(j == i) {
       append(1,1, FALSE);
 
-    // If the word still fits on the current line or is smaller than cols/2, then consider it as a single entity
-    } else if(curcols+width <= cols || width < cols/2) {
+    // If the word still fits on the current line or is smaller than cols*3/4
+    // and cols-indent, then consider it as a single entity
+    } else if(curcols+width <= cols || width < MIN(cols*3/4, cols-indent)) {
       append(width, j-i, FALSE);
 
     // Otherwise, wrap on character-boundary and ignore indent
@@ -544,7 +545,7 @@ static int ui_logwindow_drawline(struct ui_logwindow *lw, int y, int x, int nrow
   int cmask = ui_logwindow_calc_color(lw, str, colors_sep, colors);
 
   // print the rows
-  int r = 0, c = 0;
+  int r = 0, c = 0, lr = 0;
   if(rmask-r < nrows)
     move(y - rmask + r, r == 0 || r >= ind_row ? x : x+indent);
   while(r <= rmask && c <= cmask) {
@@ -553,10 +554,17 @@ static int ui_logwindow_drawline(struct ui_logwindow *lw, int y, int x, int nrow
     int rstart = rows[r];
     int cstart = colors_sep[c];
     int start = MAX(rstart, cstart);
+    int end = MIN(cend, rend);
 
-    if(rmask-r < nrows) {
+    // Ignore spaces at the start of a new line
+    while(r > 0 && lr != r && start < end && str[start] == ' ')
+      start++;
+    if(start < end)
+      lr = r;
+
+    if(start != end && rmask-r < nrows) {
       attron(colors[c]);
-      addnstr(str+start, MIN(cend, rend)-start);
+      addnstr(str+start, end-start);
       attroff(colors[c]);
     }
 

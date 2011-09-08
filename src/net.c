@@ -88,16 +88,12 @@ struct net {
   GString *out_buf_old;
   int out_queue_src;
   // Sending a file.
-  // A file upload will start when out_buf->len == 0 && file_fn.
-  // file_fn will be set to NULL when file_in is known.
+  // A file upload will start when out_buf->len == 0 && file_left > 0 && !file_busy.
   // file_left will be updated from the file transfer thread.
   int file_left;
-  GSocket *file_outsock;  // for sendfile() support
+  gboolean file_busy;
   guint64 file_offset;
   GFileInputStream *file_in;
-  GCancellable *file_can; // copy + ref of out_can in a certain point of time
-  GOutputStream *file_out; // copy + ref of n->out
-  GError *file_err;
   void (*file_cb)(struct net *);
 
   // In/out rates
@@ -444,11 +440,8 @@ void net_disconnect(struct net *n) {
     g_object_unref(n->file_in);
     n->file_in = NULL;
   }
-  if(n->file_err) {
-    g_error_free(n->file_err);
-    n->file_err = NULL;
-  }
   n->file_left = 0;
+  n->file_busy = FALSE;
   ratecalc_unregister(n->rate_in);
   ratecalc_unregister(n->rate_out);
   time(&n->timeout_last);
@@ -498,70 +491,71 @@ void net_recvraw(struct net *n, guint64 length, void (*cb)(struct net *, char *,
 static GThreadPool *file_pool = NULL; // initialized in net_init_global();
 
 
+struct file_ctx {
+  struct net *n;          // only for access to rate_out and file_left (atomic int)
+  GOutputStream *out;     // ref of n->out
+  GCancellable *can;      // ref of n->out_can
+  GSocket *sock;          // NULL if sendfile() shouldn't be used
+  GFileInputStream *file; // file stream to send
+  guint64 offset;
+  GError *err;
+};
+
+
 static gboolean file_done(gpointer dat) {
-  struct net *n = dat;
+  struct file_ctx *c = dat;
 
-  n->file_left = 0;
-  g_object_unref(n->file_can);
-  g_object_unref(n->file_out);
-  n->file_out = NULL;
-  n->file_can = NULL;
-
-  if(n->file_outsock) {
-    g_object_unref(n->file_outsock);
-    n->file_outsock = NULL;
+  if(!g_cancellable_is_cancelled(c->can)) {
+    c->n->file_left = 0;
+    c->n->file_busy = FALSE;
+    if(c->err)
+      c->n->cb_err(c->n, NETERR_SEND, c->err);
+    else if(c->n->file_cb)
+      c->n->file_cb(c->n);
   }
-  if(n->file_err) {
-    if(n->conn && n->file_err->code != G_IO_ERROR_CANCELLED)
-      n->cb_err(n, NETERR_SEND, n->file_err);
-    g_error_free(n->file_err);
-    n->file_err = NULL;
-  } else if(n->file_cb && n->conn)
-    n->file_cb(n);
 
-  if(n->file_in) {
-    g_object_unref(n->file_in);
-    n->file_in = NULL;
-  }
-  net_unref(n);
+  g_object_unref(c->can);
+  g_object_unref(c->out);
+  g_object_unref(c->file);
+  if(c->sock)
+    g_object_unref(c->sock);
+  if(c->err)
+    g_error_free(c->err);
+  net_unref(c->n);
+  g_slice_free(struct file_ctx, c);
   return FALSE;
 }
 
 
 // Inspired by glib:gio/goutputstream.c:g_output_stream_real_splice().
-// This thread has a _ref() on the net struct, so we don't have to worry about
-// that dissappearing. Most of the file_* fields are now owned by this thread,
-// except for file_left, which is shared through the use of g_atomic_int. If
-// n->file_can is cancelled, we shouldn't touch any of the fields anymore,
-// since net_disconnect() has already taken care of cleaning up for us.
 static void file_thread(gpointer dat, gpointer udat) {
-  struct net *n = dat;
+  struct file_ctx *c = dat;
   char buf[8192];
 
-  if(g_cancellable_is_cancelled(n->file_can)) {
-    g_set_error_literal(&n->file_err, 1, G_IO_ERROR_CANCELLED, "Operation cancelled");
+  if(g_cancellable_is_cancelled(c->can)) {
+    g_set_error_literal(&c->err, 1, G_IO_ERROR_CANCELLED, "Operation cancelled");
     goto file_thread_done;
   }
-  int total = g_atomic_int_get(&n->file_left);
+  int total = g_atomic_int_get(&c->n->file_left);
   int left = total;
 
   // sendfile()-based sending
 #ifdef HAVE_SENDFILE
-  int fd = n->file_outsock && G_IS_FILE_DESCRIPTOR_BASED(n->file_in)
-    ? g_file_descriptor_based_get_fd(G_FILE_DESCRIPTOR_BASED(n->file_in)) : -1;
+  int fd = c->sock && G_IS_FILE_DESCRIPTOR_BASED(c->file)
+    ? g_file_descriptor_based_get_fd(G_FILE_DESCRIPTOR_BASED(c->file)) : -1;
   while(fd > 0 && left > 0) {
     // Wait for the socket to be writable, to ensure that sendfile() won't
     // block for too long. sendfile() isn't cancellable, after all.
-    if(!g_socket_condition_wait(n->file_outsock, G_IO_OUT, n->file_can, &n->file_err))
+    if(!g_socket_condition_wait(c->sock, G_IO_OUT, c->can, &c->err))
       break;
 
     // call sendfile()
-    off_t off = n->file_offset+(total-left);
+    off_t off = c->offset+(total-left);
 #ifdef HAVE_LINUX_SENDFILE
-    ssize_t r = sendfile(g_socket_get_fd(n->file_outsock), fd, &off, left);
+    ssize_t r = sendfile(g_socket_get_fd(c->sock), fd, &off, left);
 #elif HAVE_BSD_SENDFILE
     off_t len = 0;
-    gint64 r = sendfile(fd, g_socket_get_fd(n->file_outsock), off, (size_t)left, NULL, &len, 0);
+    gint64 r = sendfile(fd, g_socket_get_fd(c->sock), off, (size_t)left, NULL, &len, 0);
     // a partial write results in an EAGAIN error on BSD, even though this isn't
     // really an error condition at all.
     if(r != -1 || (r == -1 && errno == EAGAIN))
@@ -572,13 +566,13 @@ static void file_thread(gpointer dat, gpointer udat) {
     if(r >= 0) {
       left -= r;
       ratecalc_add(&net_out, r);
-      ratecalc_add(n->rate_out, r);
-      g_atomic_int_set(&n->file_left, left);
+      ratecalc_add(c->n->rate_out, r);
+      g_atomic_int_set(&c->n->file_left, left);
       continue;
     } else if(errno == EAGAIN || errno == EINTR) {
       continue;
     } else if(errno == EPIPE || errno == ECONNRESET) {
-      g_set_error_literal(&n->file_err, 1, 0, "Remote disconnected.");
+      g_set_error_literal(&c->err, 1, 0, "Remote disconnected.");
       break;
     } else if(errno == ENOTSUP || errno == ENOSYS || errno == EINVAL) {
       g_message("sendfile() failed with `%s', using fallback.", g_strerror(errno));
@@ -586,24 +580,24 @@ static void file_thread(gpointer dat, gpointer udat) {
       break;
     } else {
       g_critical("sendfile() returned an unknown error: %d (%s)", errno, g_strerror(errno));
-      g_set_error_literal(&n->file_err, 1, 0, "Sendfile() error.");
+      g_set_error_literal(&c->err, 1, 0, "Sendfile() error.");
       break;
     }
   }
 #endif
 
   // non-sendfile() fallback
-  gboolean res = left > 0 && !n->file_err;
-  if(res && !g_seekable_seek(G_SEEKABLE(n->file_in), n->file_offset+(total-left), G_SEEK_SET, NULL, &n->file_err))
+  gboolean res = left > 0 && !c->err;
+  if(res && !g_seekable_seek(G_SEEKABLE(c->file), c->offset+(total-left), G_SEEK_SET, NULL, &c->err))
     res = FALSE;
   int r, w;
   while(res && left > 0) {
-    r = g_input_stream_read(G_INPUT_STREAM(n->file_in), buf, MIN(left, sizeof(buf)), n->file_can, &n->file_err);
+    r = g_input_stream_read(G_INPUT_STREAM(c->file), buf, MIN(left, sizeof(buf)), c->can, &c->err);
     if(r < 0)
       break;
 
     if(r == 0) {
-      g_set_error_literal(&n->file_err, 1, 0, "Unexpected EOF.");
+      g_set_error_literal(&c->err, 1, 0, "Unexpected EOF.");
       break;
     }
 
@@ -611,7 +605,7 @@ static void file_thread(gpointer dat, gpointer udat) {
     // calculation and file_left.
     char *p = buf;
     while(r > 0) {
-      w = g_output_stream_write(n->file_out, p, r, n->file_can, &n->file_err);
+      w = g_output_stream_write(c->out, p, r, c->can, &c->err);
       if(w <= 0) {
         res = FALSE;
         break;
@@ -620,33 +614,40 @@ static void file_thread(gpointer dat, gpointer udat) {
       left -= w;
       p += w;
       ratecalc_add(&net_out, w);
-      ratecalc_add(n->rate_out, w);
-      g_atomic_int_set(&n->file_left, left);
+      ratecalc_add(c->n->rate_out, w);
+      g_atomic_int_set(&c->n->file_left, left);
     }
   }
 
 file_thread_done:
-  g_idle_add(file_done, n);
+  g_idle_add(file_done, c);
 }
 
 
 static void file_start(struct net *n) {
-  g_return_if_fail(n->file_in && !n->file_can);
-  n->file_can = n->out_can;
-  n->file_out = n->out;
-  n->file_err = NULL;
+  g_return_if_fail(n->file_in && !n->file_busy);
+
+  struct file_ctx *c = g_slice_new0(struct file_ctx);
+  c->n = n;
+  net_ref(n);
+  c->can = n->out_can;
+  g_object_ref(c->can);
+  c->out = n->out;
+  g_object_ref(c->out);
+  c->file = n->file_in; // we now claim ownership of it
+  n->file_in = NULL;
+  c->offset = n->file_offset;
+  n->file_busy = TRUE;
+
 #if TLS_SUPPORT
   if(!n->tls && !G_IS_TCP_WRAPPER_CONNECTION(n->conn)) {
 #endif
-    n->file_outsock = g_socket_connection_get_socket(n->conn);
-    g_object_ref(n->file_outsock);
+    c->sock = g_socket_connection_get_socket(n->conn);
+    g_object_ref(c->sock);
 #if TLS_SUPPORT
   }
 #endif
-  g_object_ref(n->file_can);
-  g_object_ref(n->file_out);
-  net_ref(n);
-  g_thread_pool_push(file_pool, n, NULL);
+  g_thread_pool_push(file_pool, c, NULL);
 }
 
 
@@ -685,14 +686,14 @@ static gboolean setup_write(gpointer dat) {
   struct net *n = dat;
   if(n->out_queue_src)
     n->out_queue_src = 0;
-  if(!n->conn || g_output_stream_has_pending(n->out) || n->file_can)
+  if(!n->conn || g_output_stream_has_pending(n->out) || n->file_busy)
     return FALSE;
 
   if(n->out_buf->len) {
     g_output_stream_write_async(n->out, n->out_buf->str, n->out_buf->len, G_PRIORITY_DEFAULT, n->out_can, handle_write, n);
     g_object_ref(n->out);
     net_ref(n);
-  } else if(n->file_in)
+  } else if(n->file_left)
     file_start(n);
   return FALSE;
 }
@@ -701,7 +702,7 @@ static gboolean setup_write(gpointer dat) {
 void net_sendraw(struct net *n, const char *buf, int len) {
   if(!n->conn)
     return;
-  g_return_if_fail(!n->file_left && !n->file_in);
+  g_return_if_fail(!n->file_left);
   // Don't write to the output buffer when an asynchronous write is in
   // progress. Otherwise we may risk the write thread to read invalid memory.
   if(g_output_stream_has_pending(n->out)) {
@@ -735,6 +736,11 @@ void net_sendf(struct net *n, const char *fmt, ...) {
 
 
 void net_sendfile(struct net *n, const char *path, guint64 offset, int length, void (*cb)(struct net *)) {
+  if(!length) {
+    if(cb)
+      cb(n);
+    return;
+  }
   // Open file
   GError *err = NULL;
   GFile *fn = g_file_new_for_path(path);

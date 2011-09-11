@@ -17,7 +17,7 @@ ncdc_SOURCES =\
 	util.c
 
 auto_headers = $(ncdc_SOURCES:.c=.h)
-noinst_HEADERS = ncdc.h ${auto_headers}
+noinst_HEADERS = doc.h ncdc.h ${auto_headers}
 ncdc_CFLAGS = $(DEPS_CFLAGS)
 ncdc_LDFLAGS = $(DEPS_LIBS)
 

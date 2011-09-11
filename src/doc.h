@@ -244,30 +244,123 @@ static const struct doc_set {
   " behind a router or firewall, make sure that you have configured it to"
   " forward and allow these ports."
 },
-/*
-{ "autoconnect",
-{ "autorefresh",
-{ "backlog",
+{ "autoconnect", "<boolean>",
+  "Set to true to automatically connect to the current hub when ncdc starts up."
+},
+{ "autorefresh", "<integer>",
+  "The time between automatic file refreshes, in minutes. Set to 0 to disable"
+  " automatically refreshing the file list. This setting also determines"
+  " whether ncdc will perform a refresh on startup. See the `/refresh' command to"
+  " manually refresh your file list."
+},
+{ "backlog", "<integer>",
+  "When opening a hub or PM tab, ncdc can load a certain amount of lines from"
+  " the log files into the log window. Setting this to a positive value enables"
+  " this feature and configures the number of lines to load. Note that, while"
+  " this setting can be set on a per-hub basis, PM windows will use the global"
+  " value (global.backlog)."
+},
 // TODO: color_*?
-{ "connection",
-{ "description",
-{ "download_dir",
-{ "download_slots",
-{ "email",
-{ "encoding",
-{ "hubname",
-{ "log_debug",
-{ "log_downloads",
-{ "log_uploads",
-{ "minislots",
-{ "minislot_size",
-{ "nick",
-{ "password",
-{ "share_hidden",
-{ "show_joinquit",
-{ "slots",
-{ "tls_policy",
-*/
+{ "connection", "<string>",
+  "Set your upload speed. The actual format you can use here may vary, but in"
+  " general you can set it to either a pain number for Mbit/s (e.g. `50' for"
+  " 50 mbit) or a number with a `KiB/s' indicator (e.g. `2300 KiB/s'). This is"
+  " only used when connecting to NMDC hubs, and is just an indication for other"
+  " users in the hub so that they know what speed they can expect when"
+  " downloading from you."
+},
+{ "description", "<string>",
+  "A short public description that will be displayed in the user list of a hub."
+},
+{ "download_dir", "<path>",
+  "The directory where finished downloads are moved to. Finished downloads are"
+  " by default stored in <session directory>/dl/. It is possible to set this to"
+  " a location that is on a different filesystem than the session directory,"
+  " but doing so is not recommended: ncdc will block when moving the completed"
+  " files to their final destination."
+},
+{ "download_slots", "<integer>",
+  "Maximum number of simultaneous downloads."
+},
+{ "email", "<string>",
+  "Your email address. This will be displayed in the user list of the hub, so"
+  " only set this if you want it to be public."
+},
+// TODO: short list of common encodings and the languages/countries that use them
+{ "encoding", "<string>",
+  "The character set/encoding to use for hub and PM messages. This setting is"
+  " only used on NMDC hubs, ADC always uses UTF-8."
+},
+{ "hubname", "<string>",
+  "The name of the currently opened hub tab. This is a user-assigned name, and"
+  " is only used within ncdc itself. This is the same name as given to the"
+  " `/open' command."
+},
+{ "log_debug", "<boolean>",
+  "Log debug messages to stderr.log in the session directory. It is highly"
+  " recommended to enable this setting if you wish to debug or hack ncdc. Be"
+  " warned, however, that this may generate a lot of data if you're connected"
+  " to a large hub."
+},
+{ "log_downloads", "<boolean>",
+  "Log downloaded files to transfers.log."
+},
+{ "log_uploads", "<boolean>",
+  "Log file uploads to transfers.log."
+},
+{ "minislots", "<integer>",
+  "Set the number of available minislots. A `minislot' is a special slot that"
+  " is used when all regular upload slots are in use, and someone is requesting"
+  " your filelist or a small file. In this case, the other client automatically"
+  " applies for a minislot, and can still download the file as long as not all"
+  " minislots are in use. What constitutes a `small' file can be changed with"
+  " the `minislot_size' setting. Also see the `slots' configuration setting and"
+  " the `/grant' command."
+},
+{ "minislot_size", "<integer>",
+  "The maximum size of a file that may be downloaded using a `minislot', in"
+  " KiB. See the `minislots' setting for more information."
+},
+{ "nick", "<string>",
+  "Your nick. Nick changes are only visible on newly connected hubs, use the "
+  " `/reconnect' command to use your new nick immediately. Note that it is"
+  " highly discouraged to change your nick on NMDC hubs. This is because"
+  " clients downloading from you have no way of knowing that you changed your"
+  " nick, and therefore can't immediately continue to download from you."
+},
+{ "password", "<string>",
+  "Sets your password for the current hub and enables auto-login on connect. If"
+  " you just want to login to a hub without saving your password, use the"
+  " `/password' command instead. Passwords are saved unencrypted in the config"
+  " file."
+},
+{ "share_hidden", "<boolean>",
+  "Whether to share hidden files and directories. A `hidden' file or directory"
+  " is one of which the file name starts with a dot. (e.g. `.bashrc'). A file"
+  " list refresh is required for this setting to be effective."
+},
+{ "show_joinquit", "<boolean>",
+  "Whether to display join/quit messages in the hub chat."
+},
+{ "slots", "<integer>",
+  "The number of upload slots. This determines for the most part how many"
+  " people can download from you simultaneously. It is possible that this limit"
+  " is exceeded in certain circumstances, see the `minislots' setting and the"
+  " `/grant' command."
+},
+{ "tls_policy", "<disabled|allow|prefer>",
+  "Set the policy for secure client-to-client connections. Setting this to"
+  " `disabled' disables TLS support for client connections, but still allows"
+  " you to connect to TLS-enabled hubs. `allow' will allow the use of TLS if"
+  " the other client requests this, but ncdc itself will not request TLS when"
+  " connecting to others. Setting this to `prefer' tells ncdc to also request"
+  " TLS when connecting to others.\n\n"
+  "The use of TLS for client connections usually results in less optimal"
+  " performance when uploading and downloading, but is quite effective at"
+  " avoiding protocol-specific traffic shaping that some ISPs may do. Also note"
+  " that, even if you set this to `prefer', TLS will only be used if the"
+  " connecting party also supports it."
+},
 
 { NULL }
 };

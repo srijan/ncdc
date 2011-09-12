@@ -260,7 +260,31 @@ static const struct doc_set {
   " this setting can be set on a per-hub basis, PM windows will use the global"
   " value (global.backlog)."
 },
-// TODO: color_*?
+// Note: the setting list isn't alphabetic here, but in a more intuitive order
+{ "color_*", "<color>",
+  "The settings starting with the `color_' prefix allow you to change the"
+  " interface colors. The following is a list of available color settings:\n"
+  "  log_default   - default log color\n"
+  "  log_time      - the time prefix in log messages\n"
+  "  log_nick      - default nick color\n"
+  "  log_highlight - nick color of a highlighted line\n"
+  "  log_ownnick   - color of your own nick\n"
+  "  log_join      - color of join messages\n"
+  "  log_quit      - color of quit messages\n"
+  "  tabprio_low   - low priority tab notification color\n"
+  "  tabprio_med   - medium priority tab notification color\n"
+  "  tabprio_high  - high priority tab notification color\n"
+  "\n"
+  "The actual color value can be set with a comma-separated list of colors"
+  " and/or attributes. The first color in the list is the foreground color, the"
+  " second color is used for the background. When the fore- or background color"
+  " is not specified, the default colors of your terminal will be used.\n"
+  "The following color names can be used: black, blue, cyan, default, green,"
+  " magenta, red, white and yellow.\n"
+  "The following attributes can be used: bold, reverse and underline.\n"
+  "The actual color values displayed by your terminal may vary. Adding the"
+  " `bold' attribute usually makes the foreground color appear brighter as well."
+},
 { "connection", "<string>",
   "Set your upload speed. The actual format you can use here may vary, but in"
   " general you can set it to either a pain number for Mbit/s (e.g. `50' for"
@@ -289,7 +313,13 @@ static const struct doc_set {
 // TODO: short list of common encodings and the languages/countries that use them
 { "encoding", "<string>",
   "The character set/encoding to use for hub and PM messages. This setting is"
-  " only used on NMDC hubs, ADC always uses UTF-8."
+  " only used on NMDC hubs, ADC always uses UTF-8. Some common values are:\n"
+  "  CP1250      (Central Europe)\n"
+  "  CP1251      (Cyrillic)\n"
+  "  CP1252      (Western Europe)\n"
+  "  ISO-8859-7  (Greek)\n"
+  "  KOI8-R      (Cyrillic)\n"
+  "  UTF-8       (International)"
 },
 { "hubname", "<string>",
   "The name of the currently opened hub tab. This is a user-assigned name, and"

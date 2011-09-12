@@ -660,11 +660,14 @@ static struct setting *getsetting(const char *name) {
 
 // Get documentation for a setting. May return NULL.
 static struct doc_set *getdoc(struct setting *s) {
+  // Anything prefixed with `color_' can go to the `color_*' doc
+  char *n = strncmp(s->name, "color_", 6) == 0 ? "color_*" : s->name;
+
   if(s->doc)
     return s->doc;
   struct doc_set *i = (struct doc_set *)doc_sets;
   for(; i->name; i++)
-    if(strcmp(i->name, s->name) == 0)
+    if(strcmp(i->name, n) == 0)
       return i;
   return NULL;
 }
@@ -800,7 +803,6 @@ void c_set_sug(char *args, char **sug) {
 }
 
 
-// TODO: special case color_*?
 void c_help_set(char *args) {
   struct setting *s = getsetting(args);
   struct doc_set *d = s ? getdoc(s) : NULL;

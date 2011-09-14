@@ -364,7 +364,7 @@ void cc_init_global() {
   cc_granted = g_hash_table_new_full(g_int64_hash, g_int64_equal, g_free, NULL);
 
   throttle_list = g_hash_table_new_full(throttle_hash, throttle_equal, NULL, throttle_free);
-  g_timeout_add_seconds_full(G_PRIORITY_LOW, 3600, throttle_purge, NULL, NULL);
+  g_timeout_add_seconds_full(G_PRIORITY_LOW, 600, throttle_purge, NULL, NULL);
 }
 
 

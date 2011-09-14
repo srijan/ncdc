@@ -30,6 +30,7 @@
 #include <errno.h>
 
 #define DOC_CMD
+#define DOC_KEY
 #include "doc.h"
 
 struct cmd {
@@ -142,17 +143,42 @@ static void c_help(char *args) {
   if(sec)
     *(sec++) = 0;
 
-  struct cmd *c;
   // list available commands
   if(!args[0]) {
     ui_m(NULL, 0, "\nAvailable commands:");
-    for(c=cmds; c->f; c++)
+    struct cmd *c = cmds;
+    for(; c->f; c++)
       ui_mf(NULL, 0, " /%s - %s", c->name, getdoc(c)->sum);
-    ui_m(NULL, 0, "");
+    ui_m(NULL, 0, "\nFor help on key bindings, use `/help keys'.\n");
 
-  // list information on a particular command
+  // list information on a setting
+  } else if(strcmp(args, "set") == 0 && sec) {
+    c_help_set(sec);
+
+  // list available key sections
+  } else if(strcmp(args, "keys") == 0 && !sec) {
+    ui_m(NULL, 0, "\nAvailable sections:");
+    const struct doc_key *k = doc_keys;
+    for(; k->sect; k++)
+      ui_mf(NULL, 0, " %s - %s", k->sect, k->title);
+    ui_m(NULL, 0, "\nUse `/help keys <name>' to get help on the key bindings for the selected section.\n");
+
+  // get information on a particular key section
+  } else if(strcmp(args, "keys") == 0 && sec) {
+    const struct doc_key *k = doc_keys;
+    for(; k->sect; k++)
+      if(strcmp(k->sect, sec) == 0)
+        break;
+    if(!k->sect)
+      ui_mf(NULL, 0, "\nUnknown keys section '%s'.", sec);
+    else
+      ui_mf(NULL, 0, "\nKey bindings for: %s - %s.\n\n%s\n", k->sect, k->title, k->desc);
+
+  // get information on a particular command
   } else if(!sec) {
-    c = getcmd(args);
+    if(*args == '/')
+      args++;
+    struct cmd *c = getcmd(args);
     if(!c)
       ui_mf(NULL, 0, "\nUnknown command '%s'.", args);
     else {
@@ -161,10 +187,6 @@ static void c_help(char *args) {
       if(d->desc)
         ui_mf(NULL, 0, "%s\n", d->desc);
     }
-
-  // list information on a setting
-  } else if(strcmp(args, "set") == 0) {
-    c_help_set(sec);
 
   } else
     ui_mf(NULL, 0, "\nUnknown help section `%s'.", args);
@@ -178,12 +200,30 @@ static void c_help_sug(char *args, char **sug) {
     strv_prefix(sug, "set ", NULL);
     return;
   }
+  // help keys ..
+  if(strncmp(args, "keys ", 5) == 0) {
+    int i = 0, len = strlen(args)-5;
+    const struct doc_key *k;
+    for(k=doc_keys; i<20 && k->sect; k++)
+      if(strncmp(k->sect, args+5, len) == 0 && strlen(k->sect) != len)
+        sug[i++] = g_strdup(k->sect);
+    strv_prefix(sug, "keys ", NULL);
+    return;
+  }
   // help command
   int i = 0, len = strlen(args);
+  gboolean ckeys = FALSE;
   struct cmd *c;
-  for(c=cmds; i<20 && c->f; c++)
-    if(strncmp(c->name, args, len) == 0 && strlen(c->name) != len)
+  for(c=cmds; i<20 && c->f; c++) {
+    // Somehow merge "keys" into the list
+    if(!ckeys && strcmp(c->name, "keys") > 0) {
+      if(strncmp("keys", args, len) == 0 && len != 4)
+        sug[i++] = g_strdup("keys");
+      ckeys = TRUE;
+    }
+    if(i < 20 && strncmp(c->name, args, len) == 0 && strlen(c->name) != len)
       sug[i++] = g_strdup(c->name);
+  }
 }
 
 

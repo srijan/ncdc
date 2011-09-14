@@ -45,6 +45,12 @@ changed and queried using the `/set' command, and are stored in the config.ini
 file in the session directory.
 @settings@
 
+.SH KEY BINDINGS
+On any tab without the text input line, you can press `?' to get the key
+bindings for that tab. This list of key bindings is also available through the
+`/help keys' command, and is reproduced below.
+@keys@
+
 .SH FILES
 $NCDC_DIR corresponds to the session dir set via -c, environment variable
 $NCDC_DIR or $HOME/.ncdc.

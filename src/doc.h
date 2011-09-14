@@ -88,7 +88,8 @@ static const struct doc_cmd {
 { "help", "[<command>|set <key>]", "Request information on commands.",
   "To get a list of available commands, use /help without arguments.\n"
   "To get information on a particular command, use /help <command>.\n"
-  "To get information on a configuration setting, use /help set <setting>."
+  "To get information on a configuration setting, use /help set <setting>.\n"
+  "To get help on key bindings, use /help keys.\n"
 },
 { "kick", "<user>", "Kick a user from the hub.",
   "Kick a user from the hub. This command only works on NMDC hubs, and you need"
@@ -310,7 +311,6 @@ static const struct doc_set {
   "Your email address. This will be displayed in the user list of the hub, so"
   " only set this if you want it to be public."
 },
-// TODO: short list of common encodings and the languages/countries that use them
 { "encoding", "<string>",
   "The character set/encoding to use for hub and PM messages. This setting is"
   " only used on NMDC hubs, ADC always uses UTF-8. Some common values are:\n"
@@ -396,3 +396,109 @@ static const struct doc_set {
 };
 
 #endif // DOC_SET
+
+
+
+#ifdef DOC_KEY
+
+// There is some redundancy here with the actual keys used in the switch()
+// statements of each window/widget. But the methods for synchronizing the keys
+// aren't going to worth it I'm afraid.
+
+// Don't want to redirect people to the global keybindings for these four lines.
+#define LISTING_KEYS \
+  "Up/Down      Select one item up/down.\n"\
+  "k/j          Select one item up/down.\n"\
+  "PgUp/PgDown  Select one page of items up/down.\n"\
+  "End/Home     Select last/first item in the list.\n"
+
+static const struct doc_key {
+  char const *sect, *title, *desc;
+} doc_keys[] = {
+
+{ "global", "Global key bindings",
+  "Alt-j        Open previous tab.\n"
+  "Alt+k        Open next tab.\n"
+  "Alt+h        Move current tab left.\n"
+  "Alt+l        Move current tab right.\n"
+  "Alt+<num>    Open tab with number <num>.\n"
+  "Alt+c        Close current tab.\n"
+  "Alt+n        Open the connections tab.\n"
+  "Alt+q        Open the download queue tab.\n"
+  "Alt+o        Open own file list.\n"
+  "Alt+r        Refresh file list.\n"
+  "Ctrl+c       Quit ncdc.\n"
+  "\n"
+  "Keys for tabs with a log window:\n"
+  "Ctrl+l       Clear current log window.\n"
+  "PgUp         Scroll the log backward.\n"
+  "PgDown       Scroll the log forward.\n"
+  "\n"
+  "Keys for tabs with a text input line:\n"
+  "Left/Right   Move cursor one character left or right.\n"
+  "End/Home     Move cursor to the end / start of the line.\n"
+  "Up/Down      Scroll through the command history.\n"
+  "Tab          Auto-complete current command, nick or argument.\n"
+  "Alt+b        Move cursor one word backward.\n"
+  "Alt+f        Move cursor one word forward.\n"
+  "Backspace    Delete character before cursor.\n"
+  "Delete       Delete character under cursor.\n"
+  "Ctrl+w       Delete to previous space.\n"
+  "Alt+d        Delete to next space.\n"
+  "Ctrl+k       Delete everything after cursor.\n"
+  "Ctrl+u       Delete entire line."
+},
+{ "browse", "File browser",
+  LISTING_KEYS
+  "Right/l      Open selected directory.\n"
+  "Left/h       Open parent directory.\n"
+  "d            Add selected file/directory to the download queue."
+},
+{ "connections", "Connection list",
+  LISTING_KEYS
+  "d            Disconnect selected connection.\n"
+  "i/Return     Toggle information box.\n"
+  "f            Find user in user list.\n"
+  "q            Find file in download queue."
+},
+{ "queue", "Download queue",
+  LISTING_KEYS
+  "f            Find user in user list.\n"
+  "c            Find connection in the connection list.\n"
+  "d            Remove selected file from the queue.\n"
+  "+/-          Increase/decrease priority.\n"
+  "\n"
+  "Note: when an item in the queue has `ERR' indicated in the priority column,"
+  " you have two choices: You can remove the item from the queue using `d', or"
+  " attempt to continue the download by increasing its priority using `+'."
+},
+{ "search", "Search results tab",
+  LISTING_KEYS
+  "f            Find user in user list.\n"
+  "b/B          Browse the selected users' list, B to force a redownload.\n"
+  "h            Toggle hub column visibility.\n"
+  "u            Order by username.\n"
+  "s            Order by file size.\n"
+  "l            Order by free slots.\n"
+  "n            Order by file name."
+},
+{ "userlist", "User list tab",
+  LISTING_KEYS
+  "s            Order by share size.\n"
+  "u            Order by username.\n"
+  "o            Toggle sorting OPs before others.\n"
+  "t            Toggle tag column visibility.\n"
+  "e            Toggle email column visibility.\n"
+  "c            Toggle connection column visibility.\n"
+  "i/Return     Toggle information box.\n"
+  "m            Send a PM to the selected user.\n"
+  "g            Grant a slot to the selected user.\n"
+  "b/B          Browse the selected users' list, B to force a redownload."
+},
+
+{ NULL }
+};
+
+#undef LISTING_KEYS
+
+#endif // DOC_KEY

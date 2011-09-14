@@ -143,6 +143,15 @@ static void ui_main_key(guint64 key) {
 }
 
 
+// Select the main tab and run `/help keys <s>'.
+static void ui_main_keys(const char *s) {
+  ui_tab_cur = g_list_find(ui_tabs, ui_main);
+  char *c = g_strdup_printf("/help keys %s", s);
+  cmd_handle(c);
+  g_free(c);
+}
+
+
 
 
 
@@ -629,6 +638,9 @@ static void ui_userlist_key(struct ui_tab *tab, guint64 key) {
   struct hub_user *sel = g_sequence_iter_is_end(tab->list->sel) ? NULL : g_sequence_get(tab->list->sel);
   gboolean sort = FALSE;
   switch(key) {
+  case INPT_CHAR('?'):
+    ui_main_keys("userlist");
+    break;
   case INPT_CHAR('s'): // s (order by share asc/desc)
     if(tab->user_sort_share)
       tab->user_reverse = !tab->user_reverse;
@@ -949,6 +961,9 @@ static void ui_conn_key(guint64 key) {
   struct cc *cc = g_sequence_iter_is_end(ui_conn->list->sel) ? NULL : g_sequence_get(ui_conn->list->sel);
 
   switch(key) {
+  case INPT_CHAR('?'):
+    ui_main_keys("connections");
+    break;
   case INPT_CTRL('j'): // newline
   case INPT_CHAR('i'): // i - toggle detailed info
     ui_conn->details = !ui_conn->details;
@@ -1192,6 +1207,10 @@ static void ui_fl_key(struct ui_tab *tab, guint64 key) {
   struct fl_list *sel = !tab->list || g_sequence_iter_is_end(tab->list->sel) ? NULL : g_sequence_get(tab->list->sel);
 
   switch(key) {
+  case INPT_CHAR('?'):
+    ui_main_keys("browse");
+    break;
+
   case INPT_CTRL('j'):      // newline
   case INPT_KEY(KEY_RIGHT): // right
   case INPT_CHAR('l'):      // l          open selected directory
@@ -1380,6 +1399,10 @@ static void ui_dl_key(guint64 key) {
   struct dl *sel = g_sequence_iter_is_end(ui_dl->list->sel) ? NULL : g_sequence_get(ui_dl->list->sel);
 
   switch(key) {
+  case INPT_CHAR('?'):
+    ui_main_keys("queue");
+    break;
+
   case INPT_CHAR('f'): // f - find user
     if(!sel)
       ui_m(NULL, 0, "Nothing selected.");
@@ -1652,6 +1675,10 @@ static void ui_search_key(struct ui_tab *tab, guint64 key) {
   gboolean sort = FALSE;
 
   switch(key) {
+  case INPT_CHAR('?'):
+    ui_main_keys("search");
+    break;
+
   case INPT_CHAR('f'): // f - find user
     if(!sel)
       ui_m(NULL, 0, "Nothing selected.");

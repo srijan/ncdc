@@ -31,6 +31,7 @@
 
 #define DOC_CMD
 #define DOC_SET
+#define DOC_KEY
 #include "../src/doc.h"
 
 
@@ -65,6 +66,16 @@ static void gen_set() {
 }
 
 
+static void gen_key() {
+  const struct doc_key *k = doc_keys;
+  for(; k->sect; k++) {
+    printf(".TP\n\\fB%s\\fP\n.br\n", k->title);
+    out_string(k->desc);
+    printf("\n");
+  }
+}
+
+
 int main(int argc, char **argv) {
   if(argc != 1) {
     fprintf(stderr, "This command does not accept any commandline arguments.");
@@ -83,6 +94,9 @@ int main(int argc, char **argv) {
       } else if(strncmp(m, "@settings@", 10) == 0) {
         gen_set();
         t += 10;
+      } else if(strncmp(m, "@keys@", 6) == 0) {
+        gen_key();
+        t += 6;
       } else if(strncmp(m, "@version@", 9) == 0) {
         printf("%s-%s", PACKAGE, VERSION);
         t += 9;

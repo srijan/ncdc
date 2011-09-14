@@ -643,7 +643,7 @@ static void handle_sendcomplete(struct net *net) {
 //  50: Generic internal error
 //  51: File not available
 //  53: No slots
-// Handles both ADC GET and the NMDC $ADCGET. May do a cc_disconnect() on fatal error.
+// Handles both ADC GET and the NMDC $ADCGET.
 static void handle_adcget(struct cc *cc, char *type, char *id, guint64 start, gint64 bytes, GError **err) {
   // tthl
   if(strcmp(type, "tthl") == 0) {
@@ -749,7 +749,6 @@ static void handle_adcget(struct cc *cc, char *type, char *id, guint64 start, gi
   if(f && throttle_check(cc, f->tth, start)) {
     g_message("CC:%s: File upload throttled: %s offset %"G_GUINT64_FORMAT, net_remoteaddr(cc->net), vpath, start);
     g_set_error_literal(err, 1, 50, "Action throttled");
-    cc_disconnect(cc);
     g_free(path);
     g_free(vpath);
     return;
@@ -914,13 +913,11 @@ static void adc_handle(struct cc *cc, char *msg) {
       GError *err = NULL;
       handle_adcget(cc, cmd.argv[0], cmd.argv[1], start, len, &err);
       if(err) {
-        if(cc->state != CCS_DISCONN) {
-          GString *r = adc_generate('C', ADCC_STA, 0, 0);
-          g_string_append_printf(r, " 1%02d", err->code);
-          adc_append(r, NULL, err->message);
-          net_send(cc->net, r->str);
-          g_string_free(r, TRUE);
-        }
+        GString *r = adc_generate('C', ADCC_STA, 0, 0);
+        g_string_append_printf(r, " 1%02d", err->code);
+        adc_append(r, NULL, err->message);
+        net_send(cc->net, r->str);
+        g_string_free(r, TRUE);
         g_propagate_error(&cc->err, err);
       }
     }
@@ -1233,12 +1230,10 @@ static void nmdc_handle(struct cc *cc, char *cmd) {
       GError *err = NULL;
       handle_adcget(cc, type, un_id, st, by, &err);
       if(err) {
-        if(cc->state != CCS_DISCONN) {
-          if(err->code != 53)
-            net_sendf(cc->net, "$Error %s", err->message);
-          else
-            net_send(cc->net, "$MaxedOut");
-        }
+        if(err->code != 53)
+          net_sendf(cc->net, "$Error %s", err->message);
+        else
+          net_send(cc->net, "$MaxedOut");
         g_propagate_error(&cc->err, err);
       }
     }

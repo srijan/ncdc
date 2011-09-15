@@ -609,13 +609,24 @@ static void handle_recvtth(struct net *n, char *buf, int read, guint64 left) {
 }
 
 
-static void handle_adcsnd(struct cc *cc, gboolean tthl, guint64 start, guint64 bytes) {
+static void handle_adcsnd(struct cc *cc, gboolean tthl, guint64 start, gint64 bytes) {
   struct dl *dl = g_hash_table_lookup(dl_queue, cc->last_hash);
   if(!dl) {
     g_set_error_literal(&cc->err, 1, 0, "Download interrupted.");
     cc_disconnect(cc);
     return;
   }
+  // Some buggy clients (DCGUI) return $ADCSND with bytes = -1. They probably
+  // mean "all of the remaining bytes of the file" with that.
+  if(bytes < 0) {
+    if(tthl) {
+      g_set_error_literal(&cc->err, 1, 0, "Protocol error.");
+      cc_disconnect(cc);
+      return;
+    }
+    bytes = cc->last_size - cc->last_offset;
+  }
+
   cc->last_length = bytes;
   if(!tthl) {
     g_return_if_fail(dl->have == start);
@@ -931,7 +942,7 @@ static void adc_handle(struct cc *cc, char *msg) {
       g_message("CC:%s: Received message in wrong state: %s", net_remoteaddr(cc->net), msg);
       cc_disconnect(cc);
     } else
-      handle_adcsnd(cc, strcmp(cmd.argv[0], "tthl") == 0, g_ascii_strtoull(cmd.argv[2], NULL, 0), g_ascii_strtoull(cmd.argv[3], NULL, 0));
+      handle_adcsnd(cc, strcmp(cmd.argv[0], "tthl") == 0, g_ascii_strtoull(cmd.argv[2], NULL, 0), g_ascii_strtoll(cmd.argv[3], NULL, 0));
     break;
 
   case ADCC_GFI:
@@ -1255,7 +1266,7 @@ static void nmdc_handle(struct cc *cc, char *cmd) {
       char *type = g_match_info_fetch(nfo, 1);
       char *start = g_match_info_fetch(nfo, 2);
       char *bytes = g_match_info_fetch(nfo, 3);
-      handle_adcsnd(cc, strcmp(type, "tthl") == 0, g_ascii_strtoull(start, NULL, 10), g_ascii_strtoull(bytes, NULL, 10));
+      handle_adcsnd(cc, strcmp(type, "tthl") == 0, g_ascii_strtoull(start, NULL, 10), g_ascii_strtoll(bytes, NULL, 10));
       g_free(type);
       g_free(start);
       g_free(bytes);

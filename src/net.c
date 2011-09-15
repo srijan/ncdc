@@ -210,7 +210,7 @@ static void handle_input(struct net *n, char *buf, int len) {
       ? g_strndup(n->in_msg->str+1, sep - n->in_msg->str - 1)
       : g_strndup(n->in_msg->str, sep - n->in_msg->str);
     g_string_erase(n->in_msg, 0, 1 + sep - n->in_msg->str);
-    g_debug("%s< %s", net_remoteaddr(n), msg);
+    g_debug("%s%s< %s", net_remoteaddr(n), n->tls ? "S" : "", msg);
     if(msg[0])
       n->recv_msg_cb(n, msg);
     g_free(msg);
@@ -341,7 +341,7 @@ void net_setconn(struct net *n, GSocketConnection *conn, gboolean tls, gboolean 
     g_object_unref(addr);
   }
 
-  g_debug("%s- Connected.", net_remoteaddr(n));
+  g_debug("%s%s- Connected.", net_remoteaddr(n), n->tls ? "S" : "");
 }
 
 
@@ -422,7 +422,7 @@ void net_disconnect(struct net *n) {
   cancel_and_reset(n->out_can);
 #undef cancel_and_reset
 
-  g_debug("%s- Disconnected.", net_remoteaddr(n));
+  g_debug("%s%s- Disconnected.", net_remoteaddr(n), n->tls ? "S" : "");
   strcpy(n->addr, "(not connected)");
   g_io_stream_close_async(G_IO_STREAM(n->conn), G_PRIORITY_DEFAULT, NULL, handle_close, NULL);
   n->out = NULL;
@@ -719,7 +719,7 @@ void net_sendraw(struct net *n, const char *buf, int len) {
 
 
 void net_send(struct net *n, const char *msg) {
-  g_debug("%s> %s", net_remoteaddr(n), msg);
+  g_debug("%s%s> %s", net_remoteaddr(n), n->tls ? "S" : "", msg);
   net_sendraw(n, msg, strlen(msg));
   net_sendraw(n, n->eom, 1);
 }

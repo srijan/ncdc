@@ -36,8 +36,8 @@ struct hub_user {
   gboolean isjoined : 1; // managed by ui_hub_userchange()
   gboolean active : 1;
   gboolean hasudp4 : 1;
-  gboolean hasadcs : 1;
-  gboolean hasadc0 : 1;
+  gboolean hastls : 1;   // NMDC: 0x10 flag in $MyINFO; ADC: SU has ADCS or ADC0
+  gboolean hasadc0 : 1;  // (ADC) Whether the SU flag was ADC0 (otherwise it was ADCS)
   unsigned char h_norm;
   unsigned char h_reg;
   unsigned char h_op;
@@ -251,6 +251,7 @@ static void user_nmdc_nfo(struct hub *hub, struct hub_user *u, char *str) {
   unsigned char h_reg = 0;
   unsigned char h_op = 0;
   unsigned char slots = 0;
+  unsigned char flags = 0;
   unsigned int as = 0;
   guint64 share = 0;
 
@@ -293,12 +294,10 @@ static void user_nmdc_nfo(struct hub *hub, struct hub_user *u, char *str) {
 
   // connection and flag
   str = next;
-  if(!(next = strchr(str, '$')))
+  if(!(next = strchr(str, '$')) || str == next)
     return;
-  *next = 0; next++;
-
-  // we currently ignore the flag
-  str[strlen(str)-1] = 0;
+  flags = *(next-1);
+  *(next-1) = *next = 0; next++;
 
   conn = str;
   cleanspace(conn);
@@ -336,6 +335,7 @@ static void user_nmdc_nfo(struct hub *hub, struct hub_user *u, char *str) {
   u->as = as*1024;
   u->hasinfo = TRUE;
   u->active = active;
+  u->hastls = (flags & 0x10) ? TRUE : FALSE;
   ui_hub_userchange(hub->tab, UIHUB_UC_NFO, u);
 }
 
@@ -404,7 +404,7 @@ static void user_adc_nfo(struct hub *hub, struct hub_user *u, struct adc_cmd *cm
       u->active = !!strstr(p, "TCP4") || !!strstr(p, "TCP6");
       u->hasudp4 = !!strstr(p, "UDP4");
       u->hasadc0 = !!strstr(p, "ADC0");
-      u->hasadcs = !!strstr(p, "ADCS");
+      u->hastls  = u->hasadc0 || strstr(p, "ADCS");
       break;
     case P('C','T'): // client type (only used to figure out u->isop)
       u->isop = (strtol(p, NULL, 10) & (4 | 8 | 16 | 32)) > 0;
@@ -500,30 +500,29 @@ void hub_opencc(struct hub *hub, struct hub_user *u) {
   if(hub->adc)
     g_snprintf(token, 19, "%"G_GUINT32_FORMAT, g_random_int());
 
-  char *proto = proto =                        !hub->adc ? "" :
-    conf_tls_policy(hub->tab->name) != CONF_TLSP_PREFER ? "ADC/1.0" :
-                                             u->hasadcs ? "ADCS/1.0" :
-                                             u->hasadc0 ? "ADCS/0.10" : "ADC/1.0";
+  gboolean wanttls = conf_tls_policy(hub->tab->name) == CONF_TLSP_PREFER ? TRUE : FALSE;
+  gboolean cantls = wanttls && u->hastls;
+  char *adcproto = !cantls ? "ADC/1.0" : u->hasadc0 ? "ADCS/0.10" : "ADCS/1.0";
 
   // we're active, send CTM
   if(cc_listen) {
-    int port = strcmp(proto, "ADCS/1.0") == 0 || strcmp(proto, "ADCS/0.10") == 0 ? cc_listen_port+1 : cc_listen_port;
+    int port = cantls ? cc_listen_port+1 : cc_listen_port;
     if(hub->adc) {
       GString *c = adc_generate('D', ADCC_CTM, hub->sid, u->sid);
-      g_string_append_printf(c, " %s %d %s", proto, port, token);
+      g_string_append_printf(c, " %s %d %s", adcproto, port, token);
       net_send(hub->net, c->str);
       g_string_free(c, TRUE);
     } else
-      net_sendf(hub->net, "$ConnectToMe %s %s:%d", u->name_hub, cc_listen_ip, port);
+      net_sendf(hub->net, "$ConnectToMe %s %s:%d%s", u->name_hub, cc_listen_ip, port, cantls ? "S" : "");
 
   // we're passive, send RCM
   } else {
     if(hub->adc) {
       GString *c = adc_generate('D', ADCC_RCM, hub->sid, u->sid);
-      g_string_append_printf(c, " %s %s", proto, token);
+      g_string_append_printf(c, " %s %s", adcproto, token);
       net_send(hub->net, c->str);
       g_string_free(c, TRUE);
-    } else
+    } else // Can't specify TLS preference in $RevConnectToMe :(
       net_sendf(hub->net, "$RevConnectToMe %s %s", hub->nick_hub, u->name_hub);
   }
 
@@ -691,9 +690,9 @@ void hub_send_nfo(struct hub *hub) {
     char *ndesc = nmdc_encode_and_escape(hub, desc?desc:"");
     char *nconn = nmdc_encode_and_escape(hub, conn?conn:"");
     char *nmail = nmdc_encode_and_escape(hub, mail?mail:"");
-    nfo = g_strdup_printf("$MyINFO $ALL %s %s<ncdc V:%s,M:%c,H:%d/%d/%d,S:%d>$ $%s\01$%s$%"G_GUINT64_FORMAT"$",
+    nfo = g_strdup_printf("$MyINFO $ALL %s %s<ncdc V:%s,M:%c,H:%d/%d/%d,S:%d>$ $%s%c$%s$%"G_GUINT64_FORMAT"$",
       hub->nick_hub, ndesc, VERSION, ip4 ? 'A' : 'P', h_norm, h_reg, h_op,
-      slots, nconn, nmail, share);
+      slots, nconn, 1 | (sup_tls ? 0x10 : 0), nmail, share);
     g_free(ndesc);
     g_free(nconn);
     g_free(nmail);
@@ -1238,7 +1237,7 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
   CMDREGEX(hubname, "HubName (.+)");
   CMDREGEX(to, "To: ([^ $]+) From: ([^ $]+) \\$(.+)");
   CMDREGEX(forcemove, "ForceMove (.+)");
-  CMDREGEX(connecttome, "ConnectToMe ([^ $]+) ([0-9]{1,3}(?:\\.[0-9]{1,3}){3}:[0-9]+)"); // TODO: IPv6
+  CMDREGEX(connecttome, "ConnectToMe ([^ $]+) ([0-9]{1,3}(?:\\.[0-9]{1,3}){3}:[0-9]+)(S|)"); // TODO: IPv6
   CMDREGEX(revconnecttome, "RevConnectToMe ([^ $]+) ([^ $]+)");
   CMDREGEX(search, "Search (Hub:(?:[^ $]+)|(?:[0-9]{1,3}(?:\\.[0-9]{1,3}){3}:[0-9]+)) ([TF])\\?([TF])\\?([0-9]+)\\?([1-9])\\?(.+)");
 
@@ -1414,15 +1413,17 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
   g_match_info_free(nfo);
 
   // $ConnectToMe
-  if(g_regex_match(connecttome, cmd, 0, &nfo)) { // 1 = me, 2 = addr
+  if(g_regex_match(connecttome, cmd, 0, &nfo)) { // 1 = me, 2 = addr, 3 = TLS
     char *me = g_match_info_fetch(nfo, 1);
     char *addr = g_match_info_fetch(nfo, 2);
+    char *tls = g_match_info_fetch(nfo, 3);
     if(strcmp(me, hub->nick_hub) != 0)
       g_warning("Received a $ConnectToMe for someone else (to %s from %s)", me, addr);
     else
-      cc_nmdc_connect(cc_create(hub), addr);
+      cc_nmdc_connect(cc_create(hub), addr, *tls ? TRUE : FALSE);
     g_free(me);
     g_free(addr);
+    g_free(tls);
   }
   g_match_info_free(nfo);
 
@@ -1436,7 +1437,12 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
     else if(!u)
       g_message("Received a $RevConnectToMe from someone not on the hub.");
     else if(cc_listen) {
-      net_sendf(hub->net, "$ConnectToMe %s %s:%d", other, cc_listen_ip, cc_listen_port);
+      // Unlike with ADC, the client sending the $RCTM can not indicate it
+      // wants to use TLS or not, so the decision is with us. Let's require
+      // tls_policy to be PREFER here.
+      int usetls = u->hastls && conf_tls_policy(hub->tab->name) == CONF_TLSP_PREFER;
+      net_sendf(hub->net, "$ConnectToMe %s %s:%d%s", other, cc_listen_ip,
+        usetls ? cc_listen_port+1 : cc_listen_port, usetls ? "S" : "");
       cc_expect_add(hub, u, NULL, FALSE);
     } else
       g_message("Received a $RevConnectToMe, but we're not active.");

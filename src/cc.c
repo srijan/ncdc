@@ -1382,10 +1382,11 @@ static void handle_connect(struct net *n) {
 }
 
 
-void cc_nmdc_connect(struct cc *cc, const char *addr) {
+void cc_nmdc_connect(struct cc *cc, const char *addr, gboolean tls) {
   g_return_if_fail(cc->state == CCS_CONN);
+  g_return_if_fail(!tls || have_tls_support);
   strncpy(cc->remoteaddr, addr, 23);
-  net_connect(cc->net, addr, 0, FALSE, handle_connect);
+  net_connect(cc->net, addr, 0, tls, handle_connect);
   g_clear_error(&(cc->err));
 }
 

@@ -251,8 +251,8 @@ static void generate_pid() {
 
 void conf_init() {
   // get location of the configuration directory
-  if(!conf_dir)
-    conf_dir = g_getenv("NCDC_DIR");
+  if(!conf_dir && (conf_dir = g_getenv("NCDC_DIR")))
+    conf_dir = g_strdup(conf_dir);
   if(!conf_dir)
     conf_dir = g_build_filename(g_get_home_dir(), ".ncdc", NULL);
 
@@ -260,6 +260,16 @@ void conf_init() {
   g_mkdir(conf_dir, 0700);
   if(g_access(conf_dir, F_OK | R_OK | X_OK | W_OK) < 0)
     g_error("Directory '%s' does not exist or is not writable.", conf_dir);
+
+  // Make sure it's an absolute path (yes, after mkdir'ing it, realpath() may
+  // return an error if it doesn't exist). Just stick with the relative path if
+  // realpath() fails, it's not critical anyway.
+  char *real = realpath(conf_dir, NULL);
+  if(real) {
+    g_free((char *)conf_dir);
+    conf_dir = g_strdup(real);
+    free(real);
+  }
 
   // make sure some subdirectories exist and are writable
 #define cdir(d) do {\

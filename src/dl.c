@@ -71,6 +71,7 @@ struct dl {
   char error;               // DLE_*
   unsigned short error_sub; // errno or block number (it is assumed that 0 <= errno <= USHRT_MAX)
   int incfd;                // file descriptor for this file in <conf_dir>/inc/
+  char *flsel;              // path to file/dir to select for filelists
   char hash[24];            // TTH for files, tiger(uid) for filelists
   struct dl_user *u;        // user who has this file (should be a list for multi-source downloading)
   guint64 size;             // total size of the file
@@ -403,6 +404,7 @@ void dl_queue_rm(struct dl *dl) {
   g_hash_table_remove(dl_queue, dl->hash);
   if(dl->hash_tth)
     g_slice_free(struct tth_ctx, dl->hash_tth);
+  g_free(dl->flsel);
   g_free(dl->inc);
   g_free(dl->dest);
   g_slice_free(struct dl, dl);
@@ -468,10 +470,12 @@ void dl_queue_userdisconnect(guint64 uid) {
 
 
 // Add the file list of some user to the queue
-void dl_queue_addlist(struct hub_user *u) {
+void dl_queue_addlist(struct hub_user *u, const char *sel) {
   g_return_if_fail(u && u->hasinfo);
   struct dl *dl = g_slice_new0(struct dl);
   dl->islist = TRUE;
+  if(sel)
+    dl->flsel = g_strdup(sel);
   // figure out dl->hash
   tiger_ctx tg;
   tiger_init(&tg);
@@ -603,7 +607,7 @@ static void dl_finished(struct dl *dl) {
   }
   // open the file list
   if(dl->prio != DLP_ERR && dl->islist)
-    ui_tab_open(ui_fl_create(dl->u->uid), FALSE);
+    ui_tab_open(ui_fl_create(dl->u->uid, dl->flsel), FALSE);
   // and remove from the queue
   dl_queue_rm(dl);
 }

@@ -74,6 +74,7 @@ struct ui_tab {
   char *fl_uname;
   gboolean fl_loading;
   GError *fl_err;
+  char *fl_sel;
   // SEARCH
   struct search_q *search_q;
   time_t search_t;
@@ -698,7 +699,7 @@ static void ui_userlist_key(struct ui_tab *tab, guint64 key) {
     if(!sel)
       ui_m(NULL, 0, "No user selected.");
     else
-      ui_fl_queue(sel, key == INPT_CHAR('B'));
+      ui_fl_queue(sel, key == INPT_CHAR('B'), NULL);
     break;
   }
 
@@ -1013,8 +1014,28 @@ static void ui_conn_key(guint64 key) {
 // File list browser (UIT_FL)
 
 
+static void ui_fl_dosel(struct ui_tab *tab, const char *sel) {
+  struct fl_list *root = tab->fl_list;
+  while(root->parent)
+    root = root->parent;
+  struct fl_list *n = fl_list_from_path(root, sel);
+  if(!n) {
+    ui_mf(tab, 0, "Can't select `%s': item not found.", sel);
+    return;
+  }
+  // open the parent directory
+  tab->fl_list = n->parent;
+  if(tab->list)
+    ui_listing_free(tab->list);
+  tab->list = ui_listing_create(tab->fl_list->sub);
+  // select the file/dir
+  tab->list->sel = g_sequence_iter_prev(g_sequence_search(tab->list->list, n, fl_list_cmp, NULL));
+  g_return_if_fail(!g_sequence_iter_is_end(tab->list->sel) && g_sequence_get(tab->list->sel) == n);
+}
+
+
 // Open or queue a file list. (Not really a ui_* function, but where else would it belong?)
-void ui_fl_queue(struct hub_user *u, gboolean force) {
+void ui_fl_queue(struct hub_user *u, gboolean force, const char *sel) {
   // check for u == we
   if(u && (u->hub->adc ? u->hub->sid == u->sid : u->hub->nick_valid && strcmp(u->hub->nick_hub, u->name_hub) == 0))
     u = NULL;
@@ -1022,19 +1043,28 @@ void ui_fl_queue(struct hub_user *u, gboolean force) {
 
   // check for existing tab
   GList *n;
+  struct ui_tab *t;
   for(n=ui_tabs; n; n=n->next) {
-    struct ui_tab *t = n->data;
+    t = n->data;
     if(t->type == UIT_FL && t->uid == uid)
       break;
   }
   if(n) {
     ui_tab_cur = n;
+    if(sel) {
+      if(!t->fl_loading)
+        ui_fl_dosel(n->data, sel);
+      else {
+        g_free(t->fl_sel);
+        t->fl_sel = g_strdup(sel);
+      }
+    }
     return;
   }
 
   // open own list
   if(!u) {
-    ui_tab_open(ui_fl_create(0), TRUE);
+    ui_tab_open(ui_fl_create(0, sel), TRUE);
     return;
   }
 
@@ -1048,9 +1078,9 @@ void ui_fl_queue(struct hub_user *u, gboolean force) {
     g_free(tmp);
   }
   if(e)
-    ui_tab_open(ui_fl_create(uid), TRUE);
+    ui_tab_open(ui_fl_create(uid, sel), TRUE);
   else {
-    dl_queue_addlist(u);
+    dl_queue_addlist(u, sel);
     ui_mf(NULL, 0, "File list of %s added to the download queue.", u->name);
   }
 }
@@ -1072,10 +1102,15 @@ static void ui_fl_loaddone(struct fl_list *fl, GError *err, void *dat) {
   tab->list = tab->fl_list && tab->fl_list->sub ? ui_listing_create(tab->fl_list->sub) : NULL;
   tab->fl_loading = FALSE;
   tab->prio = err ? UIP_HIGH : UIP_MED;
+  if(tab->fl_sel) {
+    ui_fl_dosel(tab, tab->fl_sel);
+    g_free(tab->fl_sel);
+    tab->fl_sel = NULL;
+  }
 }
 
 
-struct ui_tab *ui_fl_create(guint64 uid) {
+struct ui_tab *ui_fl_create(guint64 uid, const char *sel) {
   // get user
   struct hub_user *u = uid ? g_hash_table_lookup(hub_uids, &uid) : NULL;
 
@@ -1091,6 +1126,8 @@ struct ui_tab *ui_fl_create(guint64 uid) {
     tab->fl_list = fl_local_list ? fl_list_copy(fl_local_list) : NULL;
     tab->list = tab->fl_list && tab->fl_list->sub ? ui_listing_create(tab->fl_list->sub) : NULL;
     tab->prio = UIP_MED;
+    if(sel)
+      ui_fl_dosel(tab, sel);
   } else {
     char *tmp = g_strdup_printf("%016"G_GINT64_MODIFIER"x.xml.bz2", uid);
     char *fn = g_build_filename(conf_dir, "fl", tmp, NULL);
@@ -1099,6 +1136,8 @@ struct ui_tab *ui_fl_create(guint64 uid) {
     g_free(fn);
     tab->prio = UIP_LOW;
     tab->fl_loading = TRUE;
+    if(sel)
+      tab->fl_sel = g_strdup(sel);
   }
 
   return tab;
@@ -1115,6 +1154,7 @@ void ui_fl_close(struct ui_tab *tab) {
     fl_list_free(p);
   if(tab->fl_err)
     g_error_free(tab->fl_err);
+  g_free(tab->fl_sel);
   g_free(tab->name);
   g_free(tab->fl_uname);
   g_free(tab);
@@ -1698,7 +1738,7 @@ static void ui_search_key(struct ui_tab *tab, guint64 key) {
       if(!u)
         ui_m(NULL, 0, "User is not online.");
       else
-        ui_fl_queue(u, key == INPT_CHAR('B'));
+        ui_fl_queue(u, key == INPT_CHAR('B'), sel->file);
     }
     break;
   case INPT_CHAR('d'): // d - download file

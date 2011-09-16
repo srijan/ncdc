@@ -805,7 +805,7 @@ static void c_browse(char *args) {
     }
   }
 
-  ui_fl_queue(u, force);
+  ui_fl_queue(u, force, NULL);
 }
 
 

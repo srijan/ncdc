@@ -136,7 +136,9 @@ static const struct doc_cmd {
 },
 { "reconnect", NULL, "Shortcut for /disconnect and /connect",
   "Reconnect to the hub. When your nick or the hub encoding have been changed,"
-  " the new settings will be used after the reconnect."
+  " the new settings will be used after the reconnect.\n\n"
+  "This command can also be used on the main tab, in which case all connected"
+  " hubs will be reconnected."
 },
 { "refresh", "[<path>]", "Refresh file list.",
   "Initiates a refresh. If no argument is given, the complete list will be"

@@ -338,13 +338,25 @@ static void c_reconnect(char *args) {
   struct ui_tab *tab = ui_tab_cur->data;
   if(args[0])
     ui_m(NULL, 0, "This command does not accept any arguments.");
-  else if(tab->type != UIT_HUB)
-    ui_m(NULL, 0, "This command can only be used on hub tabs.");
-  else {
+  else if(tab->type == UIT_HUB) {
     if(tab->hub->net->conn || tab->hub->net->connecting || tab->hub->reconnect_timer)
       hub_disconnect(tab->hub, FALSE);
     c_connect(""); // also checks for the existence of "hubaddr"
-  }
+  } else if(tab->type == UIT_MAIN) {
+    ui_m(NULL, 0, "Reconnecting all hubs.");
+    GList *n = ui_tabs;
+    for(; n; n=n->next) {
+      tab = n->data;
+      if(tab->type != UIT_HUB)
+        continue;
+      if(tab->hub->net->conn || tab->hub->net->connecting || tab->hub->reconnect_timer)
+        hub_disconnect(tab->hub, FALSE);
+      ui_tab_cur = n;
+      c_connect("");
+    }
+    ui_tab_cur = g_list_find(ui_tabs, ui_main);
+  } else
+    ui_m(NULL, 0, "This command can only be used on the main tab or on hub tabs.");
 }
 
 

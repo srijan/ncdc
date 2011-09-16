@@ -1,3 +1,17 @@
+1.0 - 2011-09-16
+	- Added ncdc(1) and ncdc-gen-cert(1) manual pages
+	- Documented settings (/help set <setting>)
+	- Documented key bindings (/help keys)
+	- Improved line wrapping algorithm for the log window
+	- Added support for client-to-client TLS on NMDC
+	- Added support for the CGFI command on ADC
+	- Throttle GET requests on the same file + offset
+	- Fixed glib assertion failure when disabling active mode
+	- Fixed downloading from clients using $ADCSND with -1 bytes
+	- Fixed race condition in file uploading code
+	- Fixed idle time calculation while connecting to another client
+	- Properly include unistd.h in dl.c
+
 0.9 - 2011-09-03
 	- Added TLS support (adcs://, nmdcs://, and ADC client-to-client)
 	- Added tls_policy setting

@@ -1531,6 +1531,7 @@ static void cc_listen_stop() {
 
 
 static void listen_tcp_handle(GObject *src, GAsyncResult *res, gpointer dat) {
+  GSocketListener *tcp = dat;
   GError *err = NULL;
   GObject *istls = NULL;
   GSocketConnection *s = g_socket_listener_accept_finish(G_SOCKET_LISTENER(src), res, &istls, &err);
@@ -1544,10 +1545,10 @@ static void listen_tcp_handle(GObject *src, GAsyncResult *res, gpointer dat) {
     g_error_free(err);
   } else {
     cc_incoming(cc_create(NULL), s, istls ? TRUE : FALSE);
-    g_socket_listener_accept_async(cc_listen, cc_listen_tcp_can, listen_tcp_handle, NULL);
-    g_object_ref(cc_listen);
+    g_socket_listener_accept_async(cc_listen, cc_listen_tcp_can, listen_tcp_handle, tcp);
+    g_object_ref(tcp);
   }
-  g_object_unref(cc_listen);
+  g_object_unref(tcp);
 }
 
 
@@ -1719,7 +1720,7 @@ gboolean cc_listen_start() {
 
   // start accepting incoming TCP connections
   cc_listen_tcp_can = g_cancellable_new();
-  g_socket_listener_accept_async(tcp, cc_listen_tcp_can, listen_tcp_handle, NULL);
+  g_socket_listener_accept_async(tcp, cc_listen_tcp_can, listen_tcp_handle, tcp);
   g_object_ref(tcp);
 
   // start receiving incoming UDP messages

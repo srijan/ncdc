@@ -39,7 +39,7 @@ static const struct doc_cmd {
   "Without arguments, this opens a new tab where you can browse your own file list."
   " Note that changes to your list are not immediately visible in the browser."
   " You need to re-open the tab to get the latest version of your list.\n\n"
-  "With arguments, the user list of the specified user will be downloaded (if"
+  "With arguments, the file list of the specified user will be downloaded (if"
   " it has not been downloaded already) and the browse tab will open once it's"
   " complete. The `-f' flag can be used to force the file list to be (re-)downloaded."
 },
@@ -48,23 +48,25 @@ static const struct doc_cmd {
   " Ctrl+l is a shortcut for this command."
 },
 { "close", NULL, "Close the current tab.",
-  "Close the current tab.\n"
-  "When closing a hub tab, you will be disconnected from the hub."
-  " Alt+c is a shortcut for this command."
+  "Close the current tab. When closing a hub tab, you will be disconnected from"
+  " the hub and all related userlist and PM tabs will also be closed. Alt+c is"
+  " a shortcut for this command."
 },
 { "connect", "[<address>]", "Connect to a hub.",
   "Initiate a connection with a hub. If no address is specified, will connect"
   " to the hub you last used on the current tab. The address should be in the"
   " form of `protocol://host:port/' or `host:port'. The `:port' part is in both"
   " cases optional and defaults to :411. The following protocols are"
-  " recognized: dchub, nmdc, nmdcs, adc, adcs.\n\n"
+  " recognized: dchub, nmdc, nmdcs, adc, adcs. When connecting to an nmdcs or"
+  " adcs hub and the SHA256 keyprint is known, you can attach this to the url as"
+  " `?kp=SHA256/<base32-encoded-keyprint>'\n\n"
   "Note that this command can only be used on hub tabs. If you want to open a new"
   " connection to a hub, you need to use /open first. For example:\n"
   "  /open testhub\n"
   "  /connect dchub://dc.some-test-hub.com/\n"
   "See the /open command for more information."
 },
-{ "connections", NULL, "Display the connection list.",
+{ "connections", NULL, "Open the connections tab.",
   NULL
 },
 { "disconnect", NULL, "Disconnect from a hub.",
@@ -82,10 +84,10 @@ static const struct doc_cmd {
   " have no free slots.  The slot will be granted for as long as ncdc stays"
   " open. If you restart ncdc, the user will have to wait for a regular slot."
   " Unless, of course, you /grant a slot again.\n\n"
-  "Note that a granted slot is specific to a single hub. If the user is also"
-  " on other hubs, he/she will not be granted a slot on those hubs."
+  "Note that a granted slot is specific to a single hub. If the same user is"
+  " also on other hubs, he/she will not be granted a slot on those hubs."
 },
-{ "help", "[<command>|set <key>]", "Request information on commands.",
+{ "help", "[<command>|set <key>|keys [<section>]]", "Request information on commands.",
   "To get a list of available commands, use /help without arguments.\n"
   "To get information on a particular command, use /help <command>.\n"
   "To get information on a configuration setting, use /help set <setting>.\n"
@@ -97,12 +99,12 @@ static const struct doc_cmd {
 },
 { "me", "<message>", "Chat in third person.",
   "This allows you to talk in third person. Most clients will display your message as something like:\n"
-  "  * Nick is doing something\n\n"
+  "  ** Nick is doing something\n\n"
   "Note that this command only works correctly on ADC hubs. The NMDC protocol"
   " does not have this feature, and your message will be sent as-is, including the /me."
 },
 { "msg", "<user> [<message>]", "Send a private message.",
-  "Send a private message to a user on the currently opened hub. When no"
+  "Send a private message to a user on the currently opened hub. If no"
   " message is given, the tab will be opened but no message will be sent."
 },
 { "nick", "[<nick>]", "Alias for `/set nick'.",
@@ -121,7 +123,7 @@ static const struct doc_cmd {
   "This command can be used to send a password to the hub without saving it to"
   " the config file. If you wish to login automatically without having to type"
   " /password every time, use '/set password <password>'. Be warned, however,"
-  " that your password will be saved unencrypted in this case."
+  " that your password will be saved unencrypted in that case."
 },
 { "pm", "<user> [<message>]", "Alias for /msg",
   NULL
@@ -167,7 +169,7 @@ static const struct doc_cmd {
   "  4  doc      Text documents.\n"
   "  5  exe      Windows executables.\n"
   "  6  img      Image files.\n"
-  "  7  video    Videos files.\n"
+  "  7  video    Video files.\n"
   "  8  dir      Directories.\n"
   "Note that file type matching is done using file extensions, and is not very reliable."
 },
@@ -256,7 +258,7 @@ static const struct doc_set {
 },
 { "backlog", "<integer>",
   "When opening a hub or PM tab, ncdc can load a certain amount of lines from"
-  " the log files into the log window. Setting this to a positive value enables"
+  " the log file into the log window. Setting this to a positive value enables"
   " this feature and configures the number of lines to load. Note that, while"
   " this setting can be set on a per-hub basis, PM windows will use the global"
   " value (global.backlog)."
@@ -276,7 +278,7 @@ static const struct doc_set {
   "  tabprio_med   - medium priority tab notification color\n"
   "  tabprio_high  - high priority tab notification color\n"
   "\n"
-  "The actual color value can be set with a comma-separated list of colors"
+  "The actual color value can be set with a comma-separated list of color names"
   " and/or attributes. The first color in the list is the foreground color, the"
   " second color is used for the background. When the fore- or background color"
   " is not specified, the default colors of your terminal will be used.\n"
@@ -288,7 +290,7 @@ static const struct doc_set {
 },
 { "connection", "<string>",
   "Set your upload speed. The actual format you can use here may vary, but in"
-  " general you can set it to either a pain number for Mbit/s (e.g. `50' for"
+  " general you can set it to either a plain number for Mbit/s (e.g. `50' for"
   " 50 mbit) or a number with a `KiB/s' indicator (e.g. `2300 KiB/s'). This is"
   " only used when connecting to NMDC hubs, and is just an indication for other"
   " users in the hub so that they know what speed they can expect when"
@@ -340,9 +342,9 @@ static const struct doc_set {
 },
 { "minislots", "<integer>",
   "Set the number of available minislots. A `minislot' is a special slot that"
-  " is used when all regular upload slots are in use, and someone is requesting"
+  " is used when all regular upload slots are in use and someone is requesting"
   " your filelist or a small file. In this case, the other client automatically"
-  " applies for a minislot, and can still download the file as long as not all"
+  " applies for a minislot, and can still download from you as long as not all"
   " minislots are in use. What constitutes a `small' file can be changed with"
   " the `minislot_size' setting. Also see the `slots' configuration setting and"
   " the `/grant' command."
@@ -417,7 +419,7 @@ static const struct doc_key {
 } doc_keys[] = {
 
 { "global", "Global key bindings",
-  "Alt-j        Open previous tab.\n"
+  "Alt+j        Open previous tab.\n"
   "Alt+k        Open next tab.\n"
   "Alt+h        Move current tab left.\n"
   "Alt+l        Move current tab right.\n"

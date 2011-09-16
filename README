@@ -3,10 +3,8 @@ ncdc 0.9g
 
 DESCRIPTION
 
-  ncdc aims to become an awesome Direct Connect client with an NCurses
-  interface, written in C. It is currently still in active development, and
-  therefore lacks many features you'd expect a mature direct connect client to
-  have. Nonetheless, ncdc is already quite useful.
+  ncdc is a modern and lightweight direct connect client with a friendly
+  ncurses interface.
 
   Always make sure you run the latest version. You can check for updates and
   find more information at http://dev.yorhel.nl/ncdc
@@ -61,6 +59,7 @@ BUILDING FROM THE GIT REPOSITORY
 
 CONTACT
 
-  projects@yorhel.nl
-  http://dev.yorhel.nl/
+  Email: projects@yorhel.nl
+    Web: http://dev.yorhel.nl/
+     DC: adc://dc.blicky.net:2780/
 

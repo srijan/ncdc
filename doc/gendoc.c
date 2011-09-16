@@ -37,12 +37,14 @@
 
 static void out_string(const char *str) {
   const char *m;
-  while((m = strchr(str, '\n')) != NULL) {
-    fwrite(str, 1, m-str, stdout);
-    fputs("\n.br\n", stdout);
-    str = m+1;
+  for(m=str; *m; m++) {
+    if(*m == '\n')
+      fputs("\n.br\n", stdout);
+    else if(*m == '\\')
+      fputs("\\\\", stdout);
+    else
+      fputc(*m, stdout);
   }
-  fputs(str, stdout);
 }
 
 

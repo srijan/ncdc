@@ -543,8 +543,16 @@ static gboolean dl_queue_addfile(guint64 uid, char *hash, guint64 size, char *fn
 }
 
 
-// Recursively adds a file or directory to the queue.
-void dl_queue_add_fl(guint64 uid, struct fl_list *fl, char *base) {
+// Recursively adds a file or directory to the queue. *excl will only be
+// checked for files in subdirectories, if *fl is a file it will always be
+// added.
+void dl_queue_add_fl(guint64 uid, struct fl_list *fl, char *base, GRegex *excl) {
+  // check excl
+  if(base && g_regex_match(excl, fl->name, 0, NULL)) {
+    ui_mf(NULL, 0, "Ignoring `%s': excluded by regex.", fl->name);
+    return;
+  }
+
   char *name = base ? g_build_filename(base, fl->name, NULL) : g_strdup(fl->name);
   if(fl->isfile) {
     if(!dl_queue_addfile(uid, fl->tth, fl->size, name))
@@ -552,7 +560,7 @@ void dl_queue_add_fl(guint64 uid, struct fl_list *fl, char *base) {
   } else {
     GSequenceIter *i = g_sequence_get_begin_iter(fl->sub);
     for(; !g_sequence_iter_is_end(i); i=g_sequence_iter_next(i))
-      dl_queue_add_fl(uid, g_sequence_get(i), name);
+      dl_queue_add_fl(uid, g_sequence_get(i), name, excl);
   }
   if(!base)
     ui_mf(NULL, 0, "%s added to queue.", name);

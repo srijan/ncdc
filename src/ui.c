@@ -1284,7 +1284,12 @@ static void ui_fl_key(struct ui_tab *tab, guint64 key) {
       ui_m(NULL, 0, "Directory empty.");
     else {
       g_return_if_fail(sel->hastth);
-      dl_queue_add_fl(tab->uid, sel, NULL);
+      char *excl = g_key_file_get_string(conf_file, "global", "download_exclude", NULL);
+      GRegex *r = excl ? g_regex_new(excl, 0, 0, NULL) : NULL;
+      g_free(excl);
+      dl_queue_add_fl(tab->uid, sel, NULL, r);
+      if(r)
+        g_regex_unref(r);
     }
     break;
   }

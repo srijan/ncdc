@@ -656,34 +656,35 @@ static void set_old_sug(char *group, char *key, char *val, char **sug) {
 
 // the settings list
 static struct setting settings[] = {
-  { "active",        "global", get_bool_f,        set_active,        NULL               },
-  { "active_ip",     "global", get_string,        set_active_ip,     set_old_sug        },
-  { "active_port",   "global", get_int,           set_active_port,   NULL,              },
-  { "autoconnect",   NULL,     get_bool_f,        set_autoconnect,   set_bool_sug       }, // may not be used in "global"
-  { "autorefresh",   "global", get_autorefresh,   set_autorefresh,   NULL               }, // in minutes, 0 = disabled
-  { "backlog",       NULL,     get_backlog,       set_backlog,       NULL,              }, // number of lines, 0 = disabled
+  { "active",           "global", get_bool_f,        set_active,        NULL               },
+  { "active_ip",        "global", get_string,        set_active_ip,     set_old_sug        },
+  { "active_port",      "global", get_int,           set_active_port,   NULL,              },
+  { "autoconnect",      NULL,     get_bool_f,        set_autoconnect,   set_bool_sug       },
+  { "autorefresh",      "global", get_autorefresh,   set_autorefresh,   NULL               },
+  { "backlog",          NULL,     get_backlog,       set_backlog,       NULL,              },
 #define C(n, a,b,c) { "color_" G_STRINGIFY(n), "color", get_color, set_color, set_color_sug },
   UI_COLORS
 #undef C
-  { "connection",    NULL,     get_string,        set_userinfo,      set_old_sug        },
-  { "description",   NULL,     get_string,        set_userinfo,      set_old_sug        },
-  { "download_dir",  "global", get_download_dir,  set_download_dir,  set_path_sug       },
-  { "download_slots","global", get_download_slots,set_download_slots,NULL               },
-  { "email",         NULL,     get_string,        set_userinfo,      set_old_sug        },
-  { "encoding",      NULL,     get_encoding,      set_encoding,      set_encoding_sug   },
-  { "hubname",       NULL,     get_hubname,       set_hubname,       set_hubname_sug    }, // makes no sense in "global"
-  { "log_debug",     "log",    get_bool_f,        set_bool_f,        set_bool_sug       },
-  { "log_downloads", "log",    get_bool_t,        set_bool_t,        set_bool_sug       },
-  { "log_uploads",   "log",    get_bool_t,        set_bool_t,        set_bool_sug       },
-  { "minislots",     "global", get_minislots,     set_minislots,     NULL               },
-  { "minislot_size", "global", get_minislot_size, set_minislot_size, NULL               },
-  { "nick",          NULL,     get_string,        set_nick,          set_old_sug        }, // global.nick may not be /unset
-  { "password",      NULL,     get_password,      set_password,      NULL               }, // may not be used in "global" (obviously)
-  { "share_hidden",  "global", get_bool_f,        set_bool_f,        set_bool_sug       },
-  { "share_exclude", "global", get_string,        set_regex,         set_old_sug        },
-  { "show_joinquit", NULL,     get_bool_f,        set_bool_f,        set_bool_sug       },
-  { "slots",         "global", get_slots,         set_slots,         NULL               },
-  { "tls_policy",    NULL,     get_tls_policy,    set_tls_policy,    set_tls_policy_sug },
+  { "connection",       NULL,     get_string,        set_userinfo,      set_old_sug        },
+  { "description",      NULL,     get_string,        set_userinfo,      set_old_sug        },
+  { "download_dir",     "global", get_download_dir,  set_download_dir,  set_path_sug       },
+  { "download_slots",   "global", get_download_slots,set_download_slots,NULL               },
+  { "download_exclude", "global", get_string,        set_regex,         set_old_sug        },
+  { "email",            NULL,     get_string,        set_userinfo,      set_old_sug        },
+  { "encoding",         NULL,     get_encoding,      set_encoding,      set_encoding_sug   },
+  { "hubname",          NULL,     get_hubname,       set_hubname,       set_hubname_sug    },
+  { "log_debug",        "log",    get_bool_f,        set_bool_f,        set_bool_sug       },
+  { "log_downloads",    "log",    get_bool_t,        set_bool_t,        set_bool_sug       },
+  { "log_uploads",      "log",    get_bool_t,        set_bool_t,        set_bool_sug       },
+  { "minislots",        "global", get_minislots,     set_minislots,     NULL               },
+  { "minislot_size",    "global", get_minislot_size, set_minislot_size, NULL               },
+  { "nick",             NULL,     get_string,        set_nick,          set_old_sug        },
+  { "password",         NULL,     get_password,      set_password,      NULL               },
+  { "share_hidden",     "global", get_bool_f,        set_bool_f,        set_bool_sug       },
+  { "share_exclude",    "global", get_string,        set_regex,         set_old_sug        },
+  { "show_joinquit",    NULL,     get_bool_f,        set_bool_f,        set_bool_sug       },
+  { "slots",            "global", get_slots,         set_slots,         NULL               },
+  { "tls_policy",       NULL,     get_tls_policy,    set_tls_policy,    set_tls_policy_sug },
   { NULL }
 };
 

@@ -308,6 +308,14 @@ static const struct doc_set {
   " but doing so is not recommended: ncdc will block when moving the completed"
   " files to their final destination."
 },
+{ "download_exclude", "<regex>",
+  "When recursively adding a directory to the download queue - by pressing `b'"
+  " on a directory in the file list browser - any item in the selected"
+  " directory with a name that matches this regular expression will not be"
+  " added to the download queue.\n\n"
+  "This regex is not checked when adding individual files from either the file"
+  " list browser or the search results."
+},
 { "download_slots", "<integer>",
   "Maximum number of simultaneous downloads."
 },

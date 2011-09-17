@@ -824,6 +824,12 @@ gboolean fl_save(struct fl_list *fl, const char *file, GString *buf, int level, 
   CHECKFAIL(xmlTextWriterWriteAttribute(writer, (xmlChar *)"CID", (xmlChar *)cid));
 
   char *path = fl ? fl_list_path(fl) : g_strdup("/");
+  // Make sure the base path always ends with a slash, some clients will fail otherwise.
+  if(path[strlen(path)-1] != '/') {
+    char *tmp = g_strdup_printf("%s/", path);
+    g_free(path);
+    path = tmp;
+  }
   CHECKFAIL(xmlTextWriterWriteAttribute(writer, (xmlChar *)"Base", (xmlChar *)path));
   g_free(path);
 

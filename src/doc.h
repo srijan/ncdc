@@ -368,6 +368,11 @@ static const struct doc_set {
   " `/password' command instead. Passwords are saved unencrypted in the config"
   " file."
 },
+{ "share_exclude", "<regex>",
+  "Any file or directory with a name that matches this regular expression will"
+  " not be shared. A file list refresh is required for this setting to be"
+  " effective."
+},
 { "share_hidden", "<boolean>",
   "Whether to share hidden files and directories. A `hidden' file or directory"
   " is one of which the file name starts with a dot. (e.g. `.bashrc'). A file"

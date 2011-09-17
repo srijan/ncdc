@@ -360,13 +360,14 @@ static void fl_hashindex_sethash(struct fl_list *fl, char *tth, time_t lastmod, 
 struct fl_scan_args {
   struct fl_list **file, **res;
   char **path;
+  GRegex *excl_regex;
   gboolean inc_hidden;
   gboolean (*donefun)(gpointer);
 };
 
 // recursive
 // Doesn't handle paths longer than PATH_MAX, but I don't think it matters all that much.
-static void fl_scan_dir(struct fl_list *parent, const char *path, const char *vpath, gboolean inc_hidden) {
+static void fl_scan_dir(struct fl_list *parent, const char *path, const char *vpath, gboolean inc_hidden, GRegex *excl) {
   GError *err = NULL;
   GDir *dir = g_dir_open(path, 0, &err);
   if(!dir) {
@@ -380,12 +381,19 @@ static void fl_scan_dir(struct fl_list *parent, const char *path, const char *vp
       continue;
     if(!inc_hidden && name[0] == '.')
       continue;
-    // Try to get a UTF-8 filename which can be converted back.  If it can't be
-    // converted back, we won't share the file at all. Keeping track of a
-    // raw-to-UTF-8 filename lookup table isn't worth the effort.
+    // Try to get a UTF-8 filename
     char *confname = g_filename_to_utf8(name, -1, NULL, NULL, NULL);
     if(!confname)
       confname = g_filename_display_name(name);
+    // Check for share_exclude as soon as we have the confname
+    if(excl && g_regex_match(excl, confname, 0, NULL)) {
+      g_free(confname);
+      continue;
+    }
+    // Check that the UTF-8 filename can be converted back to something we can
+    // access on the filesystem. If it can't be converted back, we won't share
+    // the file at all. Keeping track of a raw-to-UTF-8 filename lookup table
+    // isn't worth the effort.
     char *vcpath = g_build_filename(vpath, confname, NULL);
     char *encname = g_filename_from_utf8(confname, -1, NULL, NULL, NULL);
     if(!encname) {
@@ -441,7 +449,7 @@ static void fl_scan_dir(struct fl_list *parent, const char *path, const char *vp
       char *cpath = g_build_filename(path, enc, NULL);
       char *virtpath = g_build_filename(vpath, cur->name, NULL);
       cur->sub = g_sequence_new(fl_list_free);
-      fl_scan_dir(cur, cpath, virtpath, inc_hidden);
+      fl_scan_dir(cur, cpath, virtpath, inc_hidden, excl);
       g_free(virtpath);
       g_free(cpath);
       g_free(enc);
@@ -460,7 +468,7 @@ static void fl_scan_thread(gpointer data, gpointer udata) {
     cur->name[0] = 0;
     char *tmp = g_filename_from_utf8(args->path[i], -1, NULL, NULL, NULL);
     cur->sub = g_sequence_new(fl_list_free);
-    fl_scan_dir(cur, tmp, args->path[i], args->inc_hidden);
+    fl_scan_dir(cur, tmp, args->path[i], args->inc_hidden, args->excl_regex);
     g_free(tmp);
     args->res[i] = cur;
   }
@@ -806,9 +814,14 @@ static void fl_refresh_process() {
 
   // construct the list of to-be-scanned directories
   struct fl_list *dir = fl_refresh_queue->head->data;
-  struct fl_scan_args *args = g_new0(struct fl_scan_args, 1);
+  struct fl_scan_args *args = g_slice_new0(struct fl_scan_args);
   args->donefun = fl_refresh_scanned;
   args->inc_hidden = g_key_file_get_boolean(conf_file, "global", "share_hidden", NULL);
+
+  char *excl = g_key_file_get_string(conf_file, "global", "share_exclude", NULL);
+  if(excl)
+    args->excl_regex = g_regex_new(excl, G_REGEX_OPTIMIZE, 0, NULL);
+  g_free(excl);
 
   // one dir, the simple case
   if(dir != fl_local_list) {
@@ -856,9 +869,11 @@ static gboolean fl_refresh_scanned(gpointer dat) {
 
   fl_needflush = TRUE;
   g_strfreev(args->path);
+  if(args->excl_regex)
+    g_regex_unref(args->excl_regex);
   g_free(args->file);
   g_free(args->res);
-  g_free(args);
+  g_slice_free(struct fl_scan_args, args);
 
   g_queue_pop_head(fl_refresh_queue);
   if(fl_refresh_queue->head)

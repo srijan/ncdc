@@ -615,6 +615,25 @@ static void set_tls_policy_sug(char *val, char **sug) {
 }
 
 
+static void set_regex(char *group, char *key, char *val) {
+  if(!val) {
+    UNSET(group, key);
+    return;
+  }
+  GError *err = NULL;
+  GRegex *r = g_regex_new(val, 0, 0, &err);
+  if(!r) {
+    ui_m(NULL, 0, err->message);
+    g_error_free(err);
+  } else {
+    g_regex_unref(r);
+    g_key_file_set_string(conf_file, group, key, val);
+    conf_save();
+    get_string(group, key);
+  }
+}
+
+
 // the settings list
 static struct setting settings[] = {
   { "active",        "global", get_bool_f,        set_active,        NULL               },
@@ -641,6 +660,7 @@ static struct setting settings[] = {
   { "nick",          NULL,     get_string,        set_nick,          NULL               }, // global.nick may not be /unset
   { "password",      NULL,     get_password,      set_password,      NULL               }, // may not be used in "global" (obviously)
   { "share_hidden",  "global", get_bool_f,        set_bool_f,        set_bool_sug       },
+  { "share_exclude", "global", get_string,        set_regex,         NULL,              }, // TODO: tab-complete old value
   { "show_joinquit", NULL,     get_bool_f,        set_bool_f,        set_bool_sug       },
   { "slots",         "global", get_slots,         set_slots,         NULL               },
   { "tls_policy",    NULL,     get_tls_policy,    set_tls_policy,    set_tls_policy_sug },

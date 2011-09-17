@@ -39,7 +39,7 @@ struct setting {
   char *group;      // NULL = hub name or "global" on non-hub-tabs
   void (*get)(char *, char *);
   void (*set)(char *, char *, char *);
-  void (*suggest)(char *, char **);
+  void (*suggest)(char *, char *, char *, char **);
   struct doc_set *doc;
 };
 
@@ -167,7 +167,7 @@ static void set_encoding(char *group, char *key, char *val) {
 }
 
 
-static void set_encoding_sug(char *val, char **sug) {
+static void set_encoding_sug(char *group, char *key, char *val, char **sug) {
   // This list is neither complete nor are the entries guaranteed to be
   // available. Just a few commonly used encodings. There does not seem to be a
   // portable way of obtaining the available encodings.
@@ -210,7 +210,7 @@ static void set_bool_t(char *group, char *key, char *val) {
 // Only suggests "true" or "false" regardless of the input. There are only two
 // states anyway, and one would want to switch between those two without any
 // hassle.
-static void set_bool_sug(char *val, char **sug) {
+static void set_bool_sug(char *group, char *key, char *val, char **sug) {
   gboolean f = !(val[0] == 0 || val[0] == '1' || val[0] == 't' || val[0] == 'y' || val[0] == 'o');
   sug[f ? 1 : 0] = g_strdup("true");
   sug[f ? 0 : 1] = g_strdup("false");
@@ -423,6 +423,12 @@ static void set_hubname(char *group, char *key, char *val) {
 }
 
 
+static void set_hubname_sug(char *group, char *key, char *val, char **sug) {
+  if(group && *group == '#')
+    sug[0] = g_strdup(group);
+}
+
+
 static void get_download_dir(char *group, char *key) {
   char *d = conf_download_dir();
   ui_mf(NULL, 0, "%s.%s = %s", group, key, d);
@@ -559,7 +565,7 @@ static void set_color(char *group, char *key, char *val) {
 }
 
 
-static void set_color_sug(char *val, char **sug) {
+static void set_color_sug(char *group, char *key, char *val, char **sug) {
   char *attr = strrchr(val, ',');
   if(attr)
     *(attr++) = 0;
@@ -607,7 +613,7 @@ static void set_tls_policy(char *group, char *key, char *val) {
 }
 
 
-static void set_tls_policy_sug(char *val, char **sug) {
+static void set_tls_policy_sug(char *group, char *key, char *val, char **sug) {
   int i = 0, j = 0, len = strlen(val);
   for(i=0; i<=2; i++)
     if(g_ascii_strncasecmp(val, conf_tlsp_list[i], len) == 0 && strlen(conf_tlsp_list[i]) != len)
@@ -634,10 +640,24 @@ static void set_regex(char *group, char *key, char *val) {
 }
 
 
+static void set_path_sug(char *group, char *key, char *val, char **sug) {
+  path_suggest(val, sug);
+}
+
+
+// Suggest the current value. Works for both integers and strings. Perhaps also
+// for booleans, but set_bool_sug() is more useful there anyway.
+// BUG: This does not use a default value, if there is one...
+static void set_old_sug(char *group, char *key, char *val, char **sug) {
+  char *old = g_key_file_get_string(conf_file, group, key, NULL);
+  sug[0] = old;
+}
+
+
 // the settings list
 static struct setting settings[] = {
   { "active",        "global", get_bool_f,        set_active,        NULL               },
-  { "active_ip",     "global", get_string,        set_active_ip,     NULL               },
+  { "active_ip",     "global", get_string,        set_active_ip,     set_old_sug        },
   { "active_port",   "global", get_int,           set_active_port,   NULL,              },
   { "autoconnect",   NULL,     get_bool_f,        set_autoconnect,   set_bool_sug       }, // may not be used in "global"
   { "autorefresh",   "global", get_autorefresh,   set_autorefresh,   NULL               }, // in minutes, 0 = disabled
@@ -645,22 +665,22 @@ static struct setting settings[] = {
 #define C(n, a,b,c) { "color_" G_STRINGIFY(n), "color", get_color, set_color, set_color_sug },
   UI_COLORS
 #undef C
-  { "connection",    NULL,     get_string,        set_userinfo,      NULL               },
-  { "description",   NULL,     get_string,        set_userinfo,      NULL               },
-  { "download_dir",  "global", get_download_dir,  set_download_dir,  path_suggest       },
-  { "download_slots","global", get_download_slots,set_download_slots,NULL,              },
-  { "email",         NULL,     get_string,        set_userinfo,      NULL               },
+  { "connection",    NULL,     get_string,        set_userinfo,      set_old_sug        },
+  { "description",   NULL,     get_string,        set_userinfo,      set_old_sug        },
+  { "download_dir",  "global", get_download_dir,  set_download_dir,  set_path_sug       },
+  { "download_slots","global", get_download_slots,set_download_slots,NULL               },
+  { "email",         NULL,     get_string,        set_userinfo,      set_old_sug        },
   { "encoding",      NULL,     get_encoding,      set_encoding,      set_encoding_sug   },
-  { "hubname",       NULL,     get_hubname,       set_hubname,       NULL               }, // makes no sense in "global"
+  { "hubname",       NULL,     get_hubname,       set_hubname,       set_hubname_sug    }, // makes no sense in "global"
   { "log_debug",     "log",    get_bool_f,        set_bool_f,        set_bool_sug       },
   { "log_downloads", "log",    get_bool_t,        set_bool_t,        set_bool_sug       },
   { "log_uploads",   "log",    get_bool_t,        set_bool_t,        set_bool_sug       },
   { "minislots",     "global", get_minislots,     set_minislots,     NULL               },
   { "minislot_size", "global", get_minislot_size, set_minislot_size, NULL               },
-  { "nick",          NULL,     get_string,        set_nick,          NULL               }, // global.nick may not be /unset
+  { "nick",          NULL,     get_string,        set_nick,          set_old_sug        }, // global.nick may not be /unset
   { "password",      NULL,     get_password,      set_password,      NULL               }, // may not be used in "global" (obviously)
   { "share_hidden",  "global", get_bool_f,        set_bool_f,        set_bool_sug       },
-  { "share_exclude", "global", get_string,        set_regex,         NULL,              }, // TODO: tab-complete old value
+  { "share_exclude", "global", get_string,        set_regex,         set_old_sug        },
   { "show_joinquit", NULL,     get_bool_f,        set_bool_f,        set_bool_sug       },
   { "slots",         "global", get_slots,         set_slots,         NULL               },
   { "tls_policy",    NULL,     get_tls_policy,    set_tls_policy,    set_tls_policy_sug },
@@ -814,11 +834,20 @@ void c_set_sug(char *args, char **sug) {
     c_set_sugkey(args, sug);
   else {
     *sep = 0;
-    struct setting *s = getsetting(args);
-    if(s && s->suggest) {
-      s->suggest(sep+1, sug);
+    char *pre = g_strdup(args);
+
+    // Get group and key
+    char *key, *group;
+    struct setting *s;
+    gboolean checkalt;
+    if(parsesetting(pre, &group, &key, &s, &checkalt)) {
+      if(checkalt && !g_key_file_has_key(conf_file, group, key, NULL) && strcmp(key, "hubname") != 0)
+        group = "global";
+
+      s->suggest(group, key, sep+1, sug);
       strv_prefix(sug, args, " ", NULL);
     }
+    g_free(pre);
   }
 }
 

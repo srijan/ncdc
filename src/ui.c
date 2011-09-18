@@ -823,45 +823,46 @@ static void ui_conn_draw_row(struct ui_listing *list, GSequenceIter *iter, int r
     cc->state == CCS_DISCONN   ? '-' :
     cc->state == CCS_HANDSHAKE ? 'H' :
     cc->state == CCS_IDLE      ? 'I' : cc->dl ? 'D' : 'U');
+  mvaddch(row, 3, cc->net->tls ? 't' : ' ');
 
   if(cc->nick)
-    mvaddnstr(row, 4, cc->nick, str_offset_from_columns(cc->nick, 15));
+    mvaddnstr(row, 5, cc->nick, str_offset_from_columns(cc->nick, 15));
   else {
     char tmp[30];
     strcpy(tmp, "IP:");
     strcat(tmp, cc->remoteaddr);
     if(strchr(tmp+3, ':'))
       *(strchr(tmp+3, ':')) = 0;
-    mvaddstr(row, 4, tmp);
+    mvaddstr(row, 5, tmp);
   }
 
   if(cc->hub)
-    mvaddnstr(row, 20, cc->hub->tab->name, str_offset_from_columns(cc->hub->tab->name, 11));
+    mvaddnstr(row, 21, cc->hub->tab->name, str_offset_from_columns(cc->hub->tab->name, 11));
 
 
-  mvaddstr(row, 32, cc->last_length ? str_formatsize(cc->last_length) : "-");
+  mvaddstr(row, 33, cc->last_length ? str_formatsize(cc->last_length) : "-");
 
   guint64 left = cc->dl ? cc->net->recv_raw_left : net_file_left(cc->net);
   if(cc->last_length && !cc->timeout_src)
-    mvprintw(row, 44, "%3d%%", (int)(((cc->last_length-left)*100)/cc->last_length));
+    mvprintw(row, 45, "%3d%%", (int)(((cc->last_length-left)*100)/cc->last_length));
   else
-    mvaddstr(row, 44, " -");
+    mvaddstr(row, 45, " -");
 
   if(cc->timeout_src)
-    mvaddstr(row, 49, "     -");
+    mvaddstr(row, 50, "     -");
   else
-    mvprintw(row, 49, "%6d", ratecalc_get(cc->dl ? cc->net->rate_in : cc->net->rate_out)/1024);
+    mvprintw(row, 50, "%6d", ratecalc_get(cc->dl ? cc->net->rate_in : cc->net->rate_out)/1024);
 
   if(cc->err) {
-    mvaddstr(row, 57, "Disconnected: ");
-    addnstr(cc->err->message, str_offset_from_columns(cc->err->message, wincols-(57+14)));
+    mvaddstr(row, 58, "Disconnected: ");
+    addnstr(cc->err->message, str_offset_from_columns(cc->err->message, wincols-(58+14)));
   } else if(cc->last_file) {
     char *file = strrchr(cc->last_file, '/');
     if(file)
       file++;
     else
       file = cc->last_file;
-      mvaddnstr(row, 57, file, str_offset_from_columns(file, wincols-57));
+      mvaddnstr(row, 58, file, str_offset_from_columns(file, wincols-58));
   }
 }
 
@@ -934,11 +935,11 @@ static void ui_conn_draw_details(int l) {
 
 static void ui_conn_draw() {
   attron(A_BOLD);
-  mvaddstr(1, 2,  "S Username");
-  mvaddstr(1, 20, "Hub");
-  mvaddstr(1, 32, "Chunk          %");
-  mvaddstr(1, 49, " KiB/s");
-  mvaddstr(1, 57, "File");
+  mvaddstr(1, 2,  "St Username");
+  mvaddstr(1, 21, "Hub");
+  mvaddstr(1, 33, "Chunk          %");
+  mvaddstr(1, 50, " KiB/s");
+  mvaddstr(1, 58, "File");
   attroff(A_BOLD);
 
   int bottom = ui_conn->details ? winrows-11 : winrows-3;

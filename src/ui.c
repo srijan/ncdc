@@ -560,7 +560,6 @@ static void ui_userlist_draw_row(struct ui_listing *list, GSequenceIter *iter, i
 }
 
 
-// TODO: some way of letting the user know what keys can be pressed
 static void ui_userlist_draw(struct ui_tab *tab) {
   // column widths (this is a trial-and-error-whatever-looks-right algorithm)
   struct ui_userlist_draw_opts o;

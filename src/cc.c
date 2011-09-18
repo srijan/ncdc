@@ -1050,24 +1050,9 @@ static void nmdc_mynick(struct cc *cc, const char *nick) {
   // check the expects list
   cc_expect_nmdc_rm(cc);
 
-  // Normally the above function should figure out from which hub this
-  // connection came. This is a fallback in the case it didn't (i.e. it's an
-  // unexpected connection)
-  // TODO: remove this fallback and simply disallow unexpected connections
+  // didn't see this one coming? disconnect!
   if(!cc->hub) {
-    GList *n;
-    for(n=ui_tabs; n; n=n->next) {
-      struct ui_tab *t = n->data;
-      if(t->type == UIT_HUB && g_hash_table_lookup(t->hub->users, cc->nick_raw)) {
-        g_warning("CC:%s: Unexpected incoming connection from %s", net_remoteaddr(cc->net), cc->nick_raw);
-        cc->hub = t->hub;
-      }
-    }
-  }
-
-  // still not found? disconnect
-  if(!cc->hub) {
-    g_message("CC:%s: Received incoming connection from %s, who is on none of the connected hubs.", net_remoteaddr(cc->net), nick);
+    g_message("CC:%s: Unexpected NMDC connection from %s.", net_remoteaddr(cc->net), nick);
     cc_disconnect(cc);
     return;
   }

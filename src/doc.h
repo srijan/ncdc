@@ -291,12 +291,15 @@ static const struct doc_set {
   " `bold' attribute usually makes the foreground color appear brighter as well."
 },
 { "connection", "<string>",
-  "Set your upload speed. The actual format you can use here may vary, but in"
-  " general you can set it to either a plain number for Mbit/s (e.g. `50' for"
-  " 50 mbit) or a number with a `KiB/s' indicator (e.g. `2300 KiB/s'). This is"
-  " only used when connecting to NMDC hubs, and is just an indication for other"
-  " users in the hub so that they know what speed they can expect when"
-  " downloading from you."
+  "Set your upload speed. This is just an indication for other users in the hub"
+  " so that they know what speed they can expect when downloading from you. The"
+  " actual format you can use here may vary, but it is recommended to set it to"
+  " either a plain number for Mbit/s (e.g. `50' for 50 mbit) or a number with a"
+  " `KiB/s' indicator (e.g. `2300 KiB/s'). On ADC hubs you must use one of the"
+  " previously mentioned formats, otherwise no upload speed will be"
+  " broadcasted. This setting is broadcasted as-is on NMDC hubs, to allow for"
+  " using old-style connection values (e.g. `DSL' or `Cable') on hubs that"
+  " require this."
 },
 { "description", "<string>",
   "A short public description that will be displayed in the user list of a hub."

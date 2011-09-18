@@ -657,6 +657,26 @@ gboolean is_valid_hubname(const char *name) {
 }
 
 
+// Converts the "connection" setting into a speed in bytes/s, returns 0 on error.
+guint64 connection_to_speed(const char *conn) {
+  if(!conn)
+    return 0;
+  char *end;
+  double val = strtod(conn, &end);
+  // couldn't convert
+  if(end == conn)
+    return 0;
+  // raw number, assume mbit/s
+  if(!*end)
+    return (val*1024.0*1024.0)/8.0;
+  // KiB/s, assume KiB/s (heh)
+  if(strcasecmp(end, "KiB/s") == 0 || strcasecmp(end, " KiB/s") == 0)
+    return val*1024.0;
+  // otherwise, no idea what to do with it
+  return 0;
+}
+
+
 guint64 rand_64() {
   // g_rand_new() uses four bytes from /dev/urandom when it's available. Doing
   // that twice (i.e. reading 8 bytes) should generate enough randomness for a

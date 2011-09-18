@@ -641,7 +641,7 @@ void hub_send_nfo(struct hub *hub) {
 
   char *nfo;
   // ADC
-  if(hub->adc) { // TODO: US,DS,SF
+  if(hub->adc) { // TODO: DS and SF?
     GString *cmd = adc_generate('B', ADCC_INF, hub->sid, 0);
     // send non-changing stuff in the IDENTIFY state
     gboolean f = hub->state == ADC_S_IDENTIFY;
@@ -683,6 +683,8 @@ void hub_send_nfo(struct hub *hub) {
       adc_append(cmd, "DE", desc?desc:"");
     if(f || !streq(mail))
       adc_append(cmd, "EM", mail?mail:"");
+    if((f || !streq(conn)) && connection_to_speed(conn))
+      g_string_append_printf(cmd, " US%"G_GUINT64_FORMAT, connection_to_speed(conn));
     nfo = g_string_free(cmd, FALSE);
 
   // NMDC

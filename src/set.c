@@ -131,6 +131,8 @@ static void set_userinfo(char *group, char *key, char *val) {
   if(!val)
     UNSET(group, key);
   else {
+    if(strcmp(key, "connection") == 0 && !connection_to_speed(val))
+      ui_mf(NULL, 0, "Couldn't convert `%s' to bytes/second, won't broadcast upload speed on ADC. See `/help set connection' for more information.", val);
     g_key_file_set_string(conf_file, group, key, val);
     conf_save();
     get_string(group, key);

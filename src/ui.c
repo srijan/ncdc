@@ -1738,7 +1738,6 @@ static void ui_search_key(struct ui_tab *tab, guint64 key) {
     break;
   case INPT_CHAR('b'): // b - /browse userlist
   case INPT_CHAR('B'): // B - /browse -f userlist
-    // TODO: go to the selected file/directory upon opening the file list
     if(!sel)
       ui_m(NULL, 0, "Nothing selected.");
     else {

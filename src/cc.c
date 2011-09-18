@@ -1619,20 +1619,15 @@ static gboolean listen_udp_handle(GSocket *sock, GIOCondition cond, gpointer dat
 }
 
 
-// TODO: option to bind to a specific IP, for those who want that functionality
-static GSocket *listen_udp_create(int port, GError **err) {
+static GSocket *listen_udp_create(GInetAddress *ia, int port, GError **err) {
   GError *tmperr = NULL;
-
-  // get local address
-  GInetAddress *laddr = g_inet_address_new_any(G_SOCKET_FAMILY_IPV4);
-  GSocketAddress *saddr = G_SOCKET_ADDRESS(g_inet_socket_address_new(laddr, port));
-  g_object_unref(laddr);
 
   // create the socket
   GSocket *s = g_socket_new(G_SOCKET_FAMILY_IPV4, G_SOCKET_TYPE_DATAGRAM, G_SOCKET_PROTOCOL_UDP, NULL);
   g_socket_set_blocking(s, FALSE);
 
   // bind to the address
+  GSocketAddress *saddr = G_SOCKET_ADDRESS(g_inet_socket_address_new(ia, port));
   g_socket_bind(s, saddr, TRUE, &tmperr);
   g_object_unref(saddr);
   if(tmperr) {
@@ -1645,25 +1640,30 @@ static GSocket *listen_udp_create(int port, GError **err) {
 }
 
 
-// TODO: same as for listen_udp_create
-static GSocketListener *listen_tcp_create(int *port, GError **err) {
+static GSocketListener *listen_tcp_create(GInetAddress *ia, int *port, GError **err) {
   GSocketListener *s = g_socket_listener_new();
+  GSocketAddress *newaddr = NULL;
+
   // TCP port
-  if(*port == 0) {
-    if(!(*port = g_socket_listener_add_any_inet_port(s, NULL, err))) {
-      g_object_unref(s);
-      return NULL;
-    }
-  } else if(!g_socket_listener_add_inet_port(s, *port, NULL, err)) {
+  GSocketAddress *saddr = G_SOCKET_ADDRESS(g_inet_socket_address_new(ia, *port));
+  gboolean r = g_socket_listener_add_address(s, saddr, G_SOCKET_TYPE_STREAM, G_SOCKET_PROTOCOL_TCP, NULL, &newaddr, err);
+  g_object_unref(saddr);
+  if(!r) {
     g_object_unref(s);
     return NULL;
   }
 
+  // Get effective port, in case our requested port was 0
+  *port = g_inet_socket_address_get_port(G_INET_SOCKET_ADDRESS(newaddr));
+  g_object_unref(newaddr);
+
   // TLS port (use a bogus GCancellable object to differenciate betwen the two)
   if(s && conf_certificate) {
+    saddr = G_SOCKET_ADDRESS(g_inet_socket_address_new(ia, *port+1));
     GCancellable *t = g_cancellable_new();
-    gboolean r = g_socket_listener_add_inet_port(s, *port+1, G_OBJECT(t), err);
+    r = g_socket_listener_add_address(s, saddr, G_SOCKET_TYPE_STREAM, G_SOCKET_PROTOCOL_TCP, G_OBJECT(t), NULL, err);
     g_object_unref(t);
+    g_object_unref(saddr);
     if(!r) {
       g_object_unref(s);
       return NULL;
@@ -1686,22 +1686,35 @@ gboolean cc_listen_start() {
   // can be 0, in which case it'll be randomly assigned
   int port = g_key_file_get_integer(conf_file, "global", "active_port", NULL);
 
+  // local addr
+  char *bind = g_key_file_get_string(conf_file, "global", "active_bind", NULL);
+  GInetAddress *laddr = NULL;
+  if(bind && *bind && !(laddr = g_inet_address_new_from_string(bind)))
+    ui_m(ui_main, 0, "Error parsing `active_bind' setting, binding to all interfaces instead.");
+  g_free(bind);
+  if(!laddr)
+    laddr = g_inet_address_new_any(G_SOCKET_FAMILY_IPV4);
+
   // Open TCP listen socket (and determine the port if it was 0)
-  GSocketListener *tcp = listen_tcp_create(&port, &err);
+  GSocketListener *tcp = listen_tcp_create(laddr, &port, &err);
   if(!tcp) {
     ui_mf(ui_main, 0, "Error creating TCP listen socket: %s", err->message);
+    g_object_unref(laddr);
     g_error_free(err);
     return FALSE;
   }
 
   // Open UDP listen socket
-  GSocket *udp = listen_udp_create(port, &err);
+  GSocket *udp = listen_udp_create(laddr, port, &err);
   if(!udp) {
     ui_mf(ui_main, 0, "Error creating UDP listen socket: %s", err->message);
+    g_object_unref(laddr);
     g_object_unref(tcp);
     g_error_free(err);
     return FALSE;
   }
+
+  g_object_unref(laddr);
 
   // start accepting incoming TCP connections
   cc_listen_tcp_can = g_cancellable_new();

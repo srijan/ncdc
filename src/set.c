@@ -263,11 +263,31 @@ static void set_active_port(char *group, char *key, char *val) {
     UNSET(group, key);
   else {
     v = strtol(val, NULL, 10);
-    if((!v && errno == EINVAL) || v < 0 || v > 65535)
+    if((!v && errno == EINVAL) || v < 0 || v > 65535) {
       ui_m(NULL, 0, "Invalid port number.");
+      return;
+    }
     g_key_file_set_integer(conf_file, group, key, v);
     conf_save();
     get_int(group, key);
+  }
+  cc_listen_start();
+}
+
+
+static void set_active_bind(char *group, char *key, char *val) {
+  if(!val)
+    UNSET(group, key);
+  else {
+    GInetAddress *a = g_inet_address_new_from_string(val);
+    if(!a) {
+      ui_m(NULL, 0, "Invalid IP.");
+      return;
+    }
+    g_object_unref(a);
+    g_key_file_set_string(conf_file, group, key, val);
+    conf_save();
+    get_string(group, key);
   }
   cc_listen_start();
 }
@@ -659,6 +679,7 @@ static void set_old_sug(char *group, char *key, char *val, char **sug) {
 // the settings list
 static struct setting settings[] = {
   { "active",           "global", get_bool_f,        set_active,        NULL               },
+  { "active_bind",      "global", get_string,        set_active_bind,   set_old_sug        },
   { "active_ip",        "global", get_string,        set_active_ip,     set_old_sug        },
   { "active_port",      "global", get_int,           set_active_port,   NULL,              },
   { "autoconnect",      NULL,     get_bool_f,        set_autoconnect,   set_bool_sug       },

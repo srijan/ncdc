@@ -231,6 +231,10 @@ static const struct doc_set {
   "Enables or disables active mode. Make sure to set `active_ip' and"
   " `active_port' before enabling active mode."
 },
+{ "active_bind", "<string>",
+  "IP address to bind to in active mode. When unset, ncdc will bind to all"
+  " interfaces."
+},
 { "active_ip", "<string>",
   "Your public IP address for use in active mode. It is important that other"
   " clients can reach you using this IP address. If you connect to a hub on the"

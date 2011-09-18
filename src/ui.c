@@ -538,6 +538,7 @@ static void ui_userlist_draw_row(struct ui_listing *list, GSequenceIter *iter, i
   struct ui_userlist_draw_opts *o = dat;
 
   char *tag = hub_user_tag(user);
+  char *conn = hub_user_conn(user);
   int j=5;
   if(iter == list->sel) {
     attron(A_BOLD);
@@ -553,7 +554,8 @@ static void ui_userlist_draw_row(struct ui_listing *list, GSequenceIter *iter, i
   DRAW_COL(row, j, o->cw_desc,  user->desc?user->desc:"");
   DRAW_COL(row, j, o->cw_tag,   tag?tag:"");
   DRAW_COL(row, j, o->cw_mail,  user->mail?user->mail:"");
-  DRAW_COL(row, j, o->cw_conn,  user->conn?user->conn:"");
+  DRAW_COL(row, j, o->cw_conn,  conn?conn:"");
+  g_free(conn);
   g_free(tag);
 }
 
@@ -616,8 +618,10 @@ static void ui_userlist_draw(struct ui_tab *tab) {
       mvprintw(bottom+1, 52, "%s (%s bytes)", str_formatsize(u->sharesize), str_fullsize(u->sharesize));
     else
       mvaddstr(bottom+1, 52, "-");
-    mvaddstr(bottom+2, 18, u->hasinfo ? u->conn : "-");
-    mvaddstr(bottom+2, 52, u->hasinfo ? u->mail : "-");
+    char *conn = hub_user_conn(u);
+    mvaddstr(bottom+2, 18, conn?conn:"-");
+    g_free(conn);
+    mvaddstr(bottom+2, 52, u->mail?u->mail:"-");
     char *tag = hub_user_tag(u);
     if(u->hasinfo)
       mvprintw(bottom+3, 18, "%s %s", u->desc?u->desc:"", tag?tag:"");

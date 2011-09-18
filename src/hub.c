@@ -50,7 +50,7 @@ struct hub_user {
   char *name;     // UTF-8
   char *name_hub; // hub-encoded (NMDC)
   char *desc;
-  char *conn;
+  char *conn;     // NMDC: string pointer, ADC: GUINT_TO_POINTER() of the US param
   char *mail;
   char *client;
   char cid[8];   // for ADC - only the first 8 bytes of the CID, for simple verification purposes
@@ -187,7 +187,8 @@ static void user_free(gpointer dat) {
   g_free(u->name_hub);
   g_free(u->name);
   g_free(u->desc);
-  g_free(u->conn);
+  if(!u->hub->adc)
+    g_free(u->conn);
   g_free(u->mail);
   g_free(u->client);
   g_slice_free(struct hub_user, u);
@@ -217,6 +218,15 @@ void hub_user_suggest(struct hub *hub, char *str, char **sug) {
       sug[i++] = g_strdup(u->name);
   qsort(sug, i, sizeof(char *), cmpstringp);
 }
+
+
+
+#if INTERFACE
+
+#define hub_user_conn(u) (!(u)->conn ? NULL :\
+  (u)->hub->adc ? g_strdup_printf("%d KiB/s", GPOINTER_TO_UINT((u)->conn)/1024) : g_strdup((u)->conn))
+
+#endif
 
 
 char *hub_user_tag(struct hub_user *u) {
@@ -408,6 +418,9 @@ static void user_adc_nfo(struct hub *hub, struct hub_user *u, struct adc_cmd *cm
       break;
     case P('C','T'): // client type (only used to figure out u->isop)
       u->isop = (strtol(p, NULL, 10) & (4 | 8 | 16 | 32)) > 0;
+      break;
+    case P('U','S'): // upload speed
+      u->conn = GUINT_TO_POINTER(g_ascii_strtoull(p, NULL, 0));
       break;
 #if TLS_SUPPORT
     case P('K','P'): // keyprint

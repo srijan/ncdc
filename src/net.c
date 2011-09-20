@@ -52,7 +52,7 @@ struct ratecalc net_in, net_out;
 #define NET_MAX_CMD  1048576
 
 struct net {
-  GSocketConnection *conn;
+  GIOStream *conn; // either a (raw, not wrapped) GSocketConnection or a GTlsConnection
   char addr[50];
   gboolean tls;
 
@@ -281,54 +281,18 @@ struct net *net_create(char term, void *han, gboolean keepalive, void (*rfunc)(s
 
 
 void net_setconn(struct net *n, GSocketConnection *conn, gboolean tls, gboolean serv) {
-  n->tls = FALSE;
-#if TLS_SUPPORT
-  if(tls && have_tls_support) {
-    n->tls = TRUE;
-    // Create a tls connection and wrap it around a tcp wrapper to make it a socketconnection again
-    GIOStream *tls = serv
-      ? g_tls_server_connection_new(G_IO_STREAM(conn), conf_certificate, NULL)
-      : g_tls_client_connection_new(G_IO_STREAM(conn), NULL, NULL);
-    g_return_if_fail(tls);
-    g_tls_connection_set_use_system_certdb(G_TLS_CONNECTION(tls), FALSE);
-    if(!serv) {
-      if(n->conn_accept_cert)
-        g_signal_connect(tls, "accept-certificate", G_CALLBACK(n->conn_accept_cert), n);
-      else
-        g_tls_client_connection_set_validation_flags(G_TLS_CLIENT_CONNECTION(tls), 0);
-      // allow the server to fetch our certificate if it wants to
-      if(conf_certificate)
-        g_tls_connection_set_certificate(G_TLS_CONNECTION(tls), conf_certificate);
-    }
-    // wrap
-    GSocketConnection *wrap = g_tcp_wrapper_connection_new(tls, g_socket_connection_get_socket(conn));
-    g_object_unref(tls);
-    g_object_unref(conn);
-    conn = wrap;
-  }
-  // The original TLS connection can be obtained again using:
-  //   G_TLS_CONNECTION(g_tcp_wrapper_connection_get_base_io_stream(G_TCP_WRAPPER_CONNECTION(conn)))
-#endif
+  g_return_if_fail(!G_IS_TCP_WRAPPER_CONNECTION(conn));
 
-  n->conn = conn;
-  n->in  = g_io_stream_get_input_stream(G_IO_STREAM(n->conn));
-  n->out = g_io_stream_get_output_stream(G_IO_STREAM(n->conn));
-  setup_read(n);
-
+  // disable the timeout set in net_connect(), we have our own idle timer
 #if TIMEOUT_SUPPORT
-  g_socket_set_timeout(g_socket_connection_get_socket(n->conn), 0);
+  g_socket_set_timeout(g_socket_connection_get_socket(G_SOCKET_CONNECTION(conn)), 0);
 #endif
   time(&(n->timeout_last));
   if(n->keepalive)
-    g_socket_set_keepalive(g_socket_connection_get_socket(n->conn), TRUE);
-
-  ratecalc_reset(n->rate_in);
-  ratecalc_reset(n->rate_out);
-  ratecalc_register(n->rate_in);
-  ratecalc_register(n->rate_out);
+    g_socket_set_keepalive(g_socket_connection_get_socket(conn), TRUE);
 
   // get/cache address
-  GInetSocketAddress *addr = G_INET_SOCKET_ADDRESS(g_socket_connection_get_remote_address(n->conn, NULL));
+  GInetSocketAddress *addr = G_INET_SOCKET_ADDRESS(g_socket_connection_get_remote_address(conn, NULL));
   if(!addr) {
     g_warning("g_socket_connection_get_remote_address() returned NULL");
     strcpy(n->addr, "(not connected)");
@@ -340,6 +304,44 @@ void net_setconn(struct net *n, GSocketConnection *conn, gboolean tls, gboolean 
     g_free(ip);
     g_object_unref(addr);
   }
+
+  // Set n->conn and wrap around a TlsConnection when requested
+  n->tls = FALSE;
+  n->conn = G_IO_STREAM(conn);
+#if TLS_SUPPORT
+  if(tls && have_tls_support) {
+    n->tls = TRUE;
+    // Create a tls connection and replace n->conn
+    GIOStream *tls = serv
+      ? g_tls_server_connection_new(n->conn, conf_certificate, NULL)
+      : g_tls_client_connection_new(n->conn, NULL, NULL);
+    g_return_if_fail(tls);
+    g_object_unref(n->conn);
+    n->conn = tls;
+    // set TLS options
+    g_tls_connection_set_use_system_certdb(G_TLS_CONNECTION(n->conn), FALSE);
+    if(!serv) {
+      if(n->conn_accept_cert)
+        g_signal_connect(n->conn, "accept-certificate", G_CALLBACK(n->conn_accept_cert), n);
+      else
+        g_tls_client_connection_set_validation_flags(G_TLS_CLIENT_CONNECTION(n->conn), 0);
+      // allow the server to fetch our certificate if it wants to
+      if(conf_certificate)
+        g_tls_connection_set_certificate(G_TLS_CONNECTION(n->conn), conf_certificate);
+    }
+  }
+#endif
+
+  // Setup and initiate read/write streams
+  n->in  = g_io_stream_get_input_stream(G_IO_STREAM(n->conn));
+  n->out = g_io_stream_get_output_stream(G_IO_STREAM(n->conn));
+  setup_read(n);
+
+  // and enable rate calculation
+  ratecalc_reset(n->rate_in);
+  ratecalc_reset(n->rate_out);
+  ratecalc_register(n->rate_in);
+  ratecalc_register(n->rate_out);
 
   g_debug("%s%s- Connected.", net_remoteaddr(n), n->tls ? "S" : "");
 }
@@ -403,7 +405,7 @@ static void handle_close(GObject *src, GAsyncResult *res, gpointer dat) {
 
 
 void net_disconnect(struct net *n) {
-  if(!n->conn)
+  if(!n->conn && !n->connecting)
     return;
 
   n->connecting = FALSE;
@@ -424,7 +426,14 @@ void net_disconnect(struct net *n) {
 
   g_debug("%s%s- Disconnected.", net_remoteaddr(n), n->tls ? "S" : "");
   strcpy(n->addr, "(not connected)");
-  g_io_stream_close_async(G_IO_STREAM(n->conn), G_PRIORITY_DEFAULT, NULL, handle_close, NULL);
+  if(n->conn) {
+    // There is a bug in the gnutls backend of glib-networking (2.28.7) that is
+    // triggered when the cancellable argument here is NULL when n->conn is a
+    // GTlsConnection object. Use some cancellable object to avoid it.
+    GCancellable *can = g_cancellable_new();
+    g_io_stream_close_async(n->conn, G_PRIORITY_DEFAULT, can, handle_close, NULL);
+    g_object_unref(can);
+  }
   n->out = NULL;
   n->in = NULL;
   n->conn = NULL;
@@ -640,9 +649,9 @@ static void file_start(struct net *n) {
   n->file_busy = TRUE;
 
 #if TLS_SUPPORT
-  if(!n->tls && !G_IS_TCP_WRAPPER_CONNECTION(n->conn)) {
+  if(!n->tls) {
 #endif
-    c->sock = g_socket_connection_get_socket(n->conn);
+    c->sock = g_socket_connection_get_socket(G_SOCKET_CONNECTION(n->conn));
     g_object_ref(c->sock);
 #if TLS_SUPPORT
   }

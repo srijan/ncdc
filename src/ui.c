@@ -1107,7 +1107,8 @@ static void ui_fl_loaddone(struct fl_list *fl, GError *err, void *dat) {
   tab->fl_loading = FALSE;
   tab->prio = err ? UIP_HIGH : UIP_MED;
   if(tab->fl_sel) {
-    ui_fl_dosel(tab, tab->fl_sel);
+    if(tab->fl_list)
+      ui_fl_dosel(tab, tab->fl_sel);
     g_free(tab->fl_sel);
     tab->fl_sel = NULL;
   }

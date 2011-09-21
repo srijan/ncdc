@@ -47,7 +47,7 @@ fi
 
 # Check for library functions.
 AC_CHECK_FUNCS(
-  [setlocale sigaction],[],
+  [setlocale sigaction ftruncate],[],
   AC_MSG_ERROR([Required function missing]))
 
 
@@ -101,6 +101,11 @@ case "$pr_cv_sendfile_func" in
 esac
 
 
+# Check for libm
+AC_CHECK_LIB([m],
+             [log10],
+             [LIBS="$LIBS -lm"],
+             [AC_MSG_RESULT([libm not found, assuming libc provides the math functions])])
 
 # Check for ncursesw
 AC_CHECK_LIB([ncursesw],

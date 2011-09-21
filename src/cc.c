@@ -822,9 +822,6 @@ static void adc_handle(struct cc *cc, char *msg) {
   struct adc_cmd cmd;
   GError *err = NULL;
 
-  if(!msg[0])
-    return;
-
   adc_parse(msg, &cmd, NULL, &err);
   if(err) {
     g_message("CC:%s: ADC parse error: %s. --> %s", net_remoteaddr(cc->net), err->message, msg);
@@ -1122,8 +1119,6 @@ static void nmdc_direction(struct cc *cc, gboolean down, int num) {
 static void nmdc_handle(struct cc *cc, char *cmd) {
   GMatchInfo *nfo;
 
-  g_clear_error(&(cc->err));
-
   // create regexes (declared statically, allocated/compiled on first call)
 #define CMDREGEX(name, regex) \
   static GRegex * name = NULL;\
@@ -1297,6 +1292,10 @@ static void nmdc_handle(struct cc *cc, char *cmd) {
 static void handle_cmd(struct net *n, char *cmd) {
   struct cc *cc = n->handle;
   g_return_if_fail(cc->state != CCS_CONN && cc->state != CCS_DISCONN);
+  if(!*cmd)
+    return;
+
+  g_clear_error(&(cc->err));
 
   // No input is allowed while we're sending file data.
   if(!cc->dl && cc->state == CCS_TRANSFER) {

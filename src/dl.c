@@ -548,7 +548,7 @@ static gboolean dl_queue_addfile(guint64 uid, char *hash, guint64 size, char *fn
 // added.
 void dl_queue_add_fl(guint64 uid, struct fl_list *fl, char *base, GRegex *excl) {
   // check excl
-  if(base && g_regex_match(excl, fl->name, 0, NULL)) {
+  if(base && excl && g_regex_match(excl, fl->name, 0, NULL)) {
     ui_mf(NULL, 0, "Ignoring `%s': excluded by regex.", fl->name);
     return;
   }

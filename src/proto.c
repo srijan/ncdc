@@ -561,7 +561,7 @@ struct search_r *search_parse_nmdc(struct hub *hub, char *msg) {
     }
     g_free(tmp);
     if(!n)
-      return FALSE;
+      return NULL;
     hub = t->hub;
   }
 

@@ -64,6 +64,7 @@ struct ui_tab {
   gboolean user_hide_tag : 1;
   gboolean user_hide_mail : 1;
   gboolean user_hide_conn : 1;
+  gboolean user_hide_ip : 1;
   // HUB
   gboolean hub_joincomplete : 1;
   GRegex *hub_highlight;
@@ -487,6 +488,7 @@ struct ui_tab *ui_userlist_create(struct hub *hub) {
   tab->user_opfirst = TRUE;
   tab->user_hide_conn = TRUE;
   tab->user_hide_mail = TRUE;
+  tab->user_hide_ip = TRUE;
   GSequence *users = g_sequence_new(NULL);
   // populate the list
   // g_sequence_sort() uses insertion sort? in that case it is faster to insert
@@ -529,7 +531,7 @@ static char *ui_userlist_title(struct ui_tab *tab) {
 
 
 struct ui_userlist_draw_opts {
-  int cw_user, cw_share, cw_conn, cw_desc, cw_mail, cw_tag;
+  int cw_user, cw_share, cw_conn, cw_desc, cw_mail, cw_tag, cw_ip;
 };
 
 
@@ -555,6 +557,7 @@ static void ui_userlist_draw_row(struct ui_listing *list, GSequenceIter *iter, i
   DRAW_COL(row, j, o->cw_tag,   tag?tag:"");
   DRAW_COL(row, j, o->cw_mail,  user->mail?user->mail:"");
   DRAW_COL(row, j, o->cw_conn,  conn?conn:"");
+  DRAW_COL(row, j, o->cw_ip,    user->ip4?ip4_unpack(user->ip4):"");
   g_free(conn);
   g_free(tag);
 }
@@ -563,10 +566,12 @@ static void ui_userlist_draw_row(struct ui_listing *list, GSequenceIter *iter, i
 static void ui_userlist_draw(struct ui_tab *tab) {
   // column widths (this is a trial-and-error-whatever-looks-right algorithm)
   struct ui_userlist_draw_opts o;
-  int num = 2 + (tab->user_hide_conn?0:1) + (tab->user_hide_desc?0:1) + (tab->user_hide_tag?0:1) + (tab->user_hide_mail?0:1);
+  int num = 2 + (tab->user_hide_conn?0:1) + (tab->user_hide_desc?0:1) + (tab->user_hide_tag?0:1) + (tab->user_hide_mail?0:1) + (tab->user_hide_ip?0:1);
   o.cw_user = MAX(20, (wincols*6)/(num*10));
   o.cw_share = 12;
-  int i = wincols-o.cw_user-o.cw_share-5; num -= 2; // remaining number of columns
+  o.cw_ip   = tab->user_hide_ip   ? 0 : 15;
+  int i = wincols-o.cw_user-o.cw_share-o.cw_ip-5;
+  num -= 2 + (tab->user_hide_ip?0:1); // remaining number of columns
   o.cw_conn = tab->user_hide_conn ? 0 : (i*6)/(num*10);
   o.cw_desc = tab->user_hide_desc ? 0 : (i*10)/(num*10);
   o.cw_mail = tab->user_hide_mail ? 0 : (i*7)/(num*10);
@@ -582,6 +587,7 @@ static void ui_userlist_draw(struct ui_tab *tab) {
   DRAW_COL(1, i, o.cw_tag,   "Tag");
   DRAW_COL(1, i, o.cw_mail,  "E-Mail");
   DRAW_COL(1, i, o.cw_conn,  "Connection");
+  DRAW_COL(1, i, o.cw_ip,    "IP");
   attroff(A_BOLD);
 
   // rows
@@ -673,6 +679,9 @@ static void ui_userlist_key(struct ui_tab *tab, guint64 key) {
     break;
   case INPT_CHAR('c'): // c (toggle connection visibility)
     tab->user_hide_conn = !tab->user_hide_conn;
+    break;
+  case INPT_CHAR('p'): // p (toggle IP visibility)
+    tab->user_hide_ip = !tab->user_hide_ip;
     break;
   case INPT_CTRL('j'): // newline
   case INPT_CHAR('i'): // i       (toggle user info)

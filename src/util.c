@@ -958,17 +958,23 @@ guint32 ip4_pack(const char *str) {
   struct in_addr n;
   if(!inet_aton(str, &n))
     return 0;
-  return n.s_addr; // this is an uint32_t, on linux at least
+  return g_ntohl(n.s_addr); // this is an uint32_t, on linux at least
 }
 
 
 // Returns a static string buffer.
 char *ip4_unpack(guint32 ip) {
   struct in_addr n;
-  n.s_addr = ip;
+  n.s_addr = g_htonl(ip);
   return inet_ntoa(n);
 }
 
+#if INTERFACE
+
+// don't use (a-b) here - the result may not fit in a signed integer
+#define ip4_cmp(a, b) ((a) > (b) ? 1 : -1)
+
+#endif
 
 
 

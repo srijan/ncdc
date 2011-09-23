@@ -513,12 +513,13 @@ static const struct doc_key {
 },
 { "userlist", "User list tab",
   LISTING_KEYS
-  "s            Order by share size.\n"
-  "u            Order by username.\n"
   "o            Toggle sorting OPs before others.\n"
-  "t            Toggle tag column visibility.\n"
-  "e            Toggle email column visibility.\n"
-  "c            Toggle connection column visibility.\n"
+  "s/S          Order by share size.\n"
+  "u/U          Order by username.\n"
+  "t/T          Toggle visibility / order by tag column.\n"
+  "e/E          Toggle visibility / order by email column.\n"
+  "c/C          Toggle visibility / order by connection column.\n"
+  "p/P          Toggle visibility / order by IP column.\n"
   "i/Return     Toggle information box.\n"
   "m            Send a PM to the selected user.\n"
   "g            Grant a slot to the selected user.\n"

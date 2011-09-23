@@ -53,12 +53,12 @@ struct ui_tab {
   struct hub *hub;             // HUB, USERLIST, MSG, SEARCH
   struct ui_listing *list;     // USERLIST, CONN, FL, DL, SEARCH
   guint64 uid;                 // FL, MSG
+  int order : 4;               // USERLIST, SEARCH (has different interpretation per tab)
+  gboolean o_reverse : 1;      // USERLIST, SEARCH
   gboolean details : 1;        // USERLIST, CONN
   // MSG
   gboolean msg_online : 1;
   // USERLIST
-  gboolean user_reverse : 1;
-  gboolean user_sort_share : 1;
   gboolean user_opfirst : 1;
   gboolean user_hide_desc : 1;
   gboolean user_hide_tag : 1;
@@ -80,8 +80,6 @@ struct ui_tab {
   struct search_q *search_q;
   time_t search_t;
   gboolean search_hide_hub : 1;
-  gboolean search_reverse : 1;
-  int search_order : 3;
 };
 
 #endif
@@ -461,22 +459,42 @@ gboolean ui_hub_finduser(struct ui_tab *tab, guint64 uid, const char *user, gboo
 
 // Userlist tab
 
+// Columns to sort on
+#define UIUL_USER   0
+#define UIUL_SHARE  1
+#define UIUL_CONN   2
+#define UIUL_DESC   3
+#define UIUL_MAIL   4
+#define UIUL_CLIENT 5
+#define UIUL_IP     6
+
+
 static gint ui_userlist_sort_func(gconstpointer da, gconstpointer db, gpointer dat) {
   const struct hub_user *a = da;
   const struct hub_user *b = db;
   struct ui_tab *tab = dat;
-  int o = 0;
-  if(!o && tab->user_opfirst && !a->isop != !b->isop)
+  int p = tab->order;
+
+  if(tab->user_opfirst && !a->isop != !b->isop)
     return a->isop && !b->isop ? -1 : 1;
-  if(!o && tab->user_sort_share)
-    o = a->sharesize > b->sharesize ? 1 : a->sharesize < b->sharesize ? -1 : 0;
-  if(!o) // TODO: this is noticably slow on large hubs, cache g_utf8_collate_key()
+
+  // All orders have the username as secondary order.
+  int o = p == UIUL_USER ? 0 :
+    p == UIUL_SHARE  ? a->sharesize > b->sharesize ? 1 : -1:
+    p == UIUL_CONN   ? (tab->hub->adc ? a->conn - b->conn : strcmp(a->conn?a->conn:"", b->conn?b->conn:"")) :
+    p == UIUL_DESC   ? g_utf8_collate(a->desc?a->desc:"", b->desc?b->desc:"") :
+    p == UIUL_MAIL   ? g_utf8_collate(a->mail?a->mail:"", b->mail?b->mail:"") :
+    p == UIUL_CLIENT ? strcmp(a->client?a->client:"", b->client?b->client:"")
+                     : ip4_cmp(a->ip4, b->ip4);
+
+  // Username sort
+  if(!o)
     o = g_utf8_collate(a->name, b->name);
   if(!o && a->name_hub && b->name_hub)
     o = strcmp(a->name_hub, b->name_hub);
   if(!o)
-    o = a > b ? 1 : -1;
-  return tab->user_reverse ? -1*o : o;
+    o = a - b;
+  return tab->o_reverse ? -1*o : o;
 }
 
 
@@ -650,24 +668,43 @@ static void ui_userlist_key(struct ui_tab *tab, guint64 key) {
   case INPT_CHAR('?'):
     ui_main_keys("userlist");
     break;
-  case INPT_CHAR('s'): // s (order by share asc/desc)
-    if(tab->user_sort_share)
-      tab->user_reverse = !tab->user_reverse;
-    else
-      tab->user_sort_share = tab->user_reverse = TRUE;
-    sort = TRUE;
+
+  // Sorting
+#define SETSORT(c) \
+  tab->o_reverse = tab->order == c ? !tab->o_reverse : FALSE;\
+  tab->order = c;\
+  sort = TRUE;
+
+  case INPT_CHAR('s'): // s/S - sort on share size
+  case INPT_CHAR('S'):
+    SETSORT(UIUL_SHARE);
     break;
-  case INPT_CHAR('u'): // u (order by username asc/desc)
-    if(!tab->user_sort_share)
-      tab->user_reverse = !tab->user_reverse;
-    else
-      tab->user_sort_share = tab->user_reverse = FALSE;
-    sort = TRUE;
+  case INPT_CHAR('u'): // u/U - sort on username
+  case INPT_CHAR('U'):
+    SETSORT(UIUL_USER)
     break;
-  case INPT_CHAR('o'): // o (toggle sorting OPs before others)
+  case INPT_CHAR('D'): // D - sort on description
+    SETSORT(UIUL_DESC)
+    break;
+  case INPT_CHAR('T'): // T - sort on client (= tag)
+    SETSORT(UIUL_CLIENT)
+    break;
+  case INPT_CHAR('E'): // E - sort on email
+    SETSORT(UIUL_MAIL)
+    break;
+  case INPT_CHAR('C'): // C - sort on connection
+    SETSORT(UIUL_CONN)
+    break;
+  case INPT_CHAR('P'): // P - sort on IP
+    SETSORT(UIUL_IP)
+    break;
+  case INPT_CHAR('o'): // o - toggle sorting OPs before others
     tab->user_opfirst = !tab->user_opfirst;
     sort = TRUE;
     break;
+#undef SETSORT
+
+  // Column visibility
   case INPT_CHAR('d'): // d (toggle description visibility)
     tab->user_hide_desc = !tab->user_hide_desc;
     break;
@@ -683,6 +720,7 @@ static void ui_userlist_key(struct ui_tab *tab, guint64 key) {
   case INPT_CHAR('p'): // p (toggle IP visibility)
     tab->user_hide_ip = !tab->user_hide_ip;
     break;
+
   case INPT_CTRL('j'): // newline
   case INPT_CHAR('i'): // i       (toggle user info)
     tab->details = !tab->details;
@@ -721,8 +759,14 @@ static void ui_userlist_key(struct ui_tab *tab, guint64 key) {
   if(sort) {
     g_sequence_sort(tab->list->list, ui_userlist_sort_func, tab);
     ui_listing_sorted(tab->list);
-    ui_mf(NULL, 0, "Ordering by %s (%s%s)", tab->user_sort_share ? "share size" : "user name",
-      tab->user_reverse ? "descending" : "ascending", tab->user_opfirst ? ", OPs first" : "");
+    ui_mf(NULL, 0, "Ordering by %s (%s%s)",
+        tab->order == UIUL_USER  ? "user name" :
+        tab->order == UIUL_SHARE ? "share size" :
+        tab->order == UIUL_CONN  ? "connection" :
+        tab->order == UIUL_DESC  ? "description" :
+        tab->order == UIUL_MAIL  ? "e-mail" :
+        tab->order == UIUL_CLIENT? "tag" : "IP address",
+      tab->o_reverse ? "descending" : "ascending", tab->user_opfirst ? ", OPs first" : "");
   }
 }
 
@@ -1557,7 +1601,7 @@ static gint ui_search_sort_func(gconstpointer da, gconstpointer db, gpointer dat
   const struct search_r *a = da;
   const struct search_r *b = db;
   struct ui_tab *tab = dat;
-  int p = tab->search_order;
+  int p = tab->order;
 
   /* Sort columns and their alternatives:
    * USER:  user/hub  -> file name -> file size
@@ -1579,7 +1623,7 @@ static gint ui_search_sort_func(gconstpointer da, gconstpointer db, gpointer dat
   // Try 3
   if(!o)
     o = p == UISCH_USER ? CMP_SIZE : p == UISCH_SIZE ? CMP_FILE : p == UISCH_SLOTS ? CMP_FILE : CMP_TTH;
-  return tab->search_reverse ? -o : o;
+  return tab->o_reverse ? -o : o;
 }
 
 
@@ -1605,7 +1649,7 @@ struct ui_tab *ui_search_create(struct hub *hub, struct search_q *q) {
   tab->search_q = q;
   tab->hub = hub;
   tab->search_hide_hub = hub ? TRUE : FALSE;
-  tab->search_order = UISCH_FILE;
+  tab->order = UISCH_FILE;
   time(&tab->search_t);
 
   // figure out a suitable tab->name
@@ -1772,23 +1816,23 @@ static void ui_search_key(struct ui_tab *tab, guint64 key) {
     tab->search_hide_hub = !tab->search_hide_hub;
     break;
   case INPT_CHAR('u'): // u - sort on username
-    tab->search_reverse = tab->search_order == UISCH_USER ? !tab->search_reverse : FALSE;
-    tab->search_order = UISCH_USER;
+    tab->o_reverse = tab->order == UISCH_USER ? !tab->o_reverse : FALSE;
+    tab->order = UISCH_USER;
     sort = TRUE;
     break;
   case INPT_CHAR('s'): // s - sort on size
-    tab->search_reverse = tab->search_order == UISCH_SIZE ? !tab->search_reverse : FALSE;
-    tab->search_order = UISCH_SIZE;
+    tab->o_reverse = tab->order == UISCH_SIZE ? !tab->o_reverse : FALSE;
+    tab->order = UISCH_SIZE;
     sort = TRUE;
     break;
   case INPT_CHAR('l'): // l - sort on slots
-    tab->search_reverse = tab->search_order == UISCH_SLOTS ? !tab->search_reverse : FALSE;
-    tab->search_order = UISCH_SLOTS;
+    tab->o_reverse = tab->order == UISCH_SLOTS ? !tab->o_reverse : FALSE;
+    tab->order = UISCH_SLOTS;
     sort = TRUE;
     break;
   case INPT_CHAR('n'): // n - sort on filename
-    tab->search_reverse = tab->search_order == UISCH_FILE ? !tab->search_reverse : FALSE;
-    tab->search_order = UISCH_FILE;
+    tab->o_reverse = tab->order == UISCH_FILE ? !tab->o_reverse : FALSE;
+    tab->order = UISCH_FILE;
     sort = TRUE;
     break;
   }
@@ -1797,10 +1841,10 @@ static void ui_search_key(struct ui_tab *tab, guint64 key) {
     g_sequence_sort(tab->list->list, ui_search_sort_func, tab);
     ui_listing_sorted(tab->list);
     ui_mf(NULL, 0, "Ordering by %s (%s)",
-      tab->search_order == UISCH_USER  ? "user name" :
-      tab->search_order == UISCH_SIZE  ? "file size" :
-      tab->search_order == UISCH_SLOTS ? "free slots" : "filename",
-      tab->search_reverse ? "descending" : "ascending");
+      tab->order == UISCH_USER  ? "user name" :
+      tab->order == UISCH_SIZE  ? "file size" :
+      tab->order == UISCH_SLOTS ? "free slots" : "filename",
+      tab->o_reverse ? "descending" : "ascending");
   }
 }
 

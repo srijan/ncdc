@@ -691,7 +691,10 @@ static void set_path_sug(char *group, char *key, char *val, char **sug) {
 // BUG: This does not use a default value, if there is one...
 static void set_old_sug(char *group, char *key, char *val, char **sug) {
   char *old = g_key_file_get_string(conf_file, group, key, NULL);
-  sug[0] = old;
+  if(strncmp(old, val, strlen(val)) == 0)
+    sug[0] = old;
+  else
+    g_free(old);
 }
 
 

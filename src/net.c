@@ -62,6 +62,9 @@ struct net {
 #if TLS_SUPPORT
   gboolean (*conn_accept_cert)(GTlsConnection *, GTlsCertificate *, GTlsCertificateFlags, gpointer);
 #endif
+  time_t conn_wait;
+  unsigned short conn_defport;
+  char *conn_addr;
 
   // Message termination character. ([0] = character, [1] = 0)
   char eom[2];
@@ -367,8 +370,27 @@ static void handle_connect(GObject *src, GAsyncResult *res, gpointer dat) {
 }
 
 
+static gboolean real_connect(gpointer dat) {
+  struct net *n = dat;
+  if(n->connecting) {
+    GSocketClient *sc = g_socket_client_new();
+    // set a timeout on the connect, regardless of the value of keepalive
+#if TIMEOUT_SUPPORT
+    g_socket_client_set_timeout(sc, 30);
+#endif
+    g_socket_client_connect_to_host_async(sc, n->conn_addr, n->conn_defport, n->conn_can, handle_connect, n);
+    net_ref(n);
+    time(&n->timeout_last);
+  }
+  g_free(n->conn_addr);
+  n->conn_addr = NULL;
+  net_unref(n);
+  return FALSE;
+}
+
+
 void net_connect(struct net *n, const char *addr, unsigned short defport, gboolean tls, void (*cb)(struct net *)) {
-  g_return_if_fail(!n->conn);
+  g_return_if_fail(!n->conn && !n->connecting);
   n->cb_con = cb;
   n->tls = tls;
 
@@ -383,15 +405,12 @@ void net_connect(struct net *n, const char *addr, unsigned short defport, gboole
     return;
   }
 
-  GSocketClient *sc = g_socket_client_new();
-  // set a timeout on the connect, regardless of the value of keepalive
-#if TIMEOUT_SUPPORT
-  g_socket_client_set_timeout(sc, 30);
-#endif
-  g_socket_client_connect_to_host_async(sc, addr, defport, n->conn_can, handle_connect, n);
+  time(&n->timeout_last);
+  n->conn_addr = g_strdup(addr);
+  n->conn_defport = defport;
   n->connecting = TRUE;
   net_ref(n);
-  time(&(n->timeout_last));
+  g_timeout_add_seconds(MAX(0, n->conn_wait-n->timeout_last), real_connect, n);
 }
 
 
@@ -423,6 +442,9 @@ void net_disconnect(struct net *n) {
   cancel_and_reset(n->in_can);
   cancel_and_reset(n->out_can);
 #undef cancel_and_reset
+
+  // Don't allow an immediate reconnect
+  n->conn_wait = time(NULL) + 5;
 
   g_debug("%s%s- Disconnected.", net_remoteaddr(n), n->tls ? "S" : "");
   strcpy(n->addr, "(not connected)");

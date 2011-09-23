@@ -606,28 +606,29 @@ static void ui_userlist_draw(struct ui_tab *tab) {
   else {
     struct hub_user *u = g_sequence_get(tab->list->sel);
     attron(A_BOLD);
-    mvaddstr(bottom+1,  8, "Username:");
-    mvaddstr(bottom+1, 45, "Share:");
-    mvaddstr(bottom+2,  6, "Connection:");
-    mvaddstr(bottom+2, 44, "E-Mail:");
-    mvaddstr(bottom+3,  1, "Description/tag:");
+    mvaddstr(bottom+1,  4, "Username:");
+    mvaddstr(bottom+1, 41, "Share:");
+    mvaddstr(bottom+2,  2, "Connection:");
+    mvaddstr(bottom+2, 40, "E-Mail:");
+    mvaddstr(bottom+3, 10, "IP:");
+    mvaddstr(bottom+3, 43, "Tag:");
+    mvaddstr(bottom+4,  1, "Description:");
     attroff(A_BOLD);
-    mvaddstr(bottom+1, 18, u->name);
+    mvaddstr(bottom+1, 14, u->name);
     if(u->hasinfo)
-      mvprintw(bottom+1, 52, "%s (%s bytes)", str_formatsize(u->sharesize), str_fullsize(u->sharesize));
+      mvprintw(bottom+1, 48, "%s (%s bytes)", str_formatsize(u->sharesize), str_fullsize(u->sharesize));
     else
-      mvaddstr(bottom+1, 52, "-");
+      mvaddstr(bottom+1, 48, "-");
     char *conn = hub_user_conn(u);
-    mvaddstr(bottom+2, 18, conn?conn:"-");
+    mvaddstr(bottom+2, 14, conn?conn:"-");
     g_free(conn);
-    mvaddstr(bottom+2, 52, u->mail?u->mail:"-");
+    mvaddstr(bottom+2, 48, u->mail?u->mail:"-");
+    mvaddstr(bottom+3, 14, u->ip4?ip4_unpack(u->ip4):"-");
     char *tag = hub_user_tag(u);
-    if(u->hasinfo)
-      mvprintw(bottom+3, 18, "%s %s", u->desc?u->desc:"", tag?tag:"");
-    else
-      mvaddstr(bottom+3, 19, "-");
+    mvaddstr(bottom+3, 48, tag?tag:"-");
     g_free(tag);
-    // TODO: CID & IP, when available
+    mvaddstr(bottom+4, 14, u->desc?u->desc:"-");
+    // TODO: CID?
   }
 }
 #undef DRAW_COL

@@ -458,8 +458,23 @@ static void get_download_dir(char *group, char *key) {
 }
 
 
-static void set_download_dir(char *group, char *key, char *val) {
-  char *nval = val ? g_strdup(val) : g_build_filename(conf_dir, "dl", NULL);
+static void get_incoming_dir(char *group, char *key) {
+  char *d = conf_incoming_dir();
+  ui_mf(NULL, 0, "%s.%s = %s", group, key, d);
+  g_free(d);
+}
+
+
+static void set_dl_inc_dir(char *group, char *key, char *val) {
+  gboolean dl = strcmp(key, "download_dir") == 0 ? TRUE : FALSE;
+
+  // Don't allow changes to incoming_dir when the download queue isn't empty
+  if(!dl && g_hash_table_size(dl_queue) > 0) {
+    ui_m(NULL, 0, "Can't change the incoming directory unless the download queue is empty.");
+    return;
+  }
+
+  char *nval = val ? g_strdup(val) : g_build_filename(conf_dir, dl ? "dl" : "inc", NULL);
   gboolean cont = FALSE, warn = FALSE;
   // check if it exists
   if(g_file_test(nval, G_FILE_TEST_EXISTS)) {
@@ -481,19 +496,20 @@ static void set_download_dir(char *group, char *key, char *val) {
   }
   // test whether they are on the same filesystem
   if(cont) {
-    struct stat inc, dest;
-    char *incd = g_build_filename(conf_dir, "inc", NULL);
-    if(stat(incd, &inc) < 0) {
-      ui_mf(NULL, 0, "Error stat'ing %s: %s", incd, g_strerror(errno));
+    struct stat a, b;
+    char *bd = dl ? conf_incoming_dir() : conf_download_dir();
+    if(stat(bd, &b) < 0) {
+      ui_mf(NULL, 0, "Error stat'ing %s: %s.", bd, g_strerror(errno));
       cont = FALSE;
     }
-    g_free(incd);
-    if(cont && stat(nval, &dest) < 0) {
-      ui_mf(NULL, 0, "Error stat'ing %s: %s", nval, g_strerror(errno));
+    g_free(bd);
+    if(cont && stat(nval, &a) < 0) {
+      ui_mf(NULL, 0, "Error stat'ing %s: %s", a, g_strerror(errno));
       cont = FALSE;
     }
-    if(cont && inc.st_dev != dest.st_dev)
+    if(!cont || (cont && a.st_dev != b.st_dev))
       warn = TRUE;
+    cont = TRUE;
   }
   // no errors? save.
   if(cont) {
@@ -501,7 +517,10 @@ static void set_download_dir(char *group, char *key, char *val) {
       UNSET(group, key);
     else {
       g_key_file_set_string(conf_file, group, key, val);
-      get_download_dir(group, key);
+      if(dl)
+        get_download_dir(group, key);
+      else
+        get_incoming_dir(group, key);
       conf_save();
     }
   }
@@ -690,12 +709,13 @@ static struct setting settings[] = {
 #undef C
   { "connection",       NULL,     get_string,        set_userinfo,      set_old_sug        },
   { "description",      NULL,     get_string,        set_userinfo,      set_old_sug        },
-  { "download_dir",     "global", get_download_dir,  set_download_dir,  set_path_sug       },
+  { "download_dir",     "global", get_download_dir,  set_dl_inc_dir,    set_path_sug       },
   { "download_slots",   "global", get_download_slots,set_download_slots,NULL               },
   { "download_exclude", "global", get_string,        set_regex,         set_old_sug        },
   { "email",            NULL,     get_string,        set_userinfo,      set_old_sug        },
   { "encoding",         NULL,     get_encoding,      set_encoding,      set_encoding_sug   },
   { "hubname",          NULL,     get_hubname,       set_hubname,       set_hubname_sug    },
+  { "incoming_dir",     "global", get_incoming_dir,  set_dl_inc_dir,    set_path_sug       },
   { "log_debug",        "log",    get_bool_f,        set_bool_f,        set_bool_sug       },
   { "log_downloads",    "log",    get_bool_t,        set_bool_t,        set_bool_sug       },
   { "log_uploads",      "log",    get_bool_t,        set_bool_t,        set_bool_sug       },

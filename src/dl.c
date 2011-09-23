@@ -70,13 +70,13 @@ struct dl {
   char prio;                // DLP_*
   char error;               // DLE_*
   unsigned short error_sub; // errno or block number (it is assumed that 0 <= errno <= USHRT_MAX)
-  int incfd;                // file descriptor for this file in <conf_dir>/inc/
+  int incfd;                // file descriptor for this file in <incoming_dir>
   char *flsel;              // path to file/dir to select for filelists
   char hash[24];            // TTH for files, tiger(uid) for filelists
   struct dl_user *u;        // user who has this file (should be a list for multi-source downloading)
   guint64 size;             // total size of the file
   guint64 have;             // what we have so far
-  char *inc;                // path to the incomplete file (/inc/<base32-hash>)
+  char *inc;                // path to the incomplete file (<incoming_dir>/<base32-hash>)
   char *dest;               // destination path (must be on same filesystem as the incomplete file)
   guint64 hash_block;       // number of bytes that each block represents
   struct tth_ctx *hash_tth; // TTH state of the last block that we have
@@ -325,7 +325,9 @@ static void dl_queue_insert(struct dl *dl, guint64 uid, gboolean init) {
   // figure out dl->inc
   char hash[40] = {};
   base32_encode(dl->hash, hash);
-  dl->inc = g_build_filename(conf_dir, "inc", hash, NULL);
+  char *tmp = conf_incoming_dir();
+  dl->inc = g_build_filename(tmp, hash, NULL);
+  g_free(tmp);
   // create or re-use dl_user struct
   dl->u = g_hash_table_lookup(queue_users, &uid);
   if(!dl->u) {
@@ -784,7 +786,9 @@ static void dl_queue_loadpartial(struct dl *dl) {
   // get size of the incomplete file
   char tth[40] = {};
   base32_encode(dl->hash, tth);
-  char *fn = g_build_filename(conf_dir, "inc", tth, NULL);
+  char *tmp = conf_incoming_dir();
+  char *fn = g_build_filename(tmp, tth, NULL);
+  g_free(tmp);
   struct stat st;
   if(stat(fn, &st) >= 0)
     dl->have = st.st_size;
@@ -921,9 +925,9 @@ gboolean dl_fl_clean(gpointer dat) {
 }
 
 
-// Removes unused files in /inc/.
+// Removes unused files in <incoming_dir>.
 static void dl_inc_clean() {
-  char *dir = g_build_filename(conf_dir, "inc", NULL);
+  char *dir = conf_incoming_dir();
   GDir *d = g_dir_open(dir, 0, NULL);
   if(!d) {
     g_free(dir);

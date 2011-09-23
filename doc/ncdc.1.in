@@ -148,8 +148,9 @@ File information and hash data for shared files.
 Command history.
 .TP
 .I $NCDC_DIR/inc/
-Location for incomplete downloads. File names are the base32-encoded TTH root
-of the completed file.
+Default location for incomplete downloads. Can be changed with the
+`incoming_dir' setting. The file names in this directory are the base32-encoded
+TTH root of the completed file.
 .TP
 .I $NCDC_DIR/logs/
 Directory where all the log files are stored. File names starting with `#' are

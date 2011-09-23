@@ -311,7 +311,7 @@ static const struct doc_set {
 { "download_dir", "<path>",
   "The directory where finished downloads are moved to. Finished downloads are"
   " by default stored in <session directory>/dl/. It is possible to set this to"
-  " a location that is on a different filesystem than the session directory,"
+  " a location that is on a different filesystem than the incoming directory,"
   " but doing so is not recommended: ncdc will block when moving the completed"
   " files to their final destination."
 },
@@ -344,6 +344,11 @@ static const struct doc_set {
   "The name of the currently opened hub tab. This is a user-assigned name, and"
   " is only used within ncdc itself. This is the same name as given to the"
   " `/open' command."
+},
+{ "incoming_dir", "<path>",
+  "The directory where incomplete downloads are stored. This setting can only"
+  " be changed when the download queue is empty. Also see the download_dir"
+  " setting."
 },
 { "log_debug", "<boolean>",
   "Log debug messages to stderr.log in the session directory. It is highly"

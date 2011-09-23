@@ -104,6 +104,10 @@ char conf_pid[24];
   !g_key_file_has_key(conf_file, "global", "download_slots", NULL) ? 3\
     : g_key_file_get_integer(conf_file, "global", "download_slots", NULL))
 
+#define conf_incoming_dir() (\
+  !g_key_file_has_key(conf_file, "global", "incoming_dir", NULL) ? g_build_filename(conf_dir, "inc", NULL)\
+    : g_key_file_get_string(conf_file, "global", "incoming_dir", NULL))
+
 // Can be used even before the configuration file is loaded. In which case it
 // returns TRUE. Default is otherwise FALSE.
 #define conf_log_debug() (\

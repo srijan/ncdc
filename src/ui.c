@@ -563,7 +563,6 @@ static void ui_userlist_draw_row(struct ui_listing *list, GSequenceIter *iter, i
   if(iter == list->sel) {
     attron(A_BOLD);
     mvaddstr(row, 0, ">");
-    attroff(A_BOLD);
   }
   if(user->isop)
     mvaddch(row, 2, 'O');
@@ -578,6 +577,8 @@ static void ui_userlist_draw_row(struct ui_listing *list, GSequenceIter *iter, i
   DRAW_COL(row, j, o->cw_ip,    user->ip4?ip4_unpack(user->ip4):"");
   g_free(conn);
   g_free(tag);
+  if(iter == list->sel)
+    attroff(A_BOLD);
 }
 
 
@@ -916,7 +917,6 @@ static void ui_conn_draw_row(struct ui_listing *list, GSequenceIter *iter, int r
   if(iter == list->sel) {
     attron(A_BOLD);
     mvaddch(row, 0, '>');
-    attroff(A_BOLD);
   }
 
   mvaddch(row, 2,
@@ -965,6 +965,9 @@ static void ui_conn_draw_row(struct ui_listing *list, GSequenceIter *iter, int r
       file = cc->last_file;
       mvaddnstr(row, 58, file, str_offset_from_columns(file, wincols-58));
   }
+
+  if(iter == list->sel)
+    attroff(A_BOLD);
 }
 
 
@@ -1280,7 +1283,6 @@ static void ui_fl_draw_row(struct ui_listing *list, GSequenceIter *iter, int row
   if(iter == list->sel) {
     attron(A_BOLD);
     mvaddch(row, 0, '>');
-    attroff(A_BOLD);
   }
 
   mvaddch(row, 2,
@@ -1291,6 +1293,9 @@ static void ui_fl_draw_row(struct ui_listing *list, GSequenceIter *iter, int row
   if(!fl->isfile)
     mvaddch(row, 17, '/');
   mvaddnstr(row, 18, fl->name, str_offset_from_columns(fl->name, wincols-19));
+
+  if(iter == list->sel)
+    attroff(A_BOLD);
 }
 
 
@@ -1473,7 +1478,6 @@ static void ui_dl_draw_row(struct ui_listing *list, GSequenceIter *iter, int row
   if(iter == list->sel) {
     attron(A_BOLD);
     mvaddch(row, 0, '>');
-    attroff(A_BOLD);
   }
 
   struct hub_user *u = g_hash_table_lookup(hub_uids, &dl->u->uid);
@@ -1505,6 +1509,9 @@ static void ui_dl_draw_row(struct ui_listing *list, GSequenceIter *iter, int row
     mvaddnstr(row, 59, dest, str_offset_from_columns(dest, wincols-59));
     g_free(def);
   }
+
+  if(iter == list->sel)
+    attroff(A_BOLD);
 }
 
 
@@ -1748,7 +1755,6 @@ static void ui_search_draw_row(struct ui_listing *list, GSequenceIter *iter, int
   if(iter == list->sel) {
     attron(A_BOLD);
     mvaddch(row, 0, '>');
-    attroff(A_BOLD);
   }
 
   struct hub_user *u = g_hash_table_lookup(hub_uids, &r->uid);
@@ -1777,6 +1783,9 @@ static void ui_search_draw_row(struct ui_listing *list, GSequenceIter *iter, int
   else
     fn = r->file;
   mvaddnstr(row, i+21, fn, str_offset_from_columns(fn, wincols-i-21));
+
+  if(iter == list->sel)
+    attroff(A_BOLD);
 }
 
 

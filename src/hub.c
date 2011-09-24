@@ -1249,6 +1249,7 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
   CMDREGEX(quit, "Quit ([^ $]+)");
   CMDREGEX(nicklist, "NickList (.+)");
   CMDREGEX(oplist, "OpList (.+)");
+  CMDREGEX(userip, "UserIP (.+)");
   CMDREGEX(myinfo, "MyINFO \\$ALL ([^ $]+) (.+)");
   CMDREGEX(hubname, "HubName (.+)");
   CMDREGEX(to, "To: ([^ $]+) From: ([^ $]+) \\$(.+)");
@@ -1261,7 +1262,7 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
   if(g_regex_match(lock, cmd, 0, &nfo)) { // 1 = lock
     char *lock = g_match_info_fetch(nfo, 1);
     if(strncmp(lock, "EXTENDEDPROTOCOL", 16) == 0)
-      net_send(hub->net, "$Supports NoGetINFO NoHello");
+      net_send(hub->net, "$Supports NoGetINFO NoHello UserIP2");
     char *key = nmdc_lock2key(lock);
     net_sendf(hub->net, "$Key %s", key);
     hub->nick = conf_hub_get(string, hub->tab->name, "nick");
@@ -1364,6 +1365,28 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
         hub->isop = TRUE;
     }
     hub->received_first = TRUE;
+    g_strfreev(list);
+  }
+  g_match_info_free(nfo);
+
+  // $UserIP
+  if(g_regex_match(userip, cmd, 0, &nfo)) { // 1 = list of users/ips
+    char *str = g_match_info_fetch(nfo, 1);
+    char **list = g_strsplit(str, "$$", 0);
+    g_free(str);
+    char **cur;
+    for(cur=list; *cur&&**cur; cur++) {
+      char *sep = strchr(*cur, ' ');
+      if(!sep)
+        continue;
+      *sep = 0;
+      struct hub_user *u = user_add(hub, *cur, NULL);
+      guint32 new = ip4_pack(sep+1);
+      if(new != u->ip4) {
+        u->ip4 = new;
+        ui_hub_userchange(hub->tab, UIHUB_UC_NFO, u);
+      }
+    }
     g_strfreev(list);
   }
   g_match_info_free(nfo);

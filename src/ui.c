@@ -581,22 +581,69 @@ static void ui_userlist_draw_row(struct ui_listing *list, GSequenceIter *iter, i
 }
 
 
+/* Distributing a width among several columns with given weights:
+ *   w_t = sum(i=c_v; w_i)
+ *   w_s = 1 + sum(i=c_h; w_i/w_t)
+ *   b_i = w_i*w_s
+ * Where:
+ *   c_v = set of all visible columns
+ *   c_h = set of all hidden columns
+ *   w_i = weight of column $i
+ *   w_t = sum of the weights of all visible columns
+ *   w_s = scale factor
+ *   b_i = calculated width of column $i, with 0 < b_i <= 1
+ *
+ * TODO: abstract this, so that the weights and such don't need repetition.
+ */
+static void ui_userlist_calc_widths(struct ui_tab *tab, struct ui_userlist_draw_opts *o) {
+  // available width
+  int w = wincols-5;
+
+  // share has a fixed size
+  o->cw_share = 12;
+  w -= 12;
+
+  // IP column as well
+  o->cw_ip = tab->user_hide_ip ? 0 : 15;
+  w -= o->cw_ip;
+
+  // User column has a minimum size (but may grow a bit later on, so will still be counted as a column)
+  o->cw_user = 15;
+  w -= 15;
+
+  // Total weight (first one is for the user column)
+  double wt = 0.02
+    + (tab->user_hide_conn ? 0.0 : 0.16)
+    + (tab->user_hide_desc ? 0.0 : 0.32)
+    + (tab->user_hide_mail ? 0.0 : 0.18)
+    + (tab->user_hide_tag  ? 0.0 : 0.32);
+
+  // Scale factor
+  double ws = 1.0 + (
+    + (tab->user_hide_conn ? 0.16: 0.0)
+    + (tab->user_hide_desc ? 0.32: 0.0)
+    + (tab->user_hide_mail ? 0.18: 0.0)
+    + (tab->user_hide_tag  ? 0.32: 0.0))/wt;
+  // scale to available width
+  ws *= w;
+
+  // Get the column widths. Note the use of floor() here, this prevents that
+  // the total width exceeds the available width. The remaining columns will be
+  // given to the user column, which is always present anyway.
+  o->cw_conn = tab->user_hide_conn ? 0 : floor(0.16*ws);
+  o->cw_desc = tab->user_hide_desc ? 0 : floor(0.32*ws);
+  o->cw_mail = tab->user_hide_mail ? 0 : floor(0.18*ws);
+  o->cw_tag  = tab->user_hide_tag  ? 0 : floor(0.32*ws);
+  o->cw_user += w - o->cw_conn - o->cw_desc - o->cw_mail - o->cw_tag;
+}
+
+
 static void ui_userlist_draw(struct ui_tab *tab) {
-  // column widths (this is a trial-and-error-whatever-looks-right algorithm)
   struct ui_userlist_draw_opts o;
-  int num = 2 + (tab->user_hide_conn?0:1) + (tab->user_hide_desc?0:1) + (tab->user_hide_tag?0:1) + (tab->user_hide_mail?0:1) + (tab->user_hide_ip?0:1);
-  o.cw_user = MAX(20, (wincols*6)/(num*10));
-  o.cw_share = 12;
-  o.cw_ip   = tab->user_hide_ip   ? 0 : 15;
-  int i = wincols-o.cw_user-o.cw_share-o.cw_ip-5;
-  num -= 2 + (tab->user_hide_ip?0:1); // remaining number of columns
-  o.cw_conn = tab->user_hide_conn ? 0 : (i*6)/(num*10);
-  o.cw_desc = tab->user_hide_desc ? 0 : (i*10)/(num*10);
-  o.cw_mail = tab->user_hide_mail ? 0 : (i*7)/(num*10);
-  o.cw_tag  = tab->user_hide_tag  ? 0 : i-o.cw_conn-o.cw_desc-o.cw_mail;
+  ui_userlist_calc_widths(tab, &o);
 
   // header
-  i = 5;
+  int i = 5;
   attron(A_BOLD);
   mvaddstr(1, 2, "OP");
   DRAW_COL(1, i, o.cw_user,  "Username");

@@ -381,7 +381,7 @@ static void user_adc_nfo(struct hub *hub, struct hub_user *u, struct adc_cmd *cm
     case P('V','E'): // client name (+ version)
       g_free(u->client);
       char *ap = adc_getparam(cmd->argv, "AP", NULL);
-      u->client = !p[0] ? NULL : !ap ? g_strdup(p) : g_strdup_printf("%s %s", ap, p);
+      u->client = !p[0] ? NULL : !ap || strncmp(p, ap, strlen(ap)) == 0 ? g_strdup(p) : g_strdup_printf("%s %s", ap, p);
       break;
     case P('E','M'): // mail
       g_free(u->mail);

@@ -802,6 +802,22 @@ static void handle_id(struct cc *cc, struct hub_user *u) {
   if(cc->adc)
     memcpy(cc->cid, u->cid, 8);
 
+  // Set u->ip4 if we didn't get this from the hub yet.
+  // Note that in the case of ADC, this function is called before the
+  // connection has actually been established, so the remote address isn't
+  // known yet. This doesn't matter, however, as the hub already sends IP
+  // information with ADC (if it didn't, we won't be able to connect in the
+  // first place).
+  if(!u->ip4 && cc->net->conn) {
+    char *tmp = net_remoteaddr(cc->net);
+    char *sep = strchr(tmp, ':');
+    if(sep)
+      *sep = 0;
+    u->ip4 = ip4_pack(tmp);
+    if(sep)
+      *sep = ':';
+  }
+
   // Don't allow multiple connections with the same user for the same purpose
   // (up/down).  For NMDC, the purpose of this connection is determined when we
   // receive a $Direction, so it's only checked here for ADC.
@@ -1054,9 +1070,9 @@ static void nmdc_mynick(struct cc *cc, const char *nick) {
     return;
   }
 
-  struct hub_user *u = g_hash_table_lookup(cc->hub->users, nick);
+  struct hub_user *u = g_hash_table_lookup(hub_uids, &cc->uid);
   if(!u) {
-    g_set_error_literal(&(cc->err), 1, 0, "User is not on the hub");
+    g_set_error_literal(&(cc->err), 1, 0, "User not online.");
     cc_disconnect(cc);
     return;
   }

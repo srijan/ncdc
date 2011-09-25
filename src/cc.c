@@ -778,10 +778,10 @@ static void handle_adcget(struct cc *cc, char *type, char *id, guint64 start, gi
     net_sendf(cc->net,
       cc->adc ? "CSND file %s %"G_GUINT64_FORMAT" %"G_GINT64_FORMAT : "$ADCSND file %s %"G_GUINT64_FORMAT" %"G_GINT64_FORMAT,
       tmp, start, bytes);
-    net_sendfile(cc->net, path, start, bytes, handle_sendcomplete);
-    g_free(tmp);
     cc->state = CCS_TRANSFER;
     time(&cc->last_start);
+    net_sendfile(cc->net, path, start, bytes, handle_sendcomplete);
+    g_free(tmp);
   } else {
     g_set_error_literal(err, 1, 53, "No Slots Available");
     g_free(vpath);

@@ -1070,7 +1070,7 @@ static void nmdc_mynick(struct cc *cc, const char *nick) {
     return;
   }
 
-  struct hub_user *u = g_hash_table_lookup(hub_uids, &cc->uid);
+  struct hub_user *u = g_hash_table_lookup(cc->hub->users, nick);
   if(!u) {
     g_set_error_literal(&(cc->err), 1, 0, "User not online.");
     cc_disconnect(cc);

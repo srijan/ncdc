@@ -141,7 +141,7 @@ static const struct doc_cmd {
   " hubs will be reconnected."
 },
 { "refresh", "[<path>]", "Refresh file list.",
-  "Initiates a refresh. If no argument is given, the complete list will be"
+  "Initiates share refresh. If no argument is given, the complete list will be"
   " refreshed. Otherwise only the specified directory will be refreshed. The"
   " path argument can be either an absolute filesystem path or a virtual path"
   " within your share."

@@ -1,3 +1,23 @@
+1.1 - 2011-09-25
+	- Select item in file browser when opened from a search result
+	- Added active_bind setting
+	- Added share_exclude setting
+	- Added download_exclude setting
+	- Added incoming_dir setting
+	- Added autocompletion for the previous values of certain settings
+	- Allow the "connection" setting to be used for ADC as well
+	- Added IP column to user list
+	- Allow sorting on description, email, tag and IP columns in user list
+	- Display upload speeds in the user list of an ADC hub
+	- Added TLS indication to connection list
+	- Mark selected items bold in listings
+	- Allow /reconnect on the main tab to reconnect all hubs
+	- Added slash to base path in partial file lists
+	- Added delay of 5 seconds before reconnecting to a hub
+	- Added recognition of the AP param on ADC
+	- Added support for UserIP2 on NMDC
+	- Removed support for unexpected incoming NMDC connections
+
 1.0 - 2011-09-16
 	- Added ncdc(1) and ncdc-gen-cert(1) manual pages
 	- Documented settings (/help set <setting>)

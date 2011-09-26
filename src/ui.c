@@ -1505,7 +1505,7 @@ static void ui_dl_draw_row(struct ui_listing *list, GSequenceIter *iter, int row
   else {
     char *def = conf_download_dir();
     int len = strlen(def);
-    char *dest = strncmp(def, dl->dest, len) == 0 ? dl->dest+len+1 : dl->dest;
+    char *dest = strncmp(def, dl->dest, len) == 0 ? dl->dest+len+(dl->dest[len-1] == '/' ? 0 : 1) : dl->dest;
     mvaddnstr(row, 59, dest, str_offset_from_columns(dest, wincols-59));
     g_free(def);
   }

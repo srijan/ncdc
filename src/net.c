@@ -422,7 +422,7 @@ static void handle_close(GObject *src, GAsyncResult *res, gpointer dat) {
 
 
 void net_disconnect(struct net *n) {
-  if(!n->conn)
+  if(!n->conn && !n->connecting)
     return;
 
   n->connecting = FALSE;

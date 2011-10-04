@@ -446,7 +446,8 @@ void net_disconnect(struct net *n) {
 
   g_debug("%s%s- Disconnected.", net_remoteaddr(n), n->tls ? "S" : "");
   strcpy(n->addr, "(not connected)");
-  g_io_stream_close_async(G_IO_STREAM(n->conn), G_PRIORITY_DEFAULT, NULL, handle_close, NULL);
+  if(n->conn)
+    g_io_stream_close_async(G_IO_STREAM(n->conn), G_PRIORITY_DEFAULT, NULL, handle_close, NULL);
   n->out = NULL;
   n->in = NULL;
   n->conn = NULL;

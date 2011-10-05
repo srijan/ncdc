@@ -49,7 +49,7 @@
   C(log_nick,       COLOR_DEFAULT,   COLOR_DEFAULT,   0)\
   C(log_ownnick,    COLOR_DEFAULT,   COLOR_DEFAULT,   A_BOLD)\
   C(log_quit,       COLOR_CYAN,      COLOR_DEFAULT,   0)\
-  C(log_time,       COLOR_DEFAULT,   COLOR_DEFAULT,   0)\
+  C(log_time,       COLOR_BLACK,     COLOR_DEFAULT,   A_BOLD)\
   C(tabprio_high,   COLOR_MAGENTA,   COLOR_DEFAULT,   A_BOLD)\
   C(tabprio_low,    COLOR_BLACK,     COLOR_DEFAULT,   A_BOLD)\
   C(tabprio_med,    COLOR_CYAN,      COLOR_DEFAULT,   A_BOLD)

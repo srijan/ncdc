@@ -2102,8 +2102,7 @@ static void ui_draw_status() {
  * - Change        "!>" or "<!"  with ! in same color as above
  */
 
-static void ui_draw_tablist() {
-  static const int xoffset = 12;
+static void ui_draw_tablist(int xoffset) {
   static int top = 0;
   int i, w;
   GList *n;
@@ -2230,11 +2229,19 @@ void ui_draw() {
   // second-last line - time and tab list
   mvhline(winrows-2, 0, ACS_HLINE, wincols);
   // time
-  time_t tm = time(NULL);
-  char ts[12];
-  strftime(ts, 11, "[%H:%M:%S]", localtime(&tm));
-  mvaddstr(winrows-2, 1, ts);
-  ui_draw_tablist();
+  int xoffset = 0;
+  char *tfmt = conf_ui_time_format();
+  if(strcmp(tfmt, "-") != 0) {
+    GDateTime *tm = g_date_time_new_now_local();
+    char *ts = g_date_time_format(tm, tfmt);
+    mvaddstr(winrows-2, 1, ts);
+    xoffset = 2 + str_columns(ts);
+    g_free(ts);
+    g_date_time_unref(tm);
+  }
+  g_free(tfmt);
+  // tabs
+  ui_draw_tablist(xoffset);
 
   // last line - status info or notification
   ui_draw_status();

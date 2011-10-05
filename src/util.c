@@ -114,6 +114,10 @@ char conf_pid[24];
   !conf_file ? TRUE : !g_key_file_has_key(conf_file, "log", "log_debug", NULL) ? FALSE :\
     g_key_file_get_boolean(conf_file, "log", "log_debug", NULL))
 
+#define conf_ui_time_format() (\
+  !g_key_file_has_key(conf_file, "global", "ui_time_format", NULL) ? g_strdup("[%H:%M:%S]")\
+    : g_key_file_get_string(conf_file, "global", "ui_time_format", NULL))
+
 
 #define CONF_TLSP_DISABLE 0
 #define CONF_TLSP_ALLOW   1

@@ -420,6 +420,15 @@ static const struct doc_set {
   " that, even if you set this to `prefer', TLS will only be used if the"
   " connecting party also supports it."
 },
+{ "ui_time_format", "<string>",
+  "The format of the time displayed in the lower-left of the screen. Set `-' to"
+  " not display a time at all. The string is passed to the Glib"
+  " g_date_time_format() function, which accepts roughly the same formats as"
+  " strftime(). Check out the strftime(3) man page or the Glib documentation"
+  " for more information. Note that this setting does not influence the"
+  " date/time format used in other places, such as the chat window or log"
+  " files."
+},
 
 { NULL }
 };

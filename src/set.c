@@ -681,6 +681,24 @@ static void set_regex(char *group, char *key, char *val) {
 }
 
 
+static void get_ui_time_format(char *group, char *key) {
+  char *d = conf_ui_time_format();
+  ui_mf(NULL, 0, "%s.%s = %s", group, key, d);
+  g_free(d);
+}
+
+
+static void set_ui_time_format(char *group, char *key, char *val) {
+  if(!val) {
+    UNSET(group, key);
+  } else {
+    g_key_file_set_string(conf_file, group, key, val);
+    conf_save();
+    get_ui_time_format(group, key);
+  }
+}
+
+
 static void set_path_sug(char *group, char *key, char *val, char **sug) {
   path_suggest(val, sug);
 }
@@ -731,6 +749,7 @@ static struct setting settings[] = {
   { "show_joinquit",    NULL,     get_bool_f,        set_bool_f,        set_bool_sug       },
   { "slots",            "global", get_slots,         set_slots,         NULL               },
   { "tls_policy",       NULL,     get_tls_policy,    set_tls_policy,    set_tls_policy_sug },
+  { "ui_time_format",   "global", get_ui_time_format,set_ui_time_format,set_old_sug        },
   { NULL }
 };
 

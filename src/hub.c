@@ -167,7 +167,7 @@ static struct hub_user *user_add(struct hub *hub, const char *name, const char *
   ui_hub_userchange(hub->tab, UIHUB_UC_JOIN, u);
   // notify the dl manager
   if(hub->nick_valid)
-    dl_queue_useronline(u->uid);
+    dl_user_join(u->uid);
   return u;
 }
 
@@ -445,18 +445,6 @@ static void user_adc_nfo(struct hub *hub, struct hub_user *u, struct adc_cmd *cm
 }
 
 #undef P
-
-
-// Call dl_queue_useronline() for every user on the this hub. Should be called
-// when we might be able to send CTM/RCM's (i.e. when hub->nick_valid becomes
-// true).
-static void user_notifydl(struct hub *hub) {
-  GHashTableIter iter;
-  struct hub_user *u;
-  g_hash_table_iter_init(&iter, hub->users);
-  while(g_hash_table_iter_next(&iter, NULL, (gpointer *)&u))
-    dl_queue_useronline(u->uid);
-}
 
 
 
@@ -974,7 +962,7 @@ static void adc_handle(struct hub *hub, char *msg) {
           hub->state = ADC_S_NORMAL;
           hub->isop = u->isop;
           if(!hub->nick_valid)
-            user_notifydl(hub);
+            dl_user_join(0);
           hub->nick_valid = TRUE;
           hub->joincomplete = TRUE;
         }
@@ -1299,7 +1287,7 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
         // Most hubs send the user list after our nick has been validated (in
         // contrast to ADC), but it doesn't hurt to call this function at this
         // point anyway.
-        user_notifydl(hub);
+        dl_user_join(0);
       }
     } else {
       struct hub_user *u = user_add(hub, nick, NULL);

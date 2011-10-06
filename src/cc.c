@@ -67,12 +67,10 @@ static GQueue *cc_expected;
 
 static void cc_expect_rm(GList *n, struct cc *success) {
   struct cc_expect *e = n->data;
-  if(success && e->dl) {
+  if(e->dl && !success)
+    dl_user_cc(e->uid, FALSE);
+  else if(e->dl)
     success->dl = TRUE;
-    dl_queue_cc(e->uid, success);
-  }
-  if(e->dl)
-    dl_queue_expect(e->uid, FALSE);
   g_source_remove(e->timeout_src);
 #if TLS_SUPPORT
   if(e->kp)
@@ -113,8 +111,6 @@ void cc_expect_add(struct hub *hub, struct hub_user *u, char *t, gboolean dl) {
 #endif
   if(t)
     e->token = g_strdup(t);
-  if(e->dl)
-    dl_queue_expect(e->uid, TRUE);
   time(&(e->added));
   g_queue_push_tail(cc_expected, e);
   e->timeout_src = g_timeout_add_seconds_full(G_PRIORITY_LOW, 60, cc_expect_timeout, cc_expected->tail, NULL);
@@ -533,8 +529,14 @@ static void handle_error(struct net *n, int action, GError *err) {
 }
 
 
+// TODO: just call dl_user_cc() upon entering the IDLE state and let dl.c call
+// this function with a certain dl struct as argument.
 void cc_download(struct cc *cc) {
   g_return_if_fail(cc->state == CCS_IDLE && cc->dl);
+  // If we just entered the IDLE state, notify dl.c that we can download
+  if(!cc->last_file)
+    dl_user_cc(cc->uid, cc);
+
   struct dl *dl = dl_queue_next(cc->uid);
   if(!dl)
     return;
@@ -1122,7 +1124,7 @@ static void nmdc_direction(struct cc *cc, gboolean down, int num) {
 
   // If we wanted to download, but didn't get the chance to do so, notify the dl manager.
   if(old_dl && !cc->dl)
-    dl_queue_cc(cc->uid, NULL);
+    dl_user_cc(cc->uid, NULL);
 
   // if we can download, do so!
   if(cc->dl)
@@ -1462,7 +1464,7 @@ void cc_disconnect(struct cc *cc) {
   cc->token = NULL;
   cc->state = CCS_DISCONN;
   if(cc->dl && cc->uid)
-    dl_queue_cc(cc->uid, NULL);
+    dl_user_cc(cc->uid, NULL);
 }
 
 
@@ -1473,8 +1475,6 @@ void cc_free(struct cc *cc) {
     g_source_remove(cc->timeout_src);
   if(ui_conn)
     ui_conn_listchange(cc->iter, UICONN_DEL);
-  if(cc->dl && cc->uid)
-    dl_queue_cc(cc->uid, NULL);
   g_sequence_remove(cc->iter);
   net_unref(cc->net);
   if(cc->err)

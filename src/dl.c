@@ -35,13 +35,45 @@
 
 #if INTERFACE
 
+#define DLU_NCO  0 // Not connected, ready for connection
+#define DLU_EXP  1 // Expecting a dl connection
+#define DLU_IDL  2 // dl connected, idle
+#define DLU_ACT  3 // dl connected, downloading
+#define DLU_WAI  4 // Not connected, waiting for reconnect timeout
+
 struct dl_user {
+  int state;     // DLU_*
+  int timeout;   // source id of the timeout function in DLU_WAI
   guint64 uid;
-  struct cc_expect *expect;
-  struct cc *cc;
-  GSList *queue; // ordered list of struct dl's. (TODO: GSequence for performance?)
-  gboolean active; // whether we're currently downloading or not. (i.e. whether this user is occupying a download slot)
+  struct cc *cc; // Always when state = IDL or ACT, may be set or NULL in EXP
+  GSList *queue; // Ordered list of struct dl's
 };
+
+/* State machine for dl_user.state:
+ *
+ *           8  /-----\
+ *        .<--- | WAI | <-------------------------------.
+ *       /      \-----/     |             |             |
+ *       |                2 |           4 |  .<------.  | 7
+ *       v                  |             | /       6 \ |
+ *    /-----\  1         /-----\  3    /-----\  5    /-----\
+ * -> | NCO | ---------> | EXP | ----> | IDL | ----> | ACT |
+ *    \-----/            \-----/       \-----/       \-----/
+ *
+ *  1. We're requesting a connect
+ *  2. No reply, connection timed out or we lost the $Download game on NMDC
+ *  3. Successful connection and handshake
+ *  4. Idle timeout / user disconnect
+ *  5. Start of download
+ *  6. Download (chunk) finished
+ *  7. Idle timeout / user disconnect / download aborted / no slots free / error while downloading
+ *  8. Reconnect timeout expired
+ *     (currently hardcoded to 60 sec, probably want to make this configurable)
+ */
+// TODO: Improve the NCO->EXP->IDL abstraction
+// TODO: Move more logic to dl_user_setstate()
+// TODO: Always initiate downloads from dl.c
+
 
 
 // Note: The following numbers are also stored in dl.dat. Keep this in mind
@@ -123,7 +155,7 @@ static GHashTable *queue_users = NULL;
 
 
 // Cached value. Should be equivalent to the number of items in the queue_users
-// table where active = TRUE.
+// table where state = UDL_ACT
 static int queue_users_active = 0;
 
 
@@ -155,15 +187,52 @@ char *dl_strerror(char err, unsigned short sub) {
 }
 
 
+static gboolean dl_user_waitdone(gpointer dat);
+static void dl_queue_uchange(struct dl_user *du);
+
+// TODO: this function should also initiate certain actions in the future, but
+// currently the checks and actions are still performed by the calling functions.
+// This function does already take care to update queue_users_active and
+// handles the WAI timeout.
+static void dl_user_setstate(struct dl_user *du, int state) {
+  // x -> ACT
+  if(du->state != DLU_ACT && state == DLU_ACT)
+    queue_users_active++;
+  // ACT -> x
+  else if(du->state == DLU_ACT && state != DLU_ACT)
+    queue_users_active--;
+  // x -> WAI
+  else if(du->state != DLU_WAI && state == DLU_WAI)
+    du->timeout = g_timeout_add_seconds_full(G_PRIORITY_LOW, 60, dl_user_waitdone, du, NULL);
+  // WAI -> X
+  else if(du->state == DLU_WAI && state != DLU_WAI)
+    g_source_remove(du->timeout);
+  du->state = state;
+}
+
+
+static gboolean dl_user_waitdone(gpointer dat) {
+  struct dl_user *du = dat;
+  g_return_val_if_fail(du->state == DLU_WAI, FALSE);
+  dl_user_setstate(du, DLU_NCO);
+  dl_queue_uchange(du);
+  return FALSE;
+}
+
+
 // Returns the first item in the download queue for this user, prepares the
 // item for downloading and sets this user as 'active'.
+// TODO: Remove this function entirely, let dl.c initiate the transfer when a
+// user reaches the IDL state.
 struct dl *dl_queue_next(guint64 uid) {
   struct dl_user *du = g_hash_table_lookup(queue_users, &uid);
-  if(!du || !du->queue || ((struct dl *)du->queue->data)->prio <= DLP_OFF) {
-    if(du->active)
-      queue_users_active--;
-    du->active = FALSE;
-    // Nothing more for this user, check for other users.
+  if(!du)
+    return NULL;
+  // Assure that we're in the IDL state. This function is called either from
+  // the EXP, IDL or ACT state, in all cases we now move to the IDL state.
+  dl_user_setstate(du, DLU_IDL);
+  // Nothing more for this user, check for other users.
+  if(!du->queue || ((struct dl *)du->queue->data)->prio <= DLP_OFF) {
     dl_queue_startany();
     return NULL;
   }
@@ -171,11 +240,9 @@ struct dl *dl_queue_next(guint64 uid) {
   // If we weren't downloading from this user yet, check that we can start a
   // new download. If we can't, it means we accidentally connected to this
   // user... let the connection idle.
-  if(!du->active && queue_users_active >= conf_download_slots())
+  if(queue_users_active >= conf_download_slots())
     return NULL;
-  if(!du->active)
-    queue_users_active++;
-  du->active = TRUE;
+  dl_user_setstate(du, DLU_ACT);
 
   // For filelists: Don't allow resuming of the download. It could happen that
   // the client modifies its filelist in between our retries. In that case the
@@ -206,14 +273,12 @@ static void dl_queue_start(struct dl *dl) {
   if(queue_users_active >= conf_download_slots())
     return;
   // If we expect an incoming connection, then things will resolve itself automatically.
-  if(dl->u->expect)
+  if(dl->u->state == DLU_EXP)
     return;
   // try to re-use an existing connection
-  if(dl->u->cc) {
-    if(dl->u->cc->dl && dl->u->cc->state == CCS_IDLE) {
-      g_debug("dl:%016"G_GINT64_MODIFIER"x: re-using connection", dl->u->uid);
-      cc_download(dl->u->cc);
-    }
+  if(dl->u->state == DLU_IDL) {
+    g_debug("dl:%016"G_GINT64_MODIFIER"x: re-using connection", dl->u->uid);
+    cc_download(dl->u->cc);
     return;
   }
   // get user/hub
@@ -237,15 +302,9 @@ void dl_queue_startany() {
   GHashTableIter iter;
   g_hash_table_iter_init(&iter, queue_users);
   while(n > 0 && g_hash_table_iter_next(&iter, NULL, (gpointer *)&du)) {
-    // Don't consider any user from which are actively downloading, or from
-    // which we have nothing to donwload.
-    if(du->active || !du->queue || ((struct dl *)du->queue->data)->prio <= DLP_OFF)
-      continue;
-    if(// Case 1: We are still connected to a user, in idle state.
-      (du->cc && du->cc->dl && du->cc->state == CCS_IDLE) ||
-      // Case 2: We are not connected and do not expect to get connected.
-      (!du->cc && !du->expect)
-    ) {
+    // Only consider users in the NCO/IDL state, and only if we have something
+    // to download from them.
+    if((du->state == DLU_NCO || du->state == DLU_IDL) && du->queue && ((struct dl *)du->queue->data)->prio > DLP_OFF) {
       dl_queue_start(du->queue->data);
       n--;
     }
@@ -332,6 +391,7 @@ static void dl_queue_insert(struct dl *dl, guint64 uid, gboolean init) {
   dl->u = g_hash_table_lookup(queue_users, &uid);
   if(!dl->u) {
     dl->u = g_slice_new0(struct dl_user);
+    dl->u->state = DLU_NCO;
     dl->u->uid = uid;
     g_hash_table_insert(queue_users, &dl->u->uid, dl->u);
   }
@@ -365,11 +425,11 @@ static void dl_queue_insert(struct dl *dl, guint64 uid, gboolean init) {
 // dl_queue_rm().  Removes the dl_user struct if we're not connected and
 // nothing is queued, and tries to start a connection if we're not connected
 // but something is queued.
+// TODO: merge into dl_user_setstate()?
 static void dl_queue_uchange(struct dl_user *du) {
-  g_warn_if_fail(du->cc || (!du->cc && !du->active));
-  if(!du->expect && !du->cc && du->queue)
-    dl_queue_start(du->queue->data); // TODO: this only works with single-source downloading
-  else if(!du->expect && !du->cc && !du->queue) {
+  if(du->state == DLU_IDL && du->queue)
+    dl_queue_start(du->queue->data);
+  else if(du->state == DLU_IDL && !du->queue) {
     g_hash_table_remove(queue_users, &du->uid);
     g_slice_free(struct dl_user, du);
   }
@@ -413,37 +473,36 @@ void dl_queue_rm(struct dl *dl) {
 }
 
 
-// set/unset the expect field. When expect goes from NULL to some value, it is
-// expected that the connection is being established. When it goes from some
-// value to NULL, it is expected that either the connection has been
-// established (and dl_queue_cc() is called), the connection timed out (in
-// which case we should try again), or the hub connection has been removed (in
-// which case we should look for other hubs and try again).
-// Note that in the case of a timeout (which is currently set to 60 seconds),
-// we immediately try to connect again. Some hubs might not like this
-// "aggressive" behaviour...
-void dl_queue_expect(guint64 uid, struct cc_expect *e) {
+// Notify whether the user is in the cc_expects list. When it is, it is
+// expected that the connection is being established. When it isn't, it is
+// expected that either the connection has been established (and dl_queue_cc()
+// will be called immediately afterwards, in which case we're going from WAI to
+// EXP again), or the connection timed out or the hub has disconnected, in
+// which case we should try again later.
+void dl_queue_expect(guint64 uid, gboolean e) {
   g_debug("dl:%016"G_GINT64_MODIFIER"x: expect = %s", uid, e?"true":"false");
   struct dl_user *du = g_hash_table_lookup(queue_users, &uid);
-  if(!du)
+  if(!du || (du->state != DLU_NCO || du->state != DLU_EXP))
     return;
-  du->expect = e;
+  dl_user_setstate(du, e ? DLU_EXP : DLU_WAI);
   dl_queue_uchange(du);
 }
 
 
-// set/unset the cc field. When cc goes from NULL to some value, it is expected
-// that we're either connected to the user or we're in the remove timeout. When
-// it is set, it means we're connected and the download is in progress or is
-// being negotiated. Otherwise, it means we've failed to initiate the download
-// and should try again.
+// Set/unset the cc field and update the state. When cc goes from NULL to some
+// value, it is expected that we're connected to the user and performing a
+// handshake. When it is set to NULL, it means we disconnected somehow and
+// should try again later.
 void dl_queue_cc(guint64 uid, struct cc *cc) {
   g_debug("dl:%016"G_GINT64_MODIFIER"x: cc = %s", uid, cc?"true":"false");
   struct dl_user *du = g_hash_table_lookup(queue_users, &uid);
   if(!du)
     return;
   du->cc = cc;
+  dl_user_setstate(du, cc ? DLU_EXP : DLU_WAI);
   dl_queue_uchange(du);
+  if(!cc)
+    dl_queue_startany();
 }
 
 
@@ -453,19 +512,6 @@ void dl_queue_useronline(guint64 uid) {
   struct dl_user *du = g_hash_table_lookup(queue_users, &uid);
   if(du)
     dl_queue_uchange(du);
-}
-
-
-// To be called when a cc connection is disconnected. (This happens before
-// _cc() is called, since _cc() is called on a timeout).
-void dl_queue_userdisconnect(guint64 uid) {
-  struct dl_user *du = g_hash_table_lookup(queue_users, &uid);
-  if(du) {
-    if(du->active)
-      queue_users_active--;
-    du->active = FALSE;
-    dl_queue_startany();
-  }
 }
 
 
@@ -690,7 +736,7 @@ static int dl_hash_update(struct dl *dl, int length, char *buf) {
 gboolean dl_received(struct dl *dl, char *buf, int length) {
   //g_debug("dl:%016"G_GINT64_MODIFIER"x: Received %d bytes for %s (size = %"G_GUINT64_FORMAT", have = %"G_GUINT64_FORMAT")", dl->u->uid, length, dl->dest, dl->size, dl->have+length);
   g_return_val_if_fail(dl->have + length <= dl->size, FALSE);
-  g_warn_if_fail(dl->u->active);
+  g_warn_if_fail(dl->u->state == DLU_ACT);
 
   // open dl->incfd, if it's not open yet
   if(dl->incfd <= 0) {

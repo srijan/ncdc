@@ -72,7 +72,7 @@ static void cc_expect_rm(GList *n, struct cc *success) {
     dl_queue_cc(e->uid, success);
   }
   if(e->dl)
-    dl_queue_expect(e->uid, NULL);
+    dl_queue_expect(e->uid, FALSE);
   g_source_remove(e->timeout_src);
 #if TLS_SUPPORT
   if(e->kp)
@@ -114,7 +114,7 @@ void cc_expect_add(struct hub *hub, struct hub_user *u, char *t, gboolean dl) {
   if(t)
     e->token = g_strdup(t);
   if(e->dl)
-    dl_queue_expect(e->uid, e);
+    dl_queue_expect(e->uid, TRUE);
   time(&(e->added));
   g_queue_push_tail(cc_expected, e);
   e->timeout_src = g_timeout_add_seconds_full(G_PRIORITY_LOW, 60, cc_expect_timeout, cc_expected->tail, NULL);
@@ -1121,10 +1121,8 @@ static void nmdc_direction(struct cc *cc, gboolean down, int num) {
   cc->state = CCS_IDLE;
 
   // If we wanted to download, but didn't get the chance to do so, notify the dl manager.
-  if(old_dl && !cc->dl) {
-    dl_queue_userdisconnect(cc->uid);
+  if(old_dl && !cc->dl)
     dl_queue_cc(cc->uid, NULL);
-  }
 
   // if we can download, do so!
   if(cc->dl)
@@ -1464,7 +1462,7 @@ void cc_disconnect(struct cc *cc) {
   cc->token = NULL;
   cc->state = CCS_DISCONN;
   if(cc->dl && cc->uid)
-    dl_queue_userdisconnect(cc->uid);
+    dl_queue_cc(cc->uid, NULL);
 }
 
 

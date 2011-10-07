@@ -551,7 +551,7 @@ static void set_download_slots(char *group, char *key, char *val) {
     }
   }
   if(conf_download_slots() > oldval)
-    dl_queue_startany();
+    dl_queue_start();
 }
 
 

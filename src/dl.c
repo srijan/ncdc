@@ -70,8 +70,6 @@ struct dl_user {
  *  8. Reconnect timeout expired
  *     (currently hardcoded to 60 sec, probably want to make this configurable)
  */
-// TODO: Move more logic to dl_user_setstate()
-// TODO: Always initiate downloads from dl.c
 
 
 
@@ -132,17 +130,6 @@ static GDBM_FILE dl_dat;
 #define DLDAT_USERS 1 // <8 bytes: amount(=1)><8 bytes: uid>
 #define DLDAT_TTHL  2 // <24 bytes: hash1>..
 
-static int dl_dat_needsync = FALSE;
-
-// Performs a gdbm_sync() in an upcoming iteration of the main loop. This
-// delayed write allows doing bulk operations on the data file while avoiding a
-// gdbm_sync() on every change.
-#define dl_dat_sync()\
-  if(!dl_dat_needsync) {\
-    dl_dat_needsync = TRUE;\
-    g_idle_add(dl_dat_sync_do, NULL);\
-  }
-
 
 // Download queue.
 // Key = dl->hash, Value = struct dl
@@ -153,16 +140,25 @@ GHashTable *dl_queue = NULL;
 static GHashTable *queue_users = NULL;
 
 
-// Cached value. Should be equivalent to the number of items in the queue_users
-// table where state = UDL_ACT
-static int queue_users_active = 0;
 
+static gboolean dl_dat_needsync = FALSE;
+
+// Performs a gdbm_sync() in an upcoming iteration of the main loop. This
+// delayed write allows doing bulk operations on the data file while avoiding a
+// gdbm_sync() on every change.
+#define dl_dat_sync()\
+  if(!dl_dat_needsync) {\
+    dl_dat_needsync = TRUE;\
+    g_idle_add(dl_dat_sync_do, NULL);\
+  }
 
 static gboolean dl_dat_sync_do(gpointer dat) {
   gdbm_sync(dl_dat);
   dl_dat_needsync = FALSE;
   return FALSE;
 }
+
+
 
 
 // Utility function that returns an error string for DLE_* errors.
@@ -186,156 +182,12 @@ char *dl_strerror(char err, unsigned short sub) {
 }
 
 
+
+
+
+// struct dl_user related functions
+
 static gboolean dl_user_waitdone(gpointer dat);
-static void dl_queue_uchange(struct dl_user *du);
-
-// TODO: this function should also initiate certain actions in the future, but
-// currently the checks and actions are still performed by the calling functions.
-// This function does already take care to update queue_users_active and
-// handles the WAI timeout.
-static void dl_user_setstate(struct dl_user *du, int state) {
-  // x -> ACT
-  if(du->state != DLU_ACT && state == DLU_ACT)
-    queue_users_active++;
-  // ACT -> x
-  else if(du->state == DLU_ACT && state != DLU_ACT)
-    queue_users_active--;
-  // x -> WAI
-  else if(du->state != DLU_WAI && state == DLU_WAI)
-    du->timeout = g_timeout_add_seconds_full(G_PRIORITY_LOW, 60, dl_user_waitdone, du, NULL);
-  // WAI -> X
-  else if(du->state == DLU_WAI && state != DLU_WAI)
-    g_source_remove(du->timeout);
-  du->state = state;
-}
-
-
-static gboolean dl_user_waitdone(gpointer dat) {
-  struct dl_user *du = dat;
-  g_return_val_if_fail(du->state == DLU_WAI, FALSE);
-  dl_user_setstate(du, DLU_NCO);
-  dl_queue_uchange(du);
-  return FALSE;
-}
-
-
-// When called with NULL, this means that a connection attempt failed or we
-// somehow disconnected from the user.
-// Otherwise, it means we've successfully opened a connection and are in the
-// IDL state.
-void dl_user_cc(guint64 uid, struct cc *cc) {
-  g_debug("dl:%016"G_GINT64_MODIFIER"x: cc = %s", uid, cc?"true":"false");
-  struct dl_user *du = g_hash_table_lookup(queue_users, &uid);
-  if(!du)
-    return;
-  g_return_if_fail(cc && (du->state == DLU_NCO || du->state == DLU_EXP));
-  du->cc = cc;
-  dl_user_setstate(du, cc ? DLU_IDL : DLU_WAI);
-}
-
-
-// To be called when a user joins a hub. Checks whether we have something to
-// get from that user. May be called with uid=0 after joining a hub, in which
-// case all users in the queue will be checked. (TODO!)
-void dl_user_join(guint64 uid) {
-  struct dl_user *du = g_hash_table_lookup(queue_users, &uid);
-  if(du)
-    dl_queue_uchange(du);
-}
-
-
-// Returns the first item in the download queue for this user, prepares the
-// item for downloading and sets this user as 'active'.
-// TODO: Remove this function entirely, let dl.c initiate the transfer when a
-// user reaches the IDL state.
-struct dl *dl_queue_next(guint64 uid) {
-  struct dl_user *du = g_hash_table_lookup(queue_users, &uid);
-  if(!du)
-    return NULL;
-  // Assure that we're in the IDL state. This function is called either from
-  // the EXP, IDL or ACT state, in all cases we now move to the IDL state.
-  dl_user_setstate(du, DLU_IDL);
-  // Nothing more for this user, check for other users.
-  if(!du->queue || ((struct dl *)du->queue->data)->prio <= DLP_OFF) {
-    dl_queue_startany();
-    return NULL;
-  }
-
-  // If we weren't downloading from this user yet, check that we can start a
-  // new download. If we can't, it means we accidentally connected to this
-  // user... let the connection idle.
-  if(queue_users_active >= conf_download_slots())
-    return NULL;
-  dl_user_setstate(du, DLU_ACT);
-
-  // For filelists: Don't allow resuming of the download. It could happen that
-  // the client modifies its filelist in between our retries. In that case the
-  // downloaded filelist would end up being corrupted. To avoid that: make sure
-  // lists are downloaded in one go, and throw away any incomplete data.
-  struct dl *dl = du->queue->data;
-  if(dl->islist && dl->have > 0) {
-    dl->have = dl->size = 0;
-    g_return_val_if_fail(close(dl->incfd) == 0, NULL);
-    dl->incfd = open(dl->inc, O_WRONLY|O_CREAT|O_TRUNC, 0666);
-    g_return_val_if_fail(dl->incfd >= 0, NULL);
-  }
-
-  return dl;
-}
-
-
-// Try to start the download for a specific dl item. Called from:
-// - dl_queue_uchange() when we're not connected to a user, yet have something queued
-// - dl_queue_insert()  when a new item has been inserted
-// - dl_queue_setprio() when an item has been enabled
-static void dl_queue_start(struct dl *dl) {
-  g_return_if_fail(dl && dl->u);
-  // Don't even try if it is marked as disabled
-  if(dl->prio <= DLP_OFF)
-    return;
-  // If we don't have download slots, then just forget it.
-  if(queue_users_active >= conf_download_slots())
-    return;
-  // If we expect an incoming connection, then things will resolve itself automatically.
-  if(dl->u->state == DLU_EXP)
-    return;
-  // try to re-use an existing connection
-  if(dl->u->state == DLU_IDL) {
-    g_debug("dl:%016"G_GINT64_MODIFIER"x: re-using connection", dl->u->uid);
-    cc_download(dl->u->cc);
-    return;
-  }
-  // get user/hub
-  struct hub_user *u = g_hash_table_lookup(hub_uids, &dl->u->uid);
-  if(!u)
-    return;
-  // try to open a C-C connection
-  g_debug("dl:%016"G_GINT64_MODIFIER"x: trying to open a connection", u->uid);
-  dl_user_setstate(dl->u, DLU_EXP);
-  hub_opencc(u->hub, u);
-}
-
-
-// Called when one or more download slots have become free. Will attempt to
-// start a new download.
-// TODO: Prioritize downloads according do dl_user_queue_sort_func()?
-void dl_queue_startany() {
-  int n = conf_download_slots() - queue_users_active;
-  if(n < 1)
-    return;
-  struct dl_user *du;
-  GHashTableIter iter;
-  g_hash_table_iter_init(&iter, queue_users);
-  while(n > 0 && g_hash_table_iter_next(&iter, NULL, (gpointer *)&du)) {
-    // Only consider users in the NCO/IDL state, and only if we have something
-    // to download from them.
-    if((du->state == DLU_NCO || du->state == DLU_IDL) && du->queue && ((struct dl *)du->queue->data)->prio > DLP_OFF) {
-      dl_queue_start(du->queue->data);
-      n--;
-    }
-  }
-}
-
 
 // Sort function when inserting items in the queue of a single user. This
 // ensures that the files are downloaded in a predictable order.
@@ -348,6 +200,199 @@ static gint dl_user_queue_sort_func(gconstpointer a, gconstpointer b) {
     : strcmp(x->dest, y->dest);
 }
 
+
+// Change the state of a user, use state=-1 when something is removed from
+// du->queue.
+static void dl_user_setstate(struct dl_user *du, int state) {
+  // Handle reconnect timeout
+  // x -> WAI
+  if(du->state != DLU_WAI && state == DLU_WAI)
+    du->timeout = g_timeout_add_seconds_full(G_PRIORITY_LOW, 60, dl_user_waitdone, du, NULL);
+  // WAI -> X
+  else if(du->state == DLU_WAI && state != DLU_WAI)
+    g_source_remove(du->timeout);
+
+  // Set state
+  if(state >= 0)
+    du->state = state;
+
+  // Check whether there is any value in keeping this dl_user struct in memory
+  if(du->state == DLU_NCO && !du->queue) {
+    g_hash_table_remove(queue_users, &du->uid);
+    g_slice_free(struct dl_user, du);
+    return;
+  }
+
+  // Check whether we can initiate a download again. (We could be more
+  // selective here to possibly decrease CPU usage, but oh well.)
+  dl_queue_start();
+}
+
+
+static gboolean dl_user_waitdone(gpointer dat) {
+  struct dl_user *du = dat;
+  g_return_val_if_fail(du->state == DLU_WAI, FALSE);
+  dl_user_setstate(du, DLU_NCO);
+  return FALSE;
+}
+
+
+// When called with NULL, this means that a connection attempt failed or we
+// somehow disconnected from the user.
+// Otherwise, it means that the cc connection with the user went into the IDLE
+// state, either after the handshake or after a completed download.
+void dl_user_cc(guint64 uid, struct cc *cc) {
+  g_debug("dl:%016"G_GINT64_MODIFIER"x: cc = %s", uid, cc?"true":"false");
+  struct dl_user *du = g_hash_table_lookup(queue_users, &uid);
+  if(!du)
+    return;
+  g_return_if_fail(!cc || du->state == DLU_NCO || du->state == DLU_EXP || du->state == DLU_ACT);
+  du->cc = cc;
+  dl_user_setstate(du, cc ? DLU_IDL : DLU_WAI);
+}
+
+
+// To be called when a user joins a hub. Checks whether we have something to
+// get from that user. May be called with uid=0 after joining a hub, in which
+// case all users in the queue will be checked.
+void dl_user_join(guint64 uid) {
+  if(!uid || g_hash_table_lookup(queue_users, &uid))
+    dl_queue_start();
+}
+
+
+
+
+
+// Determining when and what to start downloading
+
+static gboolean dl_queue_needstart = FALSE;
+
+// Starts a connection with a user or initiates a download if we're already
+// connected.
+static gboolean dl_queue_start_user(struct dl_user *du) {
+  g_return_val_if_fail(du->state == DLU_NCO || du->state == DLU_IDL, FALSE);
+  g_return_val_if_fail(du->queue, FALSE);
+
+  // If we're not connected yet, just connect
+  if(du->state == DLU_NCO) {
+    g_debug("dl:%016"G_GINT64_MODIFIER"x: trying to open a connection", du->uid);
+    struct hub_user *u = g_hash_table_lookup(hub_uids, &du->uid);
+    dl_user_setstate(du, DLU_EXP);
+    hub_opencc(u->hub, u);
+    return FALSE;
+  }
+
+  // Otherwise, initiate a download.
+  g_debug("dl:%016"G_GINT64_MODIFIER"x: re-using connection", du->uid);
+
+  // For filelists: Don't allow resuming of the download. It could happen that
+  // the client modifies its filelist in between our retries. In that case the
+  // downloaded filelist would end up being corrupted. To avoid that: make sure
+  // lists are downloaded in one go, and throw away any incomplete data.
+  struct dl *dl = du->queue->data;
+  if(dl->islist && dl->have > 0) {
+    dl->have = dl->size = 0;
+    g_return_val_if_fail(close(dl->incfd) == 0, FALSE);
+    dl->incfd = open(dl->inc, O_WRONLY|O_CREAT|O_TRUNC, 0666);
+    g_return_val_if_fail(dl->incfd >= 0, FALSE);
+  }
+
+  dl_user_setstate(du, DLU_ACT);
+  cc_download(du->cc, du->queue->data);
+  return TRUE;
+}
+
+
+// Order a list of dl_user structs by a "priority" to determine from whom to
+// download first. Note that users in the IDL state always get priority over
+// users in the NCO state, in order to prevent the situation that the
+// lower-priority user in the IDL state is connected to anyway in a next
+// iteration.
+static gint dl_queue_start_sort(gconstpointer a, gconstpointer b) {
+  const struct dl_user *ua = a;
+  const struct dl_user *ub = b;
+  g_return_val_if_fail(ua->queue && ub->queue, 0);
+  return -1*(
+    ua->state == DLU_IDL && ub->state != DLU_IDL ?  1 :
+    ua->state != DLU_IDL && ub->state == DLU_IDL ? -1 :
+    ((struct dl *)ua->queue->data)->prio - ((struct dl *)ub->queue->data)->prio
+  );
+}
+
+
+// Initiates a new connection to a user or requests a file from an already
+// connected user, based on the current state of dl_user and dl structs.  This
+// function is relatively slow, so is executed from a timeout to bulk-check
+// everything after some state variables have changed. Should not be called
+// directly, use dl_queue_start() instead.
+static gboolean dl_queue_start_do(gpointer dat) {
+  int freeslots = conf_download_slots();
+
+  // Walk through all users in the queue and:
+  // - determine possible targets to connect to or to start a transfer from
+  // - calculate freeslots
+  GPtrArray *targets = g_ptr_array_new();
+  struct dl_user *du;
+  GHashTableIter iter;
+  g_hash_table_iter_init(&iter, queue_users);
+  while(g_hash_table_iter_next(&iter, NULL, (gpointer *)&du)) {
+    if(du->state == DLU_ACT)
+      freeslots--;
+    // Only consider users in the NCO/IDL state and only if we have something
+    // to download from them.
+    if((du->state != DLU_NCO && du->state != DLU_IDL)
+        || !du->queue || ((struct dl *)du->queue->data)->prio <= DLP_OFF)
+      continue;
+    // In the NCO state, the user must also be online, and the hub must be
+    // properly logged in.
+    if(du->state == DLU_NCO) {
+      struct hub_user *u = g_hash_table_lookup(hub_uids, &du->uid);
+      if(!u || !u->hub->nick_valid)
+        continue;
+    }
+    // If the above applies, then we can consider it a target
+    g_ptr_array_add(targets, du);
+  }
+
+  // Sort the list of possible targets
+  if(freeslots > 0)
+    g_ptr_array_sort(targets, dl_queue_start_sort);
+
+  // And open a connection or start a download
+  int i;
+  for(i=0; i<targets->len && freeslots > 0; i++)
+    if(dl_queue_start_user(g_ptr_array_index(targets, i)))
+      freeslots--;
+
+  g_ptr_array_unref(targets);
+
+  // Reset this value *after* performing all the checks and starts, to ignore
+  // any dl_queue_start() calls while this function was working - this function
+  // already takes those changes into account anyway.
+  dl_queue_needstart = FALSE;
+  return FALSE;
+}
+
+
+// Make sure dl_queue_start() can be called at any time that something changed
+// that might allow us to initiate a download again. Since this is a relatively
+// expensive operation, dl_queue_start() simply queues a dl_queue_start_do()
+// from a timer.
+// TODO: Make the timeout configurable? It's a tradeoff between download
+// management responsiveness and CPU usage.
+void dl_queue_start() {
+  if(!dl_queue_needstart) {
+    dl_queue_needstart = TRUE;
+    g_timeout_add(500, dl_queue_start_do, NULL);
+  }
+}
+
+
+
+
+
+// Download queue manipulation
 
 static void dl_dat_saveinfo(struct dl *dl) {
   char key[25];
@@ -382,7 +427,7 @@ void dl_queue_setprio(struct dl *dl, char prio) {
   dl->u->queue = g_slist_insert_sorted(dl->u->queue, dl, dl_user_queue_sort_func);
   // Start the download if it is enabled
   if(enabled)
-    dl_queue_start(dl);
+    dl_queue_start();
 }
 
 
@@ -442,22 +487,7 @@ static void dl_queue_insert(struct dl *dl, guint64 uid, gboolean init) {
 
   // start download, if possible
   if(!init)
-    dl_queue_start(dl);
-}
-
-
-// Called on either dl_queue_expect(), dl_queue_useronline() or
-// dl_queue_rm().  Removes the dl_user struct if we're not connected and
-// nothing is queued, and tries to start a connection if we're not connected
-// but something is queued.
-// TODO: merge into dl_user_setstate()?
-static void dl_queue_uchange(struct dl_user *du) {
-  if(du->state == DLU_IDL && du->queue)
-    dl_queue_start(du->queue->data);
-  else if(du->state == DLU_IDL && !du->queue) {
-    g_hash_table_remove(queue_users, &du->uid);
-    g_slice_free(struct dl_user, du);
-  }
+    dl_queue_start();
 }
 
 
@@ -471,7 +501,7 @@ void dl_queue_rm(struct dl *dl) {
     unlink(dl->inc);
   // update and optionally remove dl_user struct
   dl->u->queue = g_slist_remove(dl->u->queue, dl);
-  dl_queue_uchange(dl->u);
+  dl_user_setstate(dl->u, -1);
   // remove from the data file
   if(!dl->islist) {
     char key[25];

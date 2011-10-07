@@ -529,17 +529,10 @@ static void handle_error(struct net *n, int action, GError *err) {
 }
 
 
-// TODO: just call dl_user_cc() upon entering the IDLE state and let dl.c call
-// this function with a certain dl struct as argument.
-void cc_download(struct cc *cc) {
-  g_return_if_fail(cc->state == CCS_IDLE && cc->dl);
-  // If we just entered the IDLE state, notify dl.c that we can download
-  if(!cc->last_file)
-    dl_user_cc(cc->uid, cc);
+// Called from dl.c
+void cc_download(struct cc *cc, struct dl *dl) {
+  g_return_if_fail(cc->dl && cc->state == CCS_IDLE);
 
-  struct dl *dl = dl_queue_next(cc->uid);
-  if(!dl)
-    return;
   memcpy(cc->last_hash, dl->hash, 24);
   // get virtual path
   char fn[45] = {};
@@ -588,7 +581,7 @@ static void handle_recvfile(struct net *n, char *buf, int read, guint64 left) {
   if(!left) {
     xfer_log_add(cc);
     cc->state = CCS_IDLE;
-    cc_download(cc);
+    dl_user_cc(cc->uid, cc);
   }
 }
 
@@ -606,7 +599,7 @@ static void handle_recvtth(struct net *n, char *buf, int read, guint64 left) {
     g_free(cc->tthl_dat);
     cc->tthl_dat = NULL;
     cc->state = CCS_IDLE;
-    cc_download(cc);
+    dl_user_cc(cc->uid, cc);
   }
 }
 
@@ -922,7 +915,7 @@ static void adc_handle(struct cc *cc, char *msg) {
         g_debug("CC:%s: Client authenticated using KEYP.", net_remoteaddr(cc->net));
 #endif
       if(cc->dl && cc->state == CCS_IDLE)
-        cc_download(cc);
+        dl_user_cc(cc->uid, cc);
     }
     break;
 
@@ -1033,7 +1026,7 @@ static void adc_handle(struct cc *cc, char *msg) {
           cc_disconnect(cc);
         else {
           cc->state = CCS_IDLE;
-          cc_download(cc);
+          dl_user_cc(cc->uid, cc);
         }
       }
 
@@ -1126,9 +1119,9 @@ static void nmdc_direction(struct cc *cc, gboolean down, int num) {
   if(old_dl && !cc->dl)
     dl_user_cc(cc->uid, NULL);
 
-  // if we can download, do so!
+  // If we reached the IDLE-dl state, notify the dl manager of this
   if(cc->dl)
-    cc_download(cc);
+    dl_user_cc(cc->uid, cc);
 }
 
 
@@ -1287,7 +1280,7 @@ static void nmdc_handle(struct cc *cc, char *cmd) {
       }
       g_free(msg);
       cc->state = CCS_IDLE;
-      cc_download(cc);
+      dl_user_cc(cc->uid, cc);
     }
   }
   g_match_info_free(nfo);

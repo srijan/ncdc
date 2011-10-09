@@ -204,11 +204,14 @@ char *dl_strerror(char err, unsigned short sub) {
 // struct dl_user related functions
 
 static gboolean dl_user_waitdone(gpointer dat);
+static void dl_queue_checkrm(struct dl *dl, gboolean justfin);
 
 
 // Determine whether a dl_user_dl struct can be considered as "enabled".
-#define dl_user_dl_enabled(dud) \
-  !(((struct dl_user_dl *)dud)->error || ((struct dl_user_dl *)dud)->dl->prio <= DLP_OFF)
+#define dl_user_dl_enabled(dud) (\
+    !dud->error && dud->dl->prio > DLP_OFF\
+    && ((!dud->dl->size && dud->dl->islist) || dud->dl->size != dud->dl->have)\
+  )
 
 
 // Sort function for dl_user_dl structs. Items with a higher priority are
@@ -281,6 +284,7 @@ static void dl_user_setstate(struct dl_user *du, int state) {
       struct dl_user_dl *dud = g_sequence_get(i);
       if(dud->active) {
         dud->active = dud->dl->active = FALSE;
+        dl_queue_checkrm(dud->dl, FALSE);
         break;
       }
     }
@@ -789,6 +793,9 @@ void dl_queue_rm(struct dl *dl) {
   // remove the incomplete file, in case we still have it
   if(dl->inc && g_file_test(dl->inc, G_FILE_TEST_EXISTS))
     unlink(dl->inc);
+  // free dl->inc while we're at it. this is used as detection by dl_queue_checkrm() to prevent recursion
+  g_free(dl->inc);
+  dl->inc = NULL;
   // remove from the user info
   while(dl->u->len > 0)
     dl_user_rm(dl, 0);
@@ -803,9 +810,42 @@ void dl_queue_rm(struct dl *dl) {
     g_slice_free(struct tth_ctx, dl->hash_tth);
   g_ptr_array_unref(dl->u);
   g_free(dl->flsel);
-  g_free(dl->inc);
   g_free(dl->dest);
   g_slice_free(struct dl, dl);
+}
+
+
+// Called when dl->active is reset or when the download has finished. If both
+// actions are satisfied, we can _rm() the dl item. This makes sure that a dl
+// struct is not removed while active is true. Otherwise the user will be
+// forcibly disconnected in dl_user_rm(). (Which is what you want if you remove
+// it while downloading, not if it's removed after finishing the download).
+static void dl_queue_checkrm(struct dl *dl, gboolean justfin) {
+  // prevent recursion
+  if(!dl->inc)
+    return;
+
+  if(justfin) {
+    // If the download just finished, we might as well remove it from dl.dat
+    // immediately. Makes sure we won't load it on the next startup.
+    dl_dat_rmdl(dl);
+    // Since the dl item is now considered as "disabled" by the download
+    // management code, make sure it is also last in every user's download
+    // queue. For performance reasons, we can also already remove the users who
+    // aren't active.
+    int i = 0;
+    while(i<dl->u->len) {
+      GSequenceIter *iter = g_ptr_array_index(dl->u, i);
+      if(!((struct dl_user_dl *)g_sequence_get(iter))->active)
+        dl_user_rm(dl, i);
+      else {
+        g_sequence_sort_changed(iter, dl_user_dl_sort, NULL);
+        i++;
+      }
+    }
+  }
+  if(!dl->active && (dl->size || !dl->islist) && dl->have == dl->size)
+    dl_queue_rm(dl);
 }
 
 
@@ -874,11 +914,8 @@ static void dl_finished(struct dl *dl) {
     g_return_if_fail(dl->u->len == 1);
     ui_tab_open(ui_fl_create(((struct dl_user_dl *)g_sequence_get(g_ptr_array_index(dl->u, 0)))->u->uid, dl->flsel), FALSE);
   }
-  // and remove from the queue
-  // TODO: This will cause the user to get disconnected immediately rather than
-  // it going to the IDL state as it should, since we're removing a dl item
-  // from it while it's in the ACT state. Perhaps we need a delayed remove?
-  dl_queue_rm(dl);
+  // and check whether we can remove this item from the queue
+  dl_queue_checkrm(dl, TRUE);
 }
 
 
@@ -1326,6 +1363,4 @@ void dl_gc() {
   // remove old files in /fl/
   dl_fl_clean(NULL);
 }
-
-
 

@@ -38,7 +38,6 @@
 struct dl_user_dl {
   struct dl *dl;
   struct dl_user *u;
-  gboolean active : 1;      // Whether it is being downloaded by this user
   char error;               // DLE_*
   unsigned short error_sub; // errno or block number (it is assumed that 0 <= errno <= USHRT_MAX)
 };
@@ -51,11 +50,12 @@ struct dl_user_dl {
 #define DLU_WAI  4 // Not connected, waiting for reconnect timeout
 
 struct dl_user {
-  int state;     // DLU_*
-  int timeout;   // source id of the timeout function in DLU_WAI
+  int state;                 // DLU_*
+  int timeout;               // source id of the timeout function in DLU_WAI
   guint64 uid;
-  struct cc *cc; // Always when state = IDL or ACT, may be set or NULL in EXP
-  GSequence *queue; // list of struct dl_user_dl, ordered by dl_user_dl_sort(). (TODO: GArray?)
+  struct cc *cc;             // Always when state = IDL or ACT, may be set or NULL in EXP
+  GSequence *queue;          // list of struct dl_user_dl, ordered by dl_user_dl_sort()
+  struct dl_user_dl *active; // when state = DLU_ACT, the dud that is being downloaded (NULL if it had been removed from the queue while downloading)
 };
 
 /* State machine for dl_user.state:
@@ -273,21 +273,14 @@ static void dl_user_setstate(struct dl_user *du, int state) {
   else if(state > 0 && du->state == DLU_WAI && state != DLU_WAI)
     g_source_remove(du->timeout);
 
-  // Update dl_user_dl.active and dl.active if we came from the ACT state.
-  // Note that the item may have been deleted from the queue, in that case the
-  // entire list is searched but nothing is updated.
-  // dl_user_dl.active and dl.active are set in dl_queue_start_user().
+  // Update dl_user_dl.active, dl.active and dl_user.active if we came from the
+  // ACT state. These are set in dl_queue_start_user().
   // ACT -> x
-  else if(state > 0 && du->state == DLU_ACT && state != DLU_ACT) {
-    GSequenceIter *i = g_sequence_get_begin_iter(du->queue);
-    for(; !g_sequence_iter_is_end(i); i=g_sequence_iter_next(i)) {
-      struct dl_user_dl *dud = g_sequence_get(i);
-      if(dud->active) {
-        dud->active = dud->dl->active = FALSE;
-        dl_queue_checkrm(dud->dl, FALSE);
-        break;
-      }
-    }
+  else if(state > 0 && du->state == DLU_ACT && state != DLU_ACT && du->active) {
+    struct dl_user_dl *dud = du->active;
+    du->active = NULL;
+    dud->dl->active = FALSE;
+    dl_queue_checkrm(dud->dl, FALSE);
   }
 
   // Set state
@@ -378,11 +371,12 @@ static void dl_user_rm(struct dl *dl, int i) {
 
   // Make sure to disconnect the user and disable dl->active if we happened to
   // be actively downloading the file from this user.
-  if(dud->active) {
+  if(du->active == dud) {
     cc_disconnect(du->cc);
+    du->active = NULL;
     dl->active = FALSE;
     // Note that cc_disconnect() immediately calls dl_user_cc(), causing
-    // du->active to be reset anyway. I'm not sure whether it's a good idea to
+    // dl->active to be reset anyway. I'm not sure whether it's a good idea to
     // rely on that, however.
   }
 
@@ -452,7 +446,8 @@ static gboolean dl_queue_start_user(struct dl_user *du) {
   }
 
   // Update state and connect
-  dud->active = dl->active = TRUE;
+  dl->active = TRUE;
+  du->active = dud;
   dl_user_setstate(du, DLU_ACT);
   cc_download(du->cc, dl);
   return TRUE;
@@ -836,7 +831,8 @@ static void dl_queue_checkrm(struct dl *dl, gboolean justfin) {
     int i = 0;
     while(i<dl->u->len) {
       GSequenceIter *iter = g_ptr_array_index(dl->u, i);
-      if(!((struct dl_user_dl *)g_sequence_get(iter))->active)
+      struct dl_user_dl *dud = g_sequence_get(iter);
+      if(dud != dud->u->active)
         dl_user_rm(dl, i);
       else {
         g_sequence_sort_changed(iter, dl_user_dl_sort, NULL);

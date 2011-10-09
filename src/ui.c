@@ -1480,12 +1480,14 @@ static void ui_dl_draw_row(struct ui_listing *list, GSequenceIter *iter, int row
     mvaddch(row, 0, '>');
   }
 
+  /* TODO: Fix this for the multi-source downloading feature
   struct hub_user *u = g_hash_table_lookup(hub_uids, &dl->u->uid);
   if(u) {
     mvaddnstr(row, 2, u->name, str_offset_from_columns(u->name, 19));
     mvaddnstr(row, 22, u->hub->tab->name, str_offset_from_columns(u->hub->tab->name, 13));
   } else
     mvprintw(row, 2, "ID:%016"G_GINT64_MODIFIER"x (offline)", dl->u->uid);
+  */
 
   mvaddstr(row, 36, str_formatsize(dl->size));
   if(dl->size)
@@ -1559,6 +1561,7 @@ static void ui_dl_key(guint64 key) {
     ui_main_keys("queue");
     break;
 
+  /* TODO: FIX
   case INPT_CHAR('f'): // f - find user
     if(!sel)
       ui_m(NULL, 0, "Nothing selected.");
@@ -1570,6 +1573,7 @@ static void ui_dl_key(guint64 key) {
         ui_hub_finduser(u->hub->tab, u->uid, NULL, FALSE);
     }
     break;
+  */
   case INPT_CHAR('d'): // d - remove item
     if(!sel)
       ui_m(NULL, 0, "Nothing selected.");
@@ -1578,6 +1582,7 @@ static void ui_dl_key(guint64 key) {
       dl_queue_rm(sel);
     }
     break;
+  /* TODO: FIX
   case INPT_CHAR('c'): // c - find connection
     if(!sel)
       ui_m(NULL, 0, "Nothing selected.");
@@ -1592,6 +1597,7 @@ static void ui_dl_key(guint64 key) {
       ui_conn->list->sel = sel->u->cc->iter;
     }
     break;
+  */
   case INPT_CHAR('+'): // +
   case INPT_CHAR('='): // = - increase priority
     if(!sel)

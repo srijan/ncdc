@@ -567,19 +567,15 @@ void cc_download(struct cc *cc, struct dl *dl) {
 
 static void handle_recvfile(struct net *n, char *buf, int read, guint64 left) {
   struct cc *cc = n->handle;
-  struct dl *dl = g_hash_table_lookup(dl_queue, cc->last_hash);
-  if(dl && !dl_received(dl, buf, read)) {
+  if(!left)
+    xfer_log_add(cc);
+  if(!dl_received(cc->uid, cc->last_hash, buf, read) && left) {
     g_set_error_literal(&cc->err, 1, 0, "Download error.");
     cc_disconnect(cc);
     return;
   }
-  // If the item has been removed from the queue while there is still data left
-  // to download, interrupt the download by forcing a disconnect.
-  if(!dl && left)
-    cc_disconnect(cc);
   // check for more stuff to download
-  if(!left) {
-    xfer_log_add(cc);
+  if(!left && n->conn) {
     cc->state = CCS_IDLE;
     dl_user_cc(cc->uid, cc);
   }
@@ -588,18 +584,16 @@ static void handle_recvfile(struct net *n, char *buf, int read, guint64 left) {
 
 static void handle_recvtth(struct net *n, char *buf, int read, guint64 left) {
   struct cc *cc = n->handle;
-  struct dl *dl = g_hash_table_lookup(dl_queue, cc->last_hash);
-  if(dl) {
-    g_return_if_fail(read + left <= cc->last_length);
-    memcpy(cc->tthl_dat+(cc->last_length-(left+read)), buf, read);
-    if(!left)
-      dl_settthl(dl, cc->tthl_dat, cc->last_length);
-  }
+  g_return_if_fail(read + left <= cc->last_length);
+  memcpy(cc->tthl_dat+(cc->last_length-(left+read)), buf, read);
   if(!left) {
+    dl_settthl(cc->uid, cc->last_hash, cc->tthl_dat, cc->last_length);
     g_free(cc->tthl_dat);
     cc->tthl_dat = NULL;
-    cc->state = CCS_IDLE;
-    dl_user_cc(cc->uid, cc);
+    if(n->conn) {
+      cc->state = CCS_IDLE;
+      dl_user_cc(cc->uid, cc);
+    }
   }
 }
 

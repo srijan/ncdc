@@ -35,6 +35,15 @@
 
 #if INTERFACE
 
+struct dl_user_dl {
+  struct dl *dl;
+  struct dl_user *u;
+  gboolean active : 1;      // Whether it is being downloaded by this user
+  char error;               // DLE_*
+  unsigned short error_sub; // errno or block number (it is assumed that 0 <= errno <= USHRT_MAX)
+};
+
+
 #define DLU_NCO  0 // Not connected, ready for connection
 #define DLU_EXP  1 // Expecting a dl connection
 #define DLU_IDL  2 // dl connected, idle
@@ -46,7 +55,7 @@ struct dl_user {
   int timeout;   // source id of the timeout function in DLU_WAI
   guint64 uid;
   struct cc *cc; // Always when state = IDL or ACT, may be set or NULL in EXP
-  GSList *queue; // Ordered list of struct dl's
+  GSequence *queue; // list of struct dl_user_dl, ordered by dl_user_dl_sort(). (TODO: GArray?)
 };
 
 /* State machine for dl_user.state:
@@ -96,13 +105,14 @@ struct dl_user {
 struct dl {
   gboolean islist : 1;
   gboolean hastthl : 1;
+  gboolean active : 1;      // Whether it is being downloaded by someone
   char prio;                // DLP_*
   char error;               // DLE_*
   unsigned short error_sub; // errno or block number (it is assumed that 0 <= errno <= USHRT_MAX)
   int incfd;                // file descriptor for this file in <incoming_dir>
   char *flsel;              // path to file/dir to select for filelists
   char hash[24];            // TTH for files, tiger(uid) for filelists
-  struct dl_user *u;        // user who has this file (should be a list for multi-source downloading)
+  GPtrArray *u;             // list of users who have this file (GSequenceIter pointers into dl_user.queue)
   guint64 size;             // total size of the file
   guint64 have;             // what we have so far
   char *inc;                // path to the incomplete file (<incoming_dir>/<base32-hash>)
@@ -113,6 +123,9 @@ struct dl {
 };
 
 #endif
+
+// TODO: do something with dl_user_dl.error
+
 
 // Minimum filesize for which we request TTHL data. If a file is smaller than
 // this, the TTHL data would simply add more overhead than it is worth.
@@ -127,7 +140,10 @@ static GDBM_FILE dl_dat;
 // have been TTH-checked, etc.
 #define DLDAT_INFO  0 // <8 bytes: size><1 byte: prio><1 byte: error><2 bytes: error_sub>
                       // <4 bytes: reserved><zero-terminated-string: destination>
-#define DLDAT_USERS 1 // <8 bytes: amount(=1)><8 bytes: uid>
+#define DLDAT_USERS 1 // <8 bytes: amount>
+                      // <8 bytes: uid><1 byte: reserved><1 byte: error><2 bytes: error_sub><4 bytes: reserved>
+                      // Repeat previous line $amount times
+                      // For ncdc <= 1.2: amount=1 and only the 8-byte uid was present
 #define DLDAT_TTHL  2 // <24 bytes: hash1>..
 
 
@@ -189,15 +205,57 @@ char *dl_strerror(char err, unsigned short sub) {
 
 static gboolean dl_user_waitdone(gpointer dat);
 
-// Sort function when inserting items in the queue of a single user. This
-// ensures that the files are downloaded in a predictable order.
-static gint dl_user_queue_sort_func(gconstpointer a, gconstpointer b) {
-  const struct dl *x = a;
-  const struct dl *y = b;
+
+// Determine whether a dl_user_dl struct can be considered as "enabled".
+#define dl_user_dl_enabled(dud) \
+  !(((struct dl_user_dl *)dud)->error || ((struct dl_user_dl *)dud)->dl->prio <= DLP_OFF)
+
+
+// Sort function for dl_user_dl structs. Items with a higher priority are
+// sorted before items with a lower priority. Never returns 0, so the order is
+// always predictable even if all items have the same priority. This function
+// is used both for sorting the queue of a single user, and to sort users
+// itself on their highest-priority file.
+// TODO: Give priority to small files (those that can be downloaded using a minislot)
+static gint dl_user_dl_sort(gconstpointer a, gconstpointer b, gpointer dat) {
+  const struct dl_user_dl *x = a;
+  const struct dl_user_dl *y = b;
+  const struct dl *dx = x->dl;
+  const struct dl *dy = y->dl;
   return
-      x->islist && !y->islist ? -1 : !x->islist && y->islist ? 1
-    : x->prio > y->prio ? -1 : x->prio < y->prio ? 1
-    : strcmp(x->dest, y->dest);
+      // Disabled? Always last
+      dl_user_dl_enabled(x) && !dl_user_dl_enabled(y) ? -1 : !dl_user_dl_enabled(x) && dl_user_dl_enabled(y) ? 1
+      // File lists get higher priority than normal files
+    : dx->islist && !dy->islist ? -1 : !dx->islist && dy->islist ? 1
+      // Higher priority files get higher priority than lower priority ones (duh)
+    : dx->prio > dy->prio ? -1 : dx->prio < dy->prio ? 1
+      // For equal priority: download in alphabetical order
+    : strcmp(dx->dest, dy->dest);
+}
+
+
+// Frees a dl_user_dl struct
+static void dl_user_dl_free(gpointer x) {
+  g_slice_free(struct dl_user_dl, x);
+}
+
+
+// Get the highest-priority file in the users' queue that is not already being
+// downloaded. This function can be assumed to be relatively fast, in most
+// cases the first iteration will be enough, in the worst case it at most
+// <download_slots> iterations.
+// Returns NULL if there is no dl item in the queue that is enabled and not
+// being downloaded.
+static struct dl_user_dl *dl_user_getdl(const struct dl_user *du) {
+  GSequenceIter *i = g_sequence_get_begin_iter(du->queue);
+  for(; !g_sequence_iter_is_end(i); i=g_sequence_iter_next(i)) {
+    struct dl_user_dl *dud = g_sequence_get(i);
+    if(!dl_user_dl_enabled(dud))
+      break;
+    if(!dud->dl->active)
+      return dud;
+  }
+  return NULL;
 }
 
 
@@ -206,19 +264,36 @@ static gint dl_user_queue_sort_func(gconstpointer a, gconstpointer b) {
 static void dl_user_setstate(struct dl_user *du, int state) {
   // Handle reconnect timeout
   // x -> WAI
-  if(du->state != DLU_WAI && state == DLU_WAI)
+  if(state > 0 && du->state != DLU_WAI && state == DLU_WAI)
     du->timeout = g_timeout_add_seconds_full(G_PRIORITY_LOW, 60, dl_user_waitdone, du, NULL);
   // WAI -> X
-  else if(du->state == DLU_WAI && state != DLU_WAI)
+  else if(state > 0 && du->state == DLU_WAI && state != DLU_WAI)
     g_source_remove(du->timeout);
+
+  // Update dl_user_dl.active and dl.active if we came from the ACT state.
+  // Note that the item may have been deleted from the queue, in that case the
+  // entire list is searched but nothing is updated.
+  // dl_user_dl.active and dl.active are set in dl_queue_start_user().
+  // ACT -> x
+  else if(state > 0 && du->state == DLU_ACT && state != DLU_ACT) {
+    GSequenceIter *i = g_sequence_get_begin_iter(du->queue);
+    for(; !g_sequence_iter_is_end(i); i=g_sequence_iter_next(i)) {
+      struct dl_user_dl *dud = g_sequence_get(i);
+      if(dud->active) {
+        dud->active = dud->dl->active = FALSE;
+        break;
+      }
+    }
+  }
 
   // Set state
   if(state >= 0)
     du->state = state;
 
   // Check whether there is any value in keeping this dl_user struct in memory
-  if(du->state == DLU_NCO && !du->queue) {
+  if(du->state == DLU_NCO && !g_sequence_get_length(du->queue)) {
     g_hash_table_remove(queue_users, &du->uid);
+    g_sequence_free(du->queue);
     g_slice_free(struct dl_user, du);
     return;
   }
@@ -261,6 +336,58 @@ void dl_user_join(guint64 uid) {
 }
 
 
+// Adds a user to a dl item, making sure to create the user if it's not in the
+// queue yet. For internal use only, does not call dl_dat_saveusers() and
+// dl_queue_start().
+static void dl_user_add(struct dl *dl, guint64 uid, char error, unsigned short error_sub) {
+  g_return_if_fail(!dl->islist || dl->u->len == 0);
+
+  // get or create dl_user struct
+  struct dl_user *du = g_hash_table_lookup(queue_users, &uid);
+  if(!du) {
+    du = g_slice_new0(struct dl_user);
+    du->state = DLU_NCO;
+    du->uid = uid;
+    du->queue = g_sequence_new(dl_user_dl_free);
+    g_hash_table_insert(queue_users, &du->uid, du);
+  }
+
+  // create and fill dl_user_dl struct
+  struct dl_user_dl *dud = g_slice_new0(struct dl_user_dl);
+  dud->dl = dl;
+  dud->u = du;
+  dud->error = error;
+  dud->error_sub = error_sub;
+
+  // Add to du->queue and dl->u
+  g_ptr_array_add(dl->u, g_sequence_insert_sorted(du->queue, dud, dl_user_dl_sort, NULL));
+}
+
+
+// Remove a user (dl->u[i]) from a dl item, making sure to also remove it from
+// du->queue and possibly free the dl_user item if it's no longer useful. As
+// above, for internal use only. Does not call dl_dat_saveusers().
+static void dl_user_rm(struct dl *dl, int i) {
+  GSequenceIter *dudi = g_ptr_array_index(dl->u, i);
+  struct dl_user_dl *dud = g_sequence_get(dudi);
+  struct dl_user *du = dud->u;
+
+  // Make sure to disconnect the user and disable dl->active if we happened to
+  // be actively downloading the file from this user.
+  if(dud->active) {
+    cc_disconnect(du->cc);
+    dl->active = FALSE;
+    // Note that cc_disconnect() immediately calls dl_user_cc(), causing
+    // du->active to be reset anyway. I'm not sure whether it's a good idea to
+    // rely on that, however.
+  }
+
+  g_sequence_remove(dudi); // dl_user_dl_free() will be called implicitely
+  g_ptr_array_remove_index_fast(dl->u, i);
+  dl_user_setstate(du, -1);
+}
+
+
 
 
 
@@ -268,11 +395,31 @@ void dl_user_join(guint64 uid) {
 
 static gboolean dl_queue_needstart = FALSE;
 
+// Determines whether the user is a possible target to either connect to, or to
+// initiate a download with.
+static gboolean dl_queue_start_istarget(struct dl_user *du) {
+  // User must be in the NCO/IDL state and we must have something to download
+  // from them.
+  if((du->state != DLU_NCO && du->state != DLU_IDL) || !dl_user_getdl(du))
+    return FALSE;
+
+  // In the NCO state, the user must also be online, and the hub must be
+  // properly logged in. Otherwise we won't be able to connect anyway.
+  if(du->state == DLU_NCO) {
+    struct hub_user *u = g_hash_table_lookup(hub_uids, &du->uid);
+    if(!u || !u->hub->nick_valid)
+      return FALSE;
+  }
+
+  // If the above holds, we're safe
+  return TRUE;
+}
+
+
 // Starts a connection with a user or initiates a download if we're already
 // connected.
 static gboolean dl_queue_start_user(struct dl_user *du) {
-  g_return_val_if_fail(du->state == DLU_NCO || du->state == DLU_IDL, FALSE);
-  g_return_val_if_fail(du->queue, FALSE);
+  g_return_val_if_fail(dl_queue_start_istarget(du), FALSE);
 
   // If we're not connected yet, just connect
   if(du->state == DLU_NCO) {
@@ -284,13 +431,15 @@ static gboolean dl_queue_start_user(struct dl_user *du) {
   }
 
   // Otherwise, initiate a download.
-  g_debug("dl:%016"G_GINT64_MODIFIER"x: re-using connection", du->uid);
+  struct dl_user_dl *dud = dl_user_getdl(du);
+  g_return_val_if_fail(dud, FALSE);
+  struct dl *dl = dud->dl;
+  g_debug("dl:%016"G_GINT64_MODIFIER"x: using connection for %s", du->uid, dl->dest);
 
   // For filelists: Don't allow resuming of the download. It could happen that
   // the client modifies its filelist in between our retries. In that case the
   // downloaded filelist would end up being corrupted. To avoid that: make sure
   // lists are downloaded in one go, and throw away any incomplete data.
-  struct dl *dl = du->queue->data;
   if(dl->islist && dl->have > 0) {
     dl->have = dl->size = 0;
     g_return_val_if_fail(close(dl->incfd) == 0, FALSE);
@@ -298,25 +447,27 @@ static gboolean dl_queue_start_user(struct dl_user *du) {
     g_return_val_if_fail(dl->incfd >= 0, FALSE);
   }
 
+  // Update state and connect
+  dud->active = dl->active = TRUE;
   dl_user_setstate(du, DLU_ACT);
-  cc_download(du->cc, du->queue->data);
+  cc_download(du->cc, dl);
   return TRUE;
 }
 
 
-// Order a list of dl_user structs by a "priority" to determine from whom to
+// Compares two dl_user structs by a "priority" to determine from whom to
 // download first. Note that users in the IDL state always get priority over
 // users in the NCO state, in order to prevent the situation that the
 // lower-priority user in the IDL state is connected to anyway in a next
-// iteration.
-static gint dl_queue_start_sort(gconstpointer a, gconstpointer b) {
+// iteration. Returns -1 if a has a higher priority than b.
+// This function assumes dl_queue_start_istarget() for both arguments.
+static gint dl_queue_start_cmp(gconstpointer a, gconstpointer b) {
   const struct dl_user *ua = a;
   const struct dl_user *ub = b;
-  g_return_val_if_fail(ua->queue && ub->queue, 0);
   return -1*(
     ua->state == DLU_IDL && ub->state != DLU_IDL ?  1 :
     ua->state != DLU_IDL && ub->state == DLU_IDL ? -1 :
-    ((struct dl *)ua->queue->data)->prio - ((struct dl *)ub->queue->data)->prio
+    dl_user_dl_sort(dl_user_getdl(ub), dl_user_getdl(ua), NULL)
   );
 }
 
@@ -331,39 +482,46 @@ static gboolean dl_queue_start_do(gpointer dat) {
 
   // Walk through all users in the queue and:
   // - determine possible targets to connect to or to start a transfer from
+  // - determine the highest-priority target
   // - calculate freeslots
   GPtrArray *targets = g_ptr_array_new();
-  struct dl_user *du;
+  struct dl_user *du, *target = NULL;
+  int target_i;
   GHashTableIter iter;
   g_hash_table_iter_init(&iter, queue_users);
   while(g_hash_table_iter_next(&iter, NULL, (gpointer *)&du)) {
     if(du->state == DLU_ACT)
       freeslots--;
-    // Only consider users in the NCO/IDL state and only if we have something
-    // to download from them.
-    if((du->state != DLU_NCO && du->state != DLU_IDL)
-        || !du->queue || ((struct dl *)du->queue->data)->prio <= DLP_OFF)
-      continue;
-    // In the NCO state, the user must also be online, and the hub must be
-    // properly logged in.
-    if(du->state == DLU_NCO) {
-      struct hub_user *u = g_hash_table_lookup(hub_uids, &du->uid);
-      if(!u || !u->hub->nick_valid)
-        continue;
+    if(dl_queue_start_istarget(du)) {
+      if(!target || dl_queue_start_cmp(target, du) > 0) {
+        target_i = targets->len;
+        target = du;
+      }
+      g_ptr_array_add(targets, du);
     }
-    // If the above applies, then we can consider it a target
-    g_ptr_array_add(targets, du);
   }
 
-  // Sort the list of possible targets
-  if(freeslots > 0)
-    g_ptr_array_sort(targets, dl_queue_start_sort);
+  // Try to connect to the previously found highest-priority target, then go
+  // through the list again to eliminate any users that may not be a target
+  // anymore and to fetch a new highest-priority target.
+  while(freeslots > 0 && target) {
+    if(dl_queue_start_user(target) && !--freeslots)
+      break;
+    g_ptr_array_remove_index_fast(targets, target_i);
 
-  // And open a connection or start a download
-  int i;
-  for(i=0; i<targets->len && freeslots > 0; i++)
-    if(dl_queue_start_user(g_ptr_array_index(targets, i)))
-      freeslots--;
+    int i = 0;
+    target = NULL;
+    while(i < targets->len) {
+      du = g_ptr_array_index(targets, i);
+      if(!dl_queue_start_istarget(du))
+        g_ptr_array_remove_index_fast(targets, i);
+      else if(!target || dl_queue_start_cmp(target, du) > 0) {
+        target_i = i;
+        target = du;
+        i++;
+      }
+    }
+  }
 
   g_ptr_array_unref(targets);
 
@@ -392,7 +550,7 @@ void dl_queue_start() {
 
 
 
-// Download queue manipulation
+// Adding/removing stuff from dl.dat
 
 static void dl_dat_saveinfo(struct dl *dl) {
   char key[25];
@@ -418,34 +576,59 @@ static void dl_dat_saveinfo(struct dl *dl) {
 }
 
 
-void dl_queue_setprio(struct dl *dl, char prio) {
-  gboolean enabled = dl->prio <= DLP_OFF && prio > DLP_OFF;
-  dl->prio = prio;
-  dl_dat_saveinfo(dl);
-  // Make sure dl->u->queue is still in the correct order
-  dl->u->queue = g_slist_remove(dl->u->queue, dl);
-  dl->u->queue = g_slist_insert_sorted(dl->u->queue, dl, dl_user_queue_sort_func);
-  // Start the download if it is enabled
-  if(enabled)
-    dl_queue_start();
+static void dl_dat_saveusers(struct dl *dl) {
+  char key[25];
+  key[0] = DLDAT_USERS;
+  memcpy(key+1, dl->hash, 24);
+
+  int len = 8+16*dl->u->len;
+  char nfo[len];
+  memset(nfo, 0, len);
+  guint64 tmp = dl->u->len;
+  tmp = GINT64_TO_LE(tmp);
+  memcpy(nfo, &tmp, 8);
+
+  int i;
+  for(i=0; i<dl->u->len; i++) {
+    char *ptr = nfo+8+i*16;
+    struct dl_user_dl *dud = g_sequence_get(g_ptr_array_index(dl->u, i));
+    tmp = GINT64_TO_LE(dud->u->uid);
+    memcpy(ptr, &tmp, 8);
+    ptr[9] = dud->error;
+    guint16 sub = GINT16_TO_LE(dud->error_sub);
+    memcpy(ptr+10, &sub, 2);
+  }
+
+  datum keydat = { key, 25 };
+  datum val = { nfo, len };
+  gdbm_store(dl_dat, keydat, val, GDBM_REPLACE);
+  dl_dat_sync();
 }
 
 
-#if INTERFACE
+void dl_dat_rmdl(struct dl *dl) {
+  char key[25];
+  datum keydat = { key, 25 };
+  memcpy(key+1, dl->hash, 24);
+  key[0] = DLDAT_INFO;
+  gdbm_delete(dl_dat, keydat);
+  key[0] = DLDAT_USERS;
+  gdbm_delete(dl_dat, keydat);
+  key[0] = DLDAT_TTHL;
+  gdbm_delete(dl_dat, keydat);
+  dl_dat_sync();
+}
 
-#define dl_queue_seterr(dl, e, sub) do {\
-    (dl)->error = e;\
-    (dl)->error_sub = sub;\
-    dl_queue_setprio(dl, DLP_ERR);\
-    ui_mf(ui_main, 0, "Download of `%s' failed: %s", (dl)->dest, dl_strerror(e, sub));\
-  } while(0)
 
-#endif
 
+
+
+// Adding stuff to the download queue
 
 // Adds a dl item to the queue. dl->inc will be determined and opened here.
 // dl->hastthl will be set if the file is small enough to not need TTHL data.
-static void dl_queue_insert(struct dl *dl, guint64 uid, gboolean init) {
+// dl->u is also created here.
+static void dl_queue_insert(struct dl *dl, gboolean init) {
   // Set dl->hastthl for files smaller than MINTTHLSIZE.
   if(!dl->islist && !dl->hastthl && dl->size <= DL_MINTTHLSIZE) {
     dl->hastthl = TRUE;
@@ -457,77 +640,21 @@ static void dl_queue_insert(struct dl *dl, guint64 uid, gboolean init) {
   char *tmp = conf_incoming_dir();
   dl->inc = g_build_filename(tmp, hash, NULL);
   g_free(tmp);
-  // create or re-use dl_user struct
-  dl->u = g_hash_table_lookup(queue_users, &uid);
-  if(!dl->u) {
-    dl->u = g_slice_new0(struct dl_user);
-    dl->u->state = DLU_NCO;
-    dl->u->uid = uid;
-    g_hash_table_insert(queue_users, &dl->u->uid, dl->u);
-  }
-  dl->u->queue = g_slist_insert_sorted(dl->u->queue, dl, dl_user_queue_sort_func);
+  // create dl->u
+  dl->u = g_ptr_array_new();
   // insert in the global queue
   g_hash_table_insert(dl_queue, dl->hash, dl);
   if(ui_dl)
     ui_dl_listchange(dl, UIDL_ADD);
 
   // insert in the data file
-  if(!dl->islist && !init) {
+  if(!dl->islist && !init)
     dl_dat_saveinfo(dl);
-
-    char key[25];
-    key[0] = DLDAT_USERS;
-    memcpy(key+1, dl->hash, 24);
-    guint64 users[2] = { GINT64_TO_LE(1), GINT64_TO_LE(uid) };
-    datum keydat = { key, 25 };
-    datum val = { (char *)users, 2*8 };
-    gdbm_store(dl_dat, keydat, val, GDBM_REPLACE);
-    dl_dat_sync();
-  }
 
   // start download, if possible
   if(!init)
     dl_queue_start();
 }
-
-
-// removes an item from the queue
-void dl_queue_rm(struct dl *dl) {
-  // close the incomplete file, in case it's still open
-  if(dl->incfd > 0)
-    g_warn_if_fail(close(dl->incfd) == 0);
-  // remove the incomplete file, in case we still have it
-  if(dl->inc && g_file_test(dl->inc, G_FILE_TEST_EXISTS))
-    unlink(dl->inc);
-  // update and optionally remove dl_user struct
-  dl->u->queue = g_slist_remove(dl->u->queue, dl);
-  dl_user_setstate(dl->u, -1);
-  // remove from the data file
-  if(!dl->islist) {
-    char key[25];
-    datum keydat = { key, 25 };
-    memcpy(key+1, dl->hash, 24);
-    key[0] = DLDAT_INFO;
-    gdbm_delete(dl_dat, keydat);
-    key[0] = DLDAT_USERS;
-    gdbm_delete(dl_dat, keydat);
-    key[0] = DLDAT_TTHL;
-    gdbm_delete(dl_dat, keydat);
-    dl_dat_sync();
-  }
-  // free and remove dl struct
-  if(ui_dl)
-    ui_dl_listchange(dl, UIDL_DEL);
-  g_hash_table_remove(dl_queue, dl->hash);
-  if(dl->hash_tth)
-    g_slice_free(struct tth_ctx, dl->hash_tth);
-  g_free(dl->flsel);
-  g_free(dl->inc);
-  g_free(dl->dest);
-  g_slice_free(struct dl, dl);
-}
-
-
 
 
 // Add the file list of some user to the queue
@@ -553,7 +680,9 @@ void dl_queue_addlist(struct hub_user *u, const char *sel) {
   g_free(fn);
   // insert & start
   g_debug("dl:%016"G_GINT64_MODIFIER"x: queueing files.xml.bz2", u->uid);
-  dl_queue_insert(dl, u->uid, FALSE);
+  dl_queue_insert(dl, FALSE);
+  dl_user_add(dl, u->uid, 0, 0);
+  dl_dat_saveusers(dl);
 }
 
 
@@ -587,6 +716,8 @@ static gboolean dl_queue_addfile(guint64 uid, char *hash, guint64 size, char *fn
   // Figure out dl->dest. It is assumed that fn + any dupe-prevention-extension
   // does not exceed NAME_MAX. (Not that checking against NAME_MAX is really
   // reliable - some filesystems have an even more strict limit)
+  // TODO: do the dupe prevention detection when the download has finished,
+  // i.e. when it is moved to the actual destination.
   int num = 1;
   char *tmp = conf_download_dir();
   char *base = g_build_filename(tmp, fn, NULL);
@@ -599,7 +730,9 @@ static gboolean dl_queue_addfile(guint64 uid, char *hash, guint64 size, char *fn
   g_free(base);
   // and add to the queue
   g_debug("dl:%016"G_GINT64_MODIFIER"x: queueing %s", uid, fn);
-  dl_queue_insert(dl, uid, FALSE);
+  dl_queue_insert(dl, FALSE);
+  dl_user_add(dl, uid, 0, 0);
+  dl_dat_saveusers(dl);
   return TRUE;
 }
 
@@ -646,9 +779,71 @@ void dl_queue_add_res(struct search_r *r) {
 
 
 
+// Removing stuff from the queue and changing priorities
+
+// removes an item from the queue
+void dl_queue_rm(struct dl *dl) {
+  // close the incomplete file, in case it's still open
+  if(dl->incfd > 0)
+    g_warn_if_fail(close(dl->incfd) == 0);
+  // remove the incomplete file, in case we still have it
+  if(dl->inc && g_file_test(dl->inc, G_FILE_TEST_EXISTS))
+    unlink(dl->inc);
+  // remove from the user info
+  while(dl->u->len > 0)
+    dl_user_rm(dl, 0);
+  // remove from the data file
+  if(!dl->islist)
+    dl_dat_rmdl(dl);
+  // free and remove dl struct
+  if(ui_dl)
+    ui_dl_listchange(dl, UIDL_DEL);
+  g_hash_table_remove(dl_queue, dl->hash);
+  if(dl->hash_tth)
+    g_slice_free(struct tth_ctx, dl->hash_tth);
+  g_ptr_array_unref(dl->u);
+  g_free(dl->flsel);
+  g_free(dl->inc);
+  g_free(dl->dest);
+  g_slice_free(struct dl, dl);
+}
+
+
+void dl_queue_setprio(struct dl *dl, char prio) {
+  gboolean enabled = dl->prio <= DLP_OFF && prio > DLP_OFF;
+  dl->prio = prio;
+  dl_dat_saveinfo(dl);
+  // Make sure the dl_user.queue lists are still in the correct order
+  int i;
+  for(i=0; i<dl->u->len; i++)
+    g_sequence_sort_changed(g_ptr_array_index(dl->u, i), dl_user_dl_sort, NULL);
+  // Start the download if it is enabled
+  if(enabled)
+    dl_queue_start();
+}
+
+
+#if INTERFACE
+
+#define dl_queue_seterr(dl, e, sub) do {\
+    (dl)->error = e;\
+    (dl)->error_sub = sub;\
+    dl_queue_setprio(dl, DLP_ERR);\
+    ui_mf(ui_main, 0, "Download of `%s' failed: %s", (dl)->dest, dl_strerror(e, sub));\
+  } while(0)
+
+#endif
+
+
+
+
+
+
+// Managing of active downloads
+
 // Called when we've got a complete file
 static void dl_finished(struct dl *dl) {
-  g_debug("dl:%016"G_GINT64_MODIFIER"x: download of `%s' finished, removing from queue", dl->u->uid, dl->dest);
+  g_debug("dl: download of `%s' finished, removing from queue", dl->dest);
   // close
   if(dl->incfd > 0)
     g_warn_if_fail(close(dl->incfd) == 0);
@@ -675,9 +870,14 @@ static void dl_finished(struct dl *dl) {
     }
   }
   // open the file list
-  if(dl->prio != DLP_ERR && dl->islist)
-    ui_tab_open(ui_fl_create(dl->u->uid, dl->flsel), FALSE);
+  if(dl->prio != DLP_ERR && dl->islist) {
+    g_return_if_fail(dl->u->len == 1);
+    ui_tab_open(ui_fl_create(((struct dl_user_dl *)g_sequence_get(g_ptr_array_index(dl->u, 0)))->u->uid, dl->flsel), FALSE);
+  }
   // and remove from the queue
+  // TODO: This will cause the user to get disconnected immediately rather than
+  // it going to the IDL state as it should, since we're removing a dl item
+  // from it while it's in the ACT state. Perhaps we need a delayed remove?
   dl_queue_rm(dl);
 }
 
@@ -746,10 +946,14 @@ static int dl_hash_update(struct dl *dl, int length, char *buf) {
 // download, FALSE when something went wrong and the transfer should be
 // aborted.
 // TODO: do this in a separate thread to avoid blocking on HDD writes.
-gboolean dl_received(struct dl *dl, char *buf, int length) {
-  //g_debug("dl:%016"G_GINT64_MODIFIER"x: Received %d bytes for %s (size = %"G_GUINT64_FORMAT", have = %"G_GUINT64_FORMAT")", dl->u->uid, length, dl->dest, dl->size, dl->have+length);
+gboolean dl_received(guint64 uid, char *tth, char *buf, int length) {
+  struct dl *dl = g_hash_table_lookup(dl_queue, tth);
+  struct dl_user *du = g_hash_table_lookup(queue_users, &uid);
+  if(!dl || !du)
+    return FALSE;
+  g_return_val_if_fail(du->state == DLU_ACT, FALSE);
   g_return_val_if_fail(dl->have + length <= dl->size, FALSE);
-  g_warn_if_fail(dl->u->state == DLU_ACT);
+  // TODO: find the related dl_user_dl struct and check that that is also set to active?
 
   // open dl->incfd, if it's not open yet
   if(dl->incfd <= 0) {
@@ -805,20 +1009,25 @@ gboolean dl_received(struct dl *dl, char *buf, int length) {
 // Called when we've received TTHL data. For now we'll just store it dl.dat
 // without modifications.
 // TODO: combine hashes to remove uneeded granularity? (512kB is probably enough)
-void dl_settthl(struct dl *dl, char *tthl, int len) {
+void dl_settthl(guint64 uid, char *tth, char *tthl, int len) {
+  struct dl *dl = g_hash_table_lookup(dl_queue, tth);
+  struct dl_user *du = g_hash_table_lookup(queue_users, &uid);
+  if(!dl || !du)
+    return;
+  g_return_if_fail(du->state == DLU_ACT);
   g_return_if_fail(!dl->islist);
   g_return_if_fail(!dl->have);
   // Ignore this if we already have the TTHL data. Currently, this situation
-  // can't happen, but it may be possible with multisource downloading.
+  // can't happen, but it may be possible with segmented downloading.
   g_return_if_fail(!dl->hastthl);
 
-  g_debug("dl:%016"G_GINT64_MODIFIER"x: Received TTHL data for %s (len = %d, bs = %"G_GUINT64_FORMAT")", dl->u->uid, dl->dest, len, tth_blocksize(dl->size, len/24));
+  g_debug("dl:%016"G_GINT64_MODIFIER"x: Received TTHL data for %s (len = %d, bs = %"G_GUINT64_FORMAT")", uid, dl->dest, len, tth_blocksize(dl->size, len/24));
 
   // Validate correctness with the root hash
   char root[24];
   tth_root(tthl, len/24, root);
   if(memcmp(root, dl->hash, 24) != 0) {
-    g_warning("dl:%016"G_GINT64_MODIFIER"x: Incorrect TTHL for %s.", dl->u->uid, dl->dest);
+    g_warning("dl:%016"G_GINT64_MODIFIER"x: Incorrect TTHL for %s.", uid, dl->dest);
     dl_queue_seterr(dl, DLE_INVTTHL, 0);
     return;
   }
@@ -838,6 +1047,9 @@ void dl_settthl(struct dl *dl, char *tthl, int len) {
 
 
 
+
+
+// Loading/initializing the download queue on startup
 
 // Calculates dl->hash_block, dl->have and if necessary updates dl->hash_tth
 // for the last block that we have.
@@ -915,8 +1127,14 @@ static void dl_queue_loaditem(char *hash) {
   g_return_if_fail(nfo.dsize > 17);
   key[0] = DLDAT_USERS;
   datum users = gdbm_fetch(dl_dat, keydat);
-  g_return_if_fail(users.dsize >= 16);
+  g_return_if_fail(users.dsize >= 8);
 
+  guint64 numusers;
+  memcpy(&numusers, users.dptr, 8);
+  numusers = GINT64_FROM_LE(numusers);
+  g_return_if_fail(users.dsize == 8+16*numusers);
+
+  // Fix dl struct
   struct dl *dl = g_slice_new0(struct dl);
   memcpy(dl->hash, hash, 24);
   memcpy(&dl->size, nfo.dptr, 8);
@@ -926,16 +1144,27 @@ static void dl_queue_loaditem(char *hash) {
   memcpy(&dl->error_sub, nfo.dptr+10, 2);
   dl->error_sub = GINT16_FROM_LE(dl->error_sub);
   dl->dest = g_strdup(nfo.dptr+16);
+  dl_queue_insert(dl, TRUE);
+
+  // Fix users
+  int i;
+  for(i=0; i<numusers; i++) {
+    char *ptr = users.dptr+8+16*i;
+    guint64 uid;
+    memcpy(&uid, ptr, 8);
+    uid = GINT64_FROM_LE(uid);
+    guint16 errsub;
+    memcpy(&errsub, ptr+10, 2);
+    errsub = GINT16_FROM_LE(errsub);
+    dl_user_add(dl, uid, ptr[9], errsub);
+  }
 
   // check what we already have
   dl_queue_loadpartial(dl);
 
   // and insert in the hash tables
-  guint64 uid;
-  memcpy(&uid, users.dptr+8, 8);
-  uid = GINT64_FROM_LE(uid);
-  dl_queue_insert(dl, uid, TRUE);
-  g_debug("dl:%016"G_GINT64_MODIFIER"x: load `%s' from data file (size = %"G_GUINT64_FORMAT", have = %"G_GUINT64_FORMAT", bs = %"G_GUINT64_FORMAT")", uid, dl->dest, dl->size, dl->have, dl->hash_block);
+  g_debug("dl: load `%s' from data file (sources = %d, size = %"G_GUINT64_FORMAT", have = %"G_GUINT64_FORMAT", bs = %"G_GUINT64_FORMAT")",
+    dl->dest, dl->u->len, dl->size, dl->have, dl->hash_block);
 
   free(nfo.dptr);
   free(users.dptr);
@@ -955,8 +1184,40 @@ static void dl_queue_loaddat() {
 }
 
 
+void dl_init_global() {
+  queue_users = g_hash_table_new(g_int64_hash, g_int64_equal);
+  dl_queue = g_hash_table_new(g_int_hash, tiger_hash_equal);
+  // open data file
+  char *fn = g_build_filename(conf_dir, "dl.dat", NULL);
+  dl_dat = gdbm_open(fn, 0, GDBM_WRCREAT, 0600, NULL);
+  g_free(fn);
+  if(!dl_dat)
+    g_error("Unable to open dl.dat.");
+  dl_queue_loaddat();
+  // Delete old filelists
+  dl_fl_clean(NULL);
+}
 
 
+void dl_close_global() {
+  gdbm_close(dl_dat);
+  // Delete incomplete file lists. They won't be completed anyway.
+  GHashTableIter iter;
+  struct dl *dl;
+  g_hash_table_iter_init(&iter, dl_queue);
+  while(g_hash_table_iter_next(&iter, NULL, (gpointer *)&dl))
+    if(dl->islist)
+      unlink(dl->inc);
+  // Delete old filelists
+  dl_fl_clean(NULL);
+}
+
+
+
+
+
+
+// Various cleanup/gc utilities
 
 // Removes old filelists from /fl/. Can be run from a timer.
 gboolean dl_fl_clean(gpointer dat) {
@@ -1067,31 +1328,4 @@ void dl_gc() {
 }
 
 
-void dl_init_global() {
-  queue_users = g_hash_table_new(g_int64_hash, g_int64_equal);
-  dl_queue = g_hash_table_new(g_int_hash, tiger_hash_equal);
-  // open data file
-  char *fn = g_build_filename(conf_dir, "dl.dat", NULL);
-  dl_dat = gdbm_open(fn, 0, GDBM_WRCREAT, 0600, NULL);
-  g_free(fn);
-  if(!dl_dat)
-    g_error("Unable to open dl.dat.");
-  dl_queue_loaddat();
-  // Delete old filelists
-  dl_fl_clean(NULL);
-}
-
-
-void dl_close_global() {
-  gdbm_close(dl_dat);
-  // Delete incomplete file lists. They won't be completed anyway.
-  GHashTableIter iter;
-  struct dl *dl;
-  g_hash_table_iter_init(&iter, dl_queue);
-  while(g_hash_table_iter_next(&iter, NULL, (gpointer *)&dl))
-    if(dl->islist)
-      unlink(dl->inc);
-  // Delete old filelists
-  dl_fl_clean(NULL);
-}
 

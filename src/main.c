@@ -379,6 +379,9 @@ int main(int argc, char **argv) {
   g_thread_init(NULL);
   g_type_init();
 
+  // Create main loop
+  main_loop = g_main_loop_new(NULL, FALSE);
+
   // Detect whether we can use TLS
 #if TLS_SUPPORT
   GTlsBackend *backend = g_tls_backend_get_default();
@@ -435,9 +438,7 @@ int main(int argc, char **argv) {
   if(auto_open)
     open_autoconnect();
 
-  // init and start main loop
-  main_loop = g_main_loop_new(NULL, FALSE);
-
+  // add some watches and start the main loop
   GIOChannel *in = g_io_channel_unix_new(STDIN_FILENO);
   g_io_add_watch(in, G_IO_IN, stdin_read, NULL);
 

@@ -124,8 +124,6 @@ struct dl {
 
 #endif
 
-// TODO: do something with dl_user_dl.error
-
 
 // Minimum filesize for which we request TTHL data. If a file is smaller than
 // this, the TTHL data would simply add more overhead than it is worth.
@@ -859,8 +857,6 @@ void dl_queue_setprio(struct dl *dl, char prio) {
 }
 
 
-#if INTERFACE
-
 #define dl_queue_seterr(dl, e, sub) do {\
     (dl)->error = e;\
     (dl)->error_sub = sub;\
@@ -868,8 +864,25 @@ void dl_queue_setprio(struct dl *dl, char prio) {
     ui_mf(ui_main, 0, "Download of `%s' failed: %s", (dl)->dest, dl_strerror(e, sub));\
   } while(0)
 
-#endif
 
+// Set a user-specific error
+void dl_queue_setuerr(guint64 uid, char *tth, char e, unsigned short sub) {
+  struct dl *dl = g_hash_table_lookup(dl_queue, tth);
+  struct dl_user *du = g_hash_table_lookup(queue_users, &uid);
+  if(!dl || !du)
+    return;
+  int i;
+  for(i=0; i<dl->u->len; i++) {
+    GSequenceIter *iter = g_ptr_array_index(dl->u, i);
+    struct dl_user_dl *dud = g_sequence_get(iter);
+    if(dud->u == du) {
+      dud->error = e;
+      dud->error_sub = sub;
+      g_sequence_sort_changed(iter, dl_user_dl_sort, NULL);
+      break;
+    }
+  }
+}
 
 
 
@@ -984,9 +997,8 @@ gboolean dl_received(guint64 uid, char *tth, char *buf, int length) {
   struct dl_user *du = g_hash_table_lookup(queue_users, &uid);
   if(!dl || !du)
     return FALSE;
-  g_return_val_if_fail(du->state == DLU_ACT, FALSE);
+  g_return_val_if_fail(du->state == DLU_ACT && du->active && du->active->dl == dl, FALSE);
   g_return_val_if_fail(dl->have + length <= dl->size, FALSE);
-  // TODO: find the related dl_user_dl struct and check that that is also set to active?
 
   // open dl->incfd, if it's not open yet
   if(dl->incfd <= 0) {
@@ -1012,7 +1024,7 @@ gboolean dl_received(guint64 uid, char *tth, char *buf, int length) {
     int fail = dl->islist ? -1 : dl_hash_update(dl, r, buf);
     if(fail >= 0) {
       g_warning("Hash failed for %s (block %d)", dl->inc, fail);
-      dl_queue_seterr(dl, DLE_HASH, fail);
+      dl_queue_setuerr(uid, tth, DLE_HASH, fail);
       // Delete the failed block and everything after it, so that a resume is possible.
       dl->have = fail*dl->hash_block;
       // I have no idea what to do when these functions fail. Resuming the
@@ -1061,7 +1073,7 @@ void dl_settthl(guint64 uid, char *tth, char *tthl, int len) {
   tth_root(tthl, len/24, root);
   if(memcmp(root, dl->hash, 24) != 0) {
     g_warning("dl:%016"G_GINT64_MODIFIER"x: Incorrect TTHL for %s.", uid, dl->dest);
-    dl_queue_seterr(dl, DLE_INVTTHL, 0);
+    dl_queue_setuerr(uid, tth, DLE_INVTTHL, 0);
     return;
   }
 

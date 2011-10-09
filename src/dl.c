@@ -683,23 +683,6 @@ void dl_queue_addlist(struct hub_user *u, const char *sel) {
 }
 
 
-static gboolean check_dupe_dest(char *dest) {
-  GHashTableIter iter;
-  struct dl *dl;
-  g_hash_table_iter_init(&iter, dl_queue);
-  // Note: it is assumed that dl->dest is a cannonical path. That is, it does
-  // not have any funky symlink magic, duplicate slashes, or references to
-  // current/parent directories. This check will fail otherwise.
-  while(g_hash_table_iter_next(&iter, NULL, (gpointer *)&dl))
-    if(strcmp(dl->dest, dest) == 0)
-      return TRUE;
-
-  if(g_file_test(dest, G_FILE_TEST_EXISTS))
-    return TRUE;
-  return FALSE;
-}
-
-
 // Add a regular file to the queue. If there is another file in the queue with
 // the same filename, something else will be chosen instead.
 // Returns true if it was added, false if it was already in the queue.
@@ -710,21 +693,10 @@ static gboolean dl_queue_addfile(guint64 uid, char *hash, guint64 size, char *fn
   struct dl *dl = g_slice_new0(struct dl);
   memcpy(dl->hash, hash, 24);
   dl->size = size;
-  // Figure out dl->dest. It is assumed that fn + any dupe-prevention-extension
-  // does not exceed NAME_MAX. (Not that checking against NAME_MAX is really
-  // reliable - some filesystems have an even more strict limit)
-  // TODO: do the dupe prevention detection when the download has finished,
-  // i.e. when it is moved to the actual destination.
-  int num = 1;
+  // Figure out dl->dest
   char *tmp = conf_download_dir();
-  char *base = g_build_filename(tmp, fn, NULL);
+  dl->dest = g_build_filename(tmp, fn, NULL);
   g_free(tmp);
-  dl->dest = g_strdup(base);
-  while(check_dupe_dest(dl->dest)) {
-    g_free(dl->dest);
-    dl->dest = g_strdup_printf("%s.%d", base, num++);
-  }
-  g_free(base);
   // and add to the queue
   g_debug("dl:%016"G_GINT64_MODIFIER"x: queueing %s", uid, fn);
   dl_queue_insert(dl, FALSE);
@@ -902,22 +874,36 @@ static void dl_finished(struct dl *dl) {
   if(g_mkdir_with_parents(parent, 0755) < 0)
     dl_queue_seterr(dl, DLE_IO_DEST, errno);
   g_free(parent);
+
+  // Prevent overwiting other files by appending a prefix to the destination if
+  // it already exists. It is assumed that fn + any dupe-prevention-extension
+  // does not exceed NAME_MAX. (Not that checking against NAME_MAX is really
+  // reliable - some filesystems have an even more strict limit)
+  int num = 1;
+  char *dest = g_strdup(dl->dest);
+  while(!dl->islist && g_file_test(dest, G_FILE_TEST_EXISTS)) {
+    g_free(dest);
+    dest = g_strdup_printf("%s.%d", dl->dest, num++);
+  }
+
   // Move the file to the destination.
   // TODO: this may block for a while if they are not on the same filesystem,
   // do this in a separate thread?
   GError *err = NULL;
   if(dl->prio != DLP_ERR) {
     GFile *src = g_file_new_for_path(dl->inc);
-    GFile *dest = g_file_new_for_path(dl->dest);
-    g_file_move(src, dest, dl->islist ? G_FILE_COPY_OVERWRITE : G_FILE_COPY_BACKUP, NULL, NULL, NULL, &err);
+    GFile *dst = g_file_new_for_path(dest);
+    g_file_move(src, dst, dl->islist ? G_FILE_COPY_OVERWRITE : G_FILE_COPY_BACKUP, NULL, NULL, NULL, &err);
     g_object_unref(src);
-    g_object_unref(dest);
+    g_object_unref(dst);
     if(err) {
-      g_warning("Error moving `%s' to `%s': %s", dl->inc, dl->dest, err->message);
+      g_warning("Error moving `%s' to `%s': %s", dl->inc, dest, err->message);
       dl_queue_seterr(dl, DLE_IO_DEST, 0); // g_file_move does not give the value of errno :(
       g_error_free(err);
     }
   }
+  g_free(dest);
+
   // open the file list
   if(dl->prio != DLP_ERR && dl->islist) {
     g_return_if_fail(dl->u->len == 1);

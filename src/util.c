@@ -31,10 +31,6 @@
 #include <glib/gstdio.h>
 #include <fcntl.h>
 
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-
 #if INTERFACE
 
 
@@ -964,10 +960,12 @@ void base32_decode(const char *from, char *to) {
 // use this strategy of ip6_pack() and ip6_unpack() with two guint64's.
 
 guint32 ip4_pack(const char *str) {
-  struct in_addr n;
-  if(!inet_aton(str, &n))
+  unsigned char ipraw[4];
+  if(sscanf(str, "%hhu.%hhu.%hhu.%hhu", ipraw, ipraw+1, ipraw+2, ipraw+3) != 4)
     return 0;
-  return g_ntohl(n.s_addr); // this is an uint32_t, on linux at least
+  guint32 ip;
+  memcpy(&ip, ipraw, 4); // ip is now in network byte order
+  return g_ntohl(ip); // convert to host byte order (allows for easy sorting)
 }
 
 

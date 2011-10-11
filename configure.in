@@ -47,7 +47,7 @@ fi
 
 # Check for library functions.
 AC_CHECK_FUNCS(
-  [setlocale sigaction flock ftruncate],[],
+  [setlocale sigaction fcntl ftruncate],[],
   AC_MSG_ERROR([Required function missing]))
 
 

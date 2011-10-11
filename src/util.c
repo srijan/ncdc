@@ -973,9 +973,13 @@ guint32 ip4_pack(const char *str) {
 
 // Returns a static string buffer.
 char *ip4_unpack(guint32 ip) {
-  struct in_addr n;
-  n.s_addr = g_htonl(ip);
-  return inet_ntoa(n);
+  // Don't use inet_ntoa(), not very portable on Solaris.
+  static char buf[20];
+  unsigned char ipraw[4];
+  ip = g_htonl(ip);
+  memcpy(ipraw, &ip, 4);
+  g_snprintf(buf, 20, "%d.%d.%d.%d", ipraw[0], ipraw[1], ipraw[2], ipraw[3]);
+  return buf;
 }
 
 #if INTERFACE

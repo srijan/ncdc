@@ -28,7 +28,7 @@ AM_CONDITIONAL([USE_MH], [test "x$have_mh" = "xyes"])
 
 # Check for header files.
 AC_CHECK_HEADERS(
-  [wchar.h locale.h signal.h bzlib.h gdbm.h sys/types.h sys/stat.h],[],
+  [wchar.h locale.h signal.h fcntl.h bzlib.h gdbm.h sys/types.h sys/stat.h],[],
   AC_MSG_ERROR([Required header file not found]))
 
 have_nch=no
@@ -47,7 +47,7 @@ fi
 
 # Check for library functions.
 AC_CHECK_FUNCS(
-  [setlocale sigaction ftruncate],[],
+  [setlocale sigaction flock ftruncate],[],
   AC_MSG_ERROR([Required function missing]))
 
 

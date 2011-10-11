@@ -29,7 +29,7 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <glib/gstdio.h>
-#include <sys/file.h>
+#include <fcntl.h>
 
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -297,7 +297,12 @@ void conf_init() {
   // make sure that there is no other ncdc instance working with the same config directory
   char *ver_file = g_build_filename(conf_dir, "version", NULL);
   int ver_fd = g_open(ver_file, O_WRONLY|O_CREAT, 0600);
-  if(ver_fd < 0 || flock(ver_fd, LOCK_EX|LOCK_NB))
+  struct flock lck;
+  lck.l_type = F_WRLCK;
+  lck.l_whence = SEEK_SET;
+  lck.l_start = 0;
+  lck.l_len = 0;
+  if(ver_fd < 0 || fcntl(ver_fd, F_SETLK, &lck) == -1)
     g_error("Unable to open lock file. Is another instance of ncdc running with the same configuration directory?");
 
   // check data directory version

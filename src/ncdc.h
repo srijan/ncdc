@@ -47,6 +47,8 @@
 struct cc;
 struct cc_expect;
 struct dl;
+struct dl_user;
+struct dl_user_dl;
 struct fl_list;
 struct hub;
 struct hub_user;

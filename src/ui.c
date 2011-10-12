@@ -1579,22 +1579,33 @@ static void ui_dl_key(guint64 key) {
       dl_queue_rm(sel);
     }
     break;
-  /* TODO: FIX
   case INPT_CHAR('c'): // c - find connection
     if(!sel)
       ui_m(NULL, 0, "Nothing selected.");
-    else if(!sel->u->cc)
+    else if(!sel->active)
       ui_m(NULL, 0, "Download not in progress.");
     else {
-      if(ui_conn)
-        ui_tab_cur = g_list_find(ui_tabs, ui_conn);
-      else
-        ui_tab_open(ui_conn_create(), TRUE);
-      // cc->iter should be valid at this point
-      ui_conn->list->sel = sel->u->cc->iter;
+      struct cc *cc = NULL;
+      int i;
+      for(i=0; i<sel->u->len; i++) {
+        struct dl_user_dl *dud = g_sequence_get(g_ptr_array_index(sel->u, i));
+        if(dud->u->active == dud) {
+          cc = dud->u->cc;
+          break;
+        }
+      }
+      if(!cc)
+        ui_m(NULL, 0, "Download not in progress.");
+      else {
+        if(ui_conn)
+          ui_tab_cur = g_list_find(ui_tabs, ui_conn);
+        else
+          ui_tab_open(ui_conn_create(), TRUE);
+        // cc->iter should be valid at this point
+        ui_conn->list->sel = cc->iter;
+      }
     }
     break;
-  */
   case INPT_CHAR('+'): // +
   case INPT_CHAR('='): // = - increase priority
     if(!sel)

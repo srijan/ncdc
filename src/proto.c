@@ -595,11 +595,14 @@ struct search_r *search_parse_adc(struct hub *hub, struct adc_cmd *cmd) {
   r.file = adc_getparam(argv, "FN", NULL);
   if(!r.file)
     return NULL;
-  while(strlen(r.file) > 1 && r.file[strlen(r.file)-1] == '/')
+  gboolean isfile = TRUE;
+  while(strlen(r.file) > 1 && r.file[strlen(r.file)-1] == '/') {
     r.file[strlen(r.file)-1] = 0;
+    isfile = FALSE;
+  }
 
   // tth & size
-  tmp = adc_getparam(argv, "TR", NULL);
+  tmp = isfile ? adc_getparam(argv, "TR", NULL) : NULL;
   if(tmp) {
     if(!istth(tmp))
       return NULL;

@@ -1454,6 +1454,7 @@ static void ui_dl_setusers(struct dl *dl) {
     return;
   }
   // create
+  ui_dl_setusers(NULL);
   GSequence *l = g_sequence_new(NULL);
   int i;
   for(i=0; i<dl->u->len; i++)

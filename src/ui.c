@@ -1738,6 +1738,14 @@ static void ui_dl_key(guint64 key) {
       ui_m(NULL, 0, key == INPT_CHAR('R') ? "Removed user from the download queue." : "Removed user for this file.");
     }
     break;
+  case INPT_CHAR('x'): // x - clear user-specific error state
+    if(!usel)
+      ui_m(NULL, 0, "No user selected.");
+    else if(!usel->error)
+      ui_m(NULL, 0, "Selected user is not in an error state.");
+    else
+      dl_queue_setuerr(usel->u->uid, sel->hash, 0, 0);
+    break;
   case INPT_CHAR('+'): // +
   case INPT_CHAR('='): // = - increase priority
     if(!sel)

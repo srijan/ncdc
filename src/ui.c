@@ -1677,6 +1677,9 @@ static void ui_dl_draw() {
 
 
 static void ui_dl_key(guint64 key) {
+  if(ui_listing_key(ui_dl->list, key, (winrows-(ui_dl->details?14:4))/2))
+    return;
+
   struct dl *sel = g_sequence_iter_is_end(ui_dl->list->sel) ? NULL : g_sequence_get(ui_dl->list->sel);
   struct dl_user_dl *usel = NULL;
   if(!ui_dl->details)
@@ -1686,15 +1689,21 @@ static void ui_dl_key(guint64 key) {
     usel = g_sequence_iter_is_end(ui_dl->dl_users->sel) ? NULL : g_sequence_get(ui_dl->dl_users->sel);
   }
 
-  if((!ui_dl->details || (key != INPT_CHAR('j') && key != INPT_CHAR('k')))
-      && ui_listing_key(ui_dl->list, key, (winrows-(ui_dl->details?14:4))/2))
-    return;
-  if(ui_dl->details && ui_listing_key(ui_dl->dl_users, key, 9))
-    return;
-
   switch(key) {
   case INPT_CHAR('?'):
     ui_main_keys("queue");
+    break;
+
+  case INPT_CHAR('J'): // J - user down
+    if(ui_dl->details) {
+      ui_dl->dl_users->sel = g_sequence_iter_next(ui_dl->dl_users->sel);
+      if(g_sequence_iter_is_end(ui_dl->dl_users->sel))
+        ui_dl->dl_users->sel = g_sequence_iter_prev(ui_dl->dl_users->sel);
+    }
+    break;
+  case INPT_CHAR('K'): // K - user up
+    if(ui_dl->details)
+      ui_dl->dl_users->sel = g_sequence_iter_prev(ui_dl->dl_users->sel);
     break;
 
   case INPT_CHAR('f'): // f - find user

@@ -265,16 +265,16 @@ static struct dl_user_dl *dl_user_getdl(const struct dl_user *du) {
 static void dl_user_setstate(struct dl_user *du, int state) {
   // Handle reconnect timeout
   // x -> WAI
-  if(state > 0 && du->state != DLU_WAI && state == DLU_WAI)
+  if(state >= 0 && du->state != DLU_WAI && state == DLU_WAI)
     du->timeout = g_timeout_add_seconds_full(G_PRIORITY_LOW, 60, dl_user_waitdone, du, NULL);
   // WAI -> X
-  else if(state > 0 && du->state == DLU_WAI && state != DLU_WAI)
+  else if(state >= 0 && du->state == DLU_WAI && state != DLU_WAI)
     g_source_remove(du->timeout);
 
   // Update dl_user_dl.active, dl.active and dl_user.active if we came from the
   // ACT state. These are set in dl_queue_start_user().
   // ACT -> x
-  else if(state > 0 && du->state == DLU_ACT && state != DLU_ACT && du->active) {
+  if(state >= 0 && du->state == DLU_ACT && state != DLU_ACT && du->active) {
     struct dl_user_dl *dud = du->active;
     du->active = NULL;
     dud->dl->active = FALSE;
@@ -282,6 +282,7 @@ static void dl_user_setstate(struct dl_user *du, int state) {
   }
 
   // Set state
+  //g_debug("dlu:%"G_GINT64_MODIFIER"x: %d -> %d (active = %s)", du->uid, du->state, state, du->active ? "true":"false");
   if(state >= 0)
     du->state = state;
 

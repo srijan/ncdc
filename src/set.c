@@ -718,7 +718,7 @@ static void set_old_sug(char *group, char *key, char *val, char **sug) {
 
 // the settings list
 static struct setting settings[] = {
-  { "active",           "global", get_bool_f,        set_active,        NULL               },
+  { "active",           "global", get_bool_f,        set_active,        set_bool_sug       },
   { "active_bind",      "global", get_string,        set_active_bind,   set_old_sug        },
   { "active_ip",        "global", get_string,        set_active_ip,     set_old_sug        },
   { "active_port",      "global", get_int,           set_active_port,   NULL,              },
@@ -911,8 +911,10 @@ void c_set_sug(char *args, char **sug) {
       if(checkalt && !g_key_file_has_key(conf_file, group, key, NULL) && strcmp(key, "hubname") != 0)
         group = "global";
 
-      s->suggest(group, key, sep+1, sug);
-      strv_prefix(sug, args, " ", NULL);
+      if(s->suggest) {
+        s->suggest(group, key, sep+1, sug);
+        strv_prefix(sug, args, " ", NULL);
+      }
     }
     g_free(pre);
   }

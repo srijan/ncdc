@@ -497,7 +497,8 @@ static const struct doc_key {
   "Left/h       Open parent directory.\n"
   "d            Add selected file/directory to the download queue.\n"
   "m            Match selected item with the download queue.\n"
-  "M            Match entire file list with the download queue."
+  "M            Match entire file list with the download queue.\n"
+  "a            Search for alternative download sources."
 },
 { "connections", "Connection list",
   LISTING_KEYS
@@ -511,6 +512,7 @@ static const struct doc_key {
   "K/J          Select one user up/down.\n"
   "f            Find user in user list.\n"
   "c            Find connection in the connection list.\n"
+  "a            Search for alternative download sources.\n"
   "d            Remove selected file from the queue.\n"
   "+/-          Increase/decrease priority.\n"
   "i/Return     Toggle user list.\n"
@@ -532,7 +534,8 @@ static const struct doc_key {
   "l            Order by free slots.\n"
   "n            Order by file name.\n"
   "m            Match selected item with the download queue.\n"
-  "M            Match all search results with the download queue."
+  "M            Match all search results with the download queue.\n"
+  "a            Search for alternative download sources."
 },
 { "userlist", "User list tab",
   LISTING_KEYS

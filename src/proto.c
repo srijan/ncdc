@@ -452,7 +452,8 @@ struct search_type search_types[] = { {},
 void search_q_free(struct search_q *q) {
   if(!q)
     return;
-  g_strfreev(q->query);
+  if(q->query)
+    g_strfreev(q->query);
   g_slice_free(struct search_q, q);
 }
 
@@ -765,4 +766,13 @@ gboolean search_do(struct search_q *q, struct hub *hub) {
   // No errors? Then open a search tab and wait for the results.
   ui_tab_open(ui_search_create(hub, q), TRUE);
   return TRUE;
+}
+
+
+// Shortcut for a TTH search_do() on all hubs.
+gboolean search_alltth(char *tth) {
+  struct search_q *q = g_slice_new0(struct search_q);
+  memcpy(q->tth, tth, 24);
+  q->type = 9;
+  return search_do(q, NULL);
 }

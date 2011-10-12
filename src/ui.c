@@ -1423,6 +1423,17 @@ static void ui_fl_key(struct ui_tab *tab, guint64 key) {
       ui_mf(NULL, 0, "Added user to queue for %d files.", n);
     }
     break;
+
+  case INPT_CHAR('a'): // a - search for alternative sources
+    if(!sel)
+      ui_m(NULL, 0, "Nothing selected.");
+    else if(!sel->isfile)
+      ui_m(NULL, 0, "Can't look for alternative sources for directories.");
+    else if(!sel->hastth)
+      ui_m(NULL, 0, "No TTH hash known.");
+    else
+      search_alltth(sel->tth);
+    break;
   }
 }
 
@@ -1755,6 +1766,14 @@ static void ui_dl_key(guint64 key) {
       }
     }
     break;
+  case INPT_CHAR('a'): // a - search for alternative sources
+    if(!sel)
+      ui_m(NULL, 0, "Nothing selected.");
+    else if(sel->islist)
+      ui_m(NULL, 0, "Can't search for alternative sources for file lists.");
+    else
+      search_alltth(sel->hash);
+    break;
   case INPT_CHAR('R'): // R - remove user from all queued files
   case INPT_CHAR('r'): // r - remove user from file
     if(!usel)
@@ -2067,6 +2086,14 @@ static void ui_search_key(struct ui_tab *tab, guint64 key) {
       struct search_r *r = g_sequence_get(i);
       n += dl_queue_matchfile(r->uid, r->tth);
     }
+    break;
+  case INPT_CHAR('a'): // a - search for alternative sources
+    if(!sel)
+      ui_m(NULL, 0, "Nothing selected.");
+    else if(sel->size == G_MAXUINT64)
+      ui_m(NULL, 0, "Can't look for alternative sources for directories.");
+    else
+      search_alltth(sel->tth);
     break;
   case INPT_CHAR('h'): // h - show/hide hub column
     tab->search_hide_hub = !tab->search_hide_hub;

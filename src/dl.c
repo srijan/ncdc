@@ -861,6 +861,7 @@ void dl_queue_setuerr(guint64 uid, char *tth, char e, unsigned short sub) {
       break;
     }
   }
+  dl_dat_saveusers(dl);
 }
 
 

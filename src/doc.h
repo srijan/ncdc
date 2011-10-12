@@ -500,7 +500,10 @@ static const struct doc_key {
   "q            Find file in download queue."
 },
 { "queue", "Download queue",
-  LISTING_KEYS
+  "Up/Down      Select one file up/down.\n"
+  "k/j          Select one user or file up/down.\n"
+  "PgUp/PgDown  Select one page of files up/down.\n"
+  "End/Home     Select last/first file in the list.\n"
   "f            Find user in user list.\n"
   "c            Find connection in the connection list.\n"
   "d            Remove selected file from the queue.\n"

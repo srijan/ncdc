@@ -1662,29 +1662,37 @@ static void ui_dl_draw() {
 
 
 static void ui_dl_key(guint64 key) {
-  if(ui_listing_key(ui_dl->list, key, (winrows-4)/2))
-    return;
-
   struct dl *sel = g_sequence_iter_is_end(ui_dl->list->sel) ? NULL : g_sequence_get(ui_dl->list->sel);
+  struct dl_user_dl *usel = NULL;
+  if(!ui_dl->details)
+    usel = NULL;
+  else {
+    ui_dl_setusers(sel);
+    usel = g_sequence_iter_is_end(ui_dl->dl_users->sel) ? NULL : g_sequence_get(ui_dl->dl_users->sel);
+  }
+
+  if((!ui_dl->details || (key != INPT_CHAR('j') && key != INPT_CHAR('k')))
+      && ui_listing_key(ui_dl->list, key, (winrows-(ui_dl->details?14:4))/2))
+    return;
+  if(ui_dl->details && ui_listing_key(ui_dl->dl_users, key, 9))
+    return;
 
   switch(key) {
   case INPT_CHAR('?'):
     ui_main_keys("queue");
     break;
 
-  /* TODO: FIX
   case INPT_CHAR('f'): // f - find user
-    if(!sel)
-      ui_m(NULL, 0, "Nothing selected.");
+    if(!usel)
+      ui_m(NULL, 0, "No user selected.");
     else {
-      struct hub_user *u = g_hash_table_lookup(hub_uids, &sel->u->uid);
+      struct hub_user *u = g_hash_table_lookup(hub_uids, &usel->u->uid);
       if(!u)
         ui_m(NULL, 0, "User is not online.");
       else
         ui_hub_finduser(u->hub->tab, u->uid, NULL, FALSE);
     }
     break;
-  */
   case INPT_CHAR('d'): // d - remove item
     if(!sel)
       ui_m(NULL, 0, "Nothing selected.");

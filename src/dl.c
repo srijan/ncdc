@@ -753,6 +753,39 @@ void dl_queue_add_res(struct search_r *r) {
 }
 
 
+// Add a user to a dl item, if the file is in the queue and the user hasn't
+// been added yet.
+static gboolean dl_queue_matchfile(guint64 uid, char *tth) {
+  struct dl *dl = g_hash_table_lookup(dl_queue, tth);
+  if(!dl)
+    return FALSE;
+  int i;
+  for(i=0; i<dl->u->len; i++)
+    if(((struct dl_user_dl *)g_sequence_get(g_ptr_array_index(dl->u, i)))->u->uid == uid)
+      return FALSE;
+  dl_user_add(dl, uid, 0, 0);
+  dl_dat_saveusers(dl);
+  dl_queue_start();
+  return TRUE;
+}
+
+
+// Recursively walks through the file list and adds the user to matching dl
+// items. Returns the number of items found.
+int dl_queue_match_fl(guint64 uid, struct fl_list *fl) {
+  if(fl->isfile && fl->hastth) {
+    return dl_queue_matchfile(uid, fl->tth) ? 1 : 0;
+
+  } else {
+    int n = 0;
+    GSequenceIter *i = g_sequence_get_begin_iter(fl->sub);
+    for(; !g_sequence_iter_is_end(i); i=g_sequence_iter_next(i))
+      n += dl_queue_match_fl(uid, g_sequence_get(i));
+    return n;
+  }
+}
+
+
 
 
 

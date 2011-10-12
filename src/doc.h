@@ -490,7 +490,8 @@ static const struct doc_key {
   LISTING_KEYS
   "Right/l      Open selected directory.\n"
   "Left/h       Open parent directory.\n"
-  "d            Add selected file/directory to the download queue."
+  "d            Add selected file/directory to the download queue.\n"
+  "m            Match file list with the download queue and add user."
 },
 { "connections", "Connection list",
   LISTING_KEYS

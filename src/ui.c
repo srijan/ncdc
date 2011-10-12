@@ -1406,6 +1406,20 @@ static void ui_fl_key(struct ui_tab *tab, guint64 key) {
         g_regex_unref(r);
     }
     break;
+
+  case INPT_CHAR('m'): // m - match queue
+    if(!tab->fl_list)
+      ui_m(NULL, 0, "File list empty.");
+    else if(!tab->uid)
+      ui_m(NULL, 0, "Can't download from yourself.");
+    else {
+      struct fl_list *root = tab->fl_list;
+      while(root->parent)
+        root = root->parent;
+      int n = dl_queue_match_fl(tab->uid, root);
+      ui_mf(NULL, 0, "Added user to queue for %d files.", n);
+    }
+    break;
   }
 }
 

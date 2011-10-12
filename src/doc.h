@@ -525,7 +525,9 @@ static const struct doc_key {
   "u            Order by username.\n"
   "s            Order by file size.\n"
   "l            Order by free slots.\n"
-  "n            Order by file name."
+  "n            Order by file name.\n"
+  "m            Match selected item with the download queue.\n"
+  "M            Match all search results with the download queue."
 },
 { "userlist", "User list tab",
   LISTING_KEYS

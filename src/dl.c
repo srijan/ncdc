@@ -755,7 +755,7 @@ void dl_queue_add_res(struct search_r *r) {
 
 // Add a user to a dl item, if the file is in the queue and the user hasn't
 // been added yet.
-static gboolean dl_queue_matchfile(guint64 uid, char *tth) {
+gboolean dl_queue_matchfile(guint64 uid, char *tth) {
   struct dl *dl = g_hash_table_lookup(dl_queue, tth);
   if(!dl)
     return FALSE;

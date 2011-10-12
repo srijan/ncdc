@@ -2052,6 +2052,22 @@ static void ui_search_key(struct ui_tab *tab, guint64 key) {
     else
       dl_queue_add_res(sel);
     break;
+  case INPT_CHAR('m'): // m - match selected item with queue
+    if(!sel)
+      ui_m(NULL, 0, "Nothing selected.");
+    else if(sel->size == G_MAXUINT64)
+      ui_m(NULL, 0, "Can't download directories from the search. Use 'b' to browse the file list instead.");
+    else
+      ui_m(NULL, 0, dl_queue_matchfile(sel->uid, sel->tth) ? "Added user to queue for the selected file." : "File not in the queue, or user is already listed.");
+    break;
+  case INPT_CHAR('M'):;// M - match all results with queue
+    int n = 0;
+    GSequenceIter *i = g_sequence_get_begin_iter(tab->list->list);
+    for(; !g_sequence_iter_is_end(i); i=g_sequence_iter_next(i)) {
+      struct search_r *r = g_sequence_get(i);
+      n += dl_queue_matchfile(r->uid, r->tth);
+    }
+    break;
   case INPT_CHAR('h'): // h - show/hide hub column
     tab->search_hide_hub = !tab->search_hide_hub;
     break;

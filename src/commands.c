@@ -907,41 +907,12 @@ static void c_search(char *args) {
 
   // validate & send
   struct ui_tab *tab = ui_tab_cur->data;
-  if(!qlen && q->type != 9) {
-    ui_m(NULL, 0, "No search query given.");
+  if(!allhubs && tab->type != UIT_HUB && tab->type != UIT_MSG) {
+    ui_m(NULL, 0, "This command can only be used on hub tabs. Use the `-all' option to search on all connected hubs.");
     goto c_search_clean;
   }
-  if(!allhubs) {
-    if(tab->type != UIT_HUB && tab->type != UIT_MSG) {
-      ui_m(NULL, 0, "This command can only be used on hub tabs. Use the `-all' option to search on all connected hubs.");
-      goto c_search_clean;
-    }
-    if(!tab->hub->nick_valid) {
-      ui_m(NULL, 0, "Not connected");
-      goto c_search_clean;
-    }
-    if(g_key_file_get_boolean(conf_file, tab->name, "chat_only", NULL))
-      ui_m(NULL, 0, "WARNING: Searching on a hub with the `chat_only' setting enabled.");
-    hub_search(tab->hub, q);
-  }
-  if(allhubs) {
-    GList *n;
-    gboolean one = FALSE;
-    for(n=ui_tabs; n; n=n->next) {
-      struct ui_tab *t = n->data;
-      if(t->type == UIT_HUB && t->hub->nick_valid && !g_key_file_get_boolean(conf_file, t->name, "chat_only", NULL)) {
-        hub_search(t->hub, q);
-        one = TRUE;
-      }
-    }
-    if(!one) {
-      ui_m(NULL, 0, "Not connected to any non-chat hubs.");
-      goto c_search_clean;
-    }
-  }
 
-  // No errors? Then open a search tab and wait for the results.
-  ui_tab_open(ui_search_create(allhubs ? NULL : tab->hub, q), TRUE);
+  search_do(q, allhubs ? NULL : tab->hub);
   q = NULL; // make sure to not free it
 
 c_search_clean:

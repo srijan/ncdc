@@ -720,3 +720,49 @@ char *search_command(struct search_q *q, gboolean onhub) {
   }
   return g_string_free(str, FALSE);
 }
+
+
+// Performs the search query on the given hub, or on all hubs if hub=NULL.
+// Opens the search tab. Returns FALSE on error and throws an error message at
+// ui_m(). Ownership of the search_q struct is passed to this function, and
+// should not be relied upon after calling.
+gboolean search_do(struct search_q *q, struct hub *hub) {
+  if((!q->query || !*q->query) && q->type != 9) {
+    ui_m(NULL, 0, "No search query given.");
+    search_q_free(q);
+    return FALSE;
+  }
+
+  // Search a single hub
+  if(hub) {
+    if(!hub->nick_valid) {
+      ui_m(NULL, 0, "Not connected");
+      search_q_free(q);
+      return FALSE;
+    }
+    if(g_key_file_get_boolean(conf_file, hub->tab->name, "chat_only", NULL))
+      ui_m(NULL, 0, "WARNING: Searching on a hub with the `chat_only' setting enabled.");
+    hub_search(hub, q);
+
+  // Search all hubs (excluding those with chat_only set)
+  } else {
+    GList *n;
+    gboolean one = FALSE;
+    for(n=ui_tabs; n; n=n->next) {
+      struct ui_tab *t = n->data;
+      if(t->type == UIT_HUB && t->hub->nick_valid && !g_key_file_get_boolean(conf_file, t->name, "chat_only", NULL)) {
+        hub_search(t->hub, q);
+        one = TRUE;
+      }
+    }
+    if(!one) {
+      ui_m(NULL, 0, "Not connected to any non-chat hubs.");
+      search_q_free(q);
+      return FALSE;
+    }
+  }
+
+  // No errors? Then open a search tab and wait for the results.
+  ui_tab_open(ui_search_create(hub, q), TRUE);
+  return TRUE;
+}

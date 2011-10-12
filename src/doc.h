@@ -158,7 +158,7 @@ static const struct doc_cmd {
   "Performs a file search, opening a new tab with the results.\n\n"
   "Available options:\n"
   "  -hub      Search the current hub only. (default)\n"
-  "  -all      Search all connected hubs.\n"
+  "  -all      Search all connected hubs, except those with `chat_only' set.\n"
   "  -le  <s>  Size of the file must be less than <s>.\n"
   "  -ge  <s>  Size of the file must be larger than <s>.\n"
   "  -t   <t>  File must be of type <t>. (see below)\n"
@@ -268,6 +268,11 @@ static const struct doc_set {
   " this feature and configures the number of lines to load. Note that, while"
   " this setting can be set on a per-hub basis, PM windows will use the global"
   " value (global.backlog)."
+},
+{ "chat_only", "<boolean>",
+  "Set to true to indicate that this hub is only used for chatting. That is,"
+  " you won't or can't download from it. This setting affects the /search"
+  " command when it is given the -all option."
 },
 // Note: the setting list isn't alphabetic here, but in a more intuitive order
 { "color_*", "<color>",

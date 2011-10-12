@@ -920,6 +920,8 @@ static void c_search(char *args) {
       ui_m(NULL, 0, "Not connected");
       goto c_search_clean;
     }
+    if(g_key_file_get_boolean(conf_file, tab->name, "chat_only", NULL))
+      ui_m(NULL, 0, "WARNING: Searching on a hub with the `chat_only' setting enabled.");
     hub_search(tab->hub, q);
   }
   if(allhubs) {
@@ -927,13 +929,13 @@ static void c_search(char *args) {
     gboolean one = FALSE;
     for(n=ui_tabs; n; n=n->next) {
       struct ui_tab *t = n->data;
-      if(t->type == UIT_HUB && t->hub->nick_valid) {
+      if(t->type == UIT_HUB && t->hub->nick_valid && !g_key_file_get_boolean(conf_file, t->name, "chat_only", NULL)) {
         hub_search(t->hub, q);
         one = TRUE;
       }
     }
     if(!one) {
-      ui_m(NULL, 0, "Not connected to any hubs.");
+      ui_m(NULL, 0, "Not connected to any non-chat hubs.");
       goto c_search_clean;
     }
   }

@@ -725,6 +725,7 @@ static struct setting settings[] = {
   { "autoconnect",      NULL,     get_bool_f,        set_autoconnect,   set_bool_sug       },
   { "autorefresh",      "global", get_autorefresh,   set_autorefresh,   NULL               },
   { "backlog",          NULL,     get_backlog,       set_backlog,       NULL,              },
+  { "chat_only",        NULL,     get_bool_f,        set_bool_f,        set_bool_sug       },
 #define C(n, a,b,c) { "color_" G_STRINGIFY(n), "color", get_color, set_color, set_color_sug },
   UI_COLORS
 #undef C

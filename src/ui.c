@@ -1407,16 +1407,19 @@ static void ui_fl_key(struct ui_tab *tab, guint64 key) {
     }
     break;
 
-  case INPT_CHAR('m'): // m - match queue
+  case INPT_CHAR('m'): // m - match queue with selected file/dir
+  case INPT_CHAR('M'): // M - match queue with entire file list
     if(!tab->fl_list)
       ui_m(NULL, 0, "File list empty.");
     else if(!tab->uid)
       ui_m(NULL, 0, "Can't download from yourself.");
+    else if(key == INPT_CHAR('m') && !sel)
+      ui_m(NULL, 0, "Nothing selected.");
     else {
       struct fl_list *root = tab->fl_list;
       while(root->parent)
         root = root->parent;
-      int n = dl_queue_match_fl(tab->uid, root);
+      int n = dl_queue_match_fl(tab->uid, key == INPT_CHAR('m') ? sel : root);
       ui_mf(NULL, 0, "Added user to queue for %d files.", n);
     }
     break;

@@ -883,7 +883,10 @@ void dl_queue_rmuser(guint64 uid, char *tth) {
         break;
       }
     }
-    dl_dat_saveusers(dl);
+    if(dl->islist && !dl->u->len)
+      dl_queue_rm(dl);
+    else
+      dl_dat_saveusers(dl);
 
   // from all dl items (may be fairly slow)
   } else {
@@ -904,7 +907,10 @@ void dl_queue_rmuser(guint64 uid, char *tth) {
           break;
         }
       }
-      dl_dat_saveusers(dl);
+      if(dl->islist && !dl->u->len)
+        dl_queue_rm(dl);
+      else
+        dl_dat_saveusers(dl);
       i = n;
     }
   }

@@ -508,6 +508,8 @@ static const struct doc_key {
   "c            Find connection in the connection list.\n"
   "d            Remove selected file from the queue.\n"
   "+/-          Increase/decrease priority.\n"
+  "r            Remove selected user for this file.\n"
+  "R            Remove selected user from all files in the download queue.\n"
   "i/Return     Toggle user list.\n"
   "\n"
   "Note: when an item in the queue has `ERR' indicated in the priority column,"

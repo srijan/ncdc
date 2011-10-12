@@ -866,6 +866,51 @@ void dl_queue_setuerr(guint64 uid, char *tth, char e, unsigned short sub) {
 }
 
 
+// Remove a user from the queue for a certain file. If tth = NULL, the user
+// will be removed from the queue entirely.
+void dl_queue_rmuser(guint64 uid, char *tth) {
+  struct dl *dl = tth ? g_hash_table_lookup(dl_queue, tth) : NULL;
+  struct dl_user *du = g_hash_table_lookup(queue_users, &uid);
+  if(!du)
+    return;
+
+  // from a single dl item
+  if(dl) {
+    int i;
+    for(i=0; i<dl->u->len; i++) {
+      if(((struct dl_user_dl *)g_sequence_get(g_ptr_array_index(dl->u, i)))->u == du) {
+        dl_user_rm(dl, i);
+        break;
+      }
+    }
+    dl_dat_saveusers(dl);
+
+  // from all dl items (may be fairly slow)
+  } else {
+    // The loop is written in this way because after calling dl_user_rm():
+    // 1. The current GSequenceIter is freed.
+    // 2. The entire du struct and the GSequence may have been freed as well,
+    //    if there were no other items left in its queue.
+    GSequenceIter *n, *i = g_sequence_get_begin_iter(du->queue);
+    gboolean run = !g_sequence_iter_is_end(i);
+    while(run) {
+      n = g_sequence_iter_next(i);
+      run = !g_sequence_iter_is_end(n);
+      struct dl *dl = ((struct dl_user_dl *)g_sequence_get(i))->dl;
+      int j;
+      for(j=0; j<dl->u->len; j++) {
+        if(g_ptr_array_index(dl->u, j) == i) {
+          dl_user_rm(dl, j);
+          break;
+        }
+      }
+      dl_dat_saveusers(dl);
+      i = n;
+    }
+  }
+}
+
+
 
 
 

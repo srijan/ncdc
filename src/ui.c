@@ -1729,6 +1729,15 @@ static void ui_dl_key(guint64 key) {
       }
     }
     break;
+  case INPT_CHAR('R'): // R - remove user from all queued files
+  case INPT_CHAR('r'): // r - remove user from file
+    if(!usel)
+      ui_m(NULL, 0, "No user selected.");
+    else {
+      dl_queue_rmuser(usel->u->uid, key == INPT_CHAR('R') ? NULL : sel->hash);
+      ui_m(NULL, 0, key == INPT_CHAR('R') ? "Removed user from the download queue." : "Removed user for this file.");
+    }
+    break;
   case INPT_CHAR('+'): // +
   case INPT_CHAR('='): // = - increase priority
     if(!sel)

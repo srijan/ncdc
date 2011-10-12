@@ -55,7 +55,7 @@ struct ui_tab {
   guint64 uid;                 // FL, MSG
   int order : 4;               // USERLIST, SEARCH (has different interpretation per tab)
   gboolean o_reverse : 1;      // USERLIST, SEARCH
-  gboolean details : 1;        // USERLIST, CONN
+  gboolean details : 1;        // USERLIST, CONN, DL
   // MSG
   gboolean msg_online : 1;
   // USERLIST
@@ -76,6 +76,9 @@ struct ui_tab {
   gboolean fl_loading;
   GError *fl_err;
   char *fl_sel;
+  // DL
+  struct dl *dl_cur;
+  struct ui_listing *dl_users;
   // SEARCH
   struct search_q *search_q;
   time_t search_t;
@@ -1422,6 +1425,44 @@ static gint ui_dl_sort_func(gconstpointer da, gconstpointer db, gpointer dat) {
 }
 
 
+// Note that we sort on username, uid. But we do not get a notification when a
+// user changes offline/online state, thus don't have the ability to keep the
+// list sorted reliably. This isn't a huge problem, though, the list is
+// removed/recreated every time an other dl item is selected. This sorting is
+// just better than having the users in completely random order all the time.
+static gint ui_dl_dud_sort_func(gconstpointer da, gconstpointer db, gpointer dat) {
+  const struct dl_user_dl *a = da;
+  const struct dl_user_dl *b = db;
+  struct hub_user *ua = g_hash_table_lookup(hub_uids, &a->u->uid);
+  struct hub_user *ub = g_hash_table_lookup(hub_uids, &b->u->uid);
+  return !ua && !ub ? (a->u->uid > b->u->uid ? 1 : a->u->uid < b->u->uid ? -1 : 0) :
+     ua && !ub ? 1 : !ua && ub ? -1 : g_utf8_collate(ua->name, ub->name);
+}
+
+
+static void ui_dl_setusers(struct dl *dl) {
+  if(ui_dl->dl_cur == dl)
+    return;
+  // free
+  if(!dl) {
+    if(ui_dl->dl_cur) {
+      g_sequence_free(ui_dl->dl_users->list);
+      ui_listing_free(ui_dl->dl_users);
+    }
+    ui_dl->dl_users = NULL;
+    ui_dl->dl_cur = NULL;
+    return;
+  }
+  // create
+  GSequence *l = g_sequence_new(NULL);
+  int i;
+  for(i=0; i<dl->u->len; i++)
+    g_sequence_insert_sorted(l, g_sequence_get(g_ptr_array_index(dl->u, i)), ui_dl_dud_sort_func, NULL);
+  ui_dl->dl_users = ui_listing_create(l);
+  ui_dl->dl_cur = dl;
+}
+
+
 struct ui_tab *ui_dl_create() {
   ui_dl = g_new0(struct ui_tab, 1);
   ui_dl->name = "queue";
@@ -1440,6 +1481,7 @@ struct ui_tab *ui_dl_create() {
 
 void ui_dl_close() {
   ui_tab_remove(ui_dl);
+  ui_dl_setusers(NULL);
   g_sequence_free(ui_dl->list->list);
   ui_listing_free(ui_dl->list);
   g_free(ui_dl);
@@ -1461,8 +1503,36 @@ void ui_dl_listchange(struct dl *dl, int change) {
     ui_listing_inserted(ui_dl->list);
     break;
   case UICONN_DEL:
+    if(dl == ui_dl->dl_cur)
+      ui_dl_setusers(NULL);
     ui_listing_remove(ui_dl->list, dl->iter);
     g_sequence_remove(dl->iter);
+    break;
+  }
+}
+
+
+void ui_dl_dud_listchange(struct dl_user_dl *dud, int change) {
+  g_return_if_fail(ui_dl);
+  if(dud->dl != ui_dl->dl_cur)
+    return;
+  switch(change) {
+  case UICONN_ADD:
+    // Note that _insert_sorted() may not actually insert the item in the
+    // correct position, since the list is not guaranteed to be correctly
+    // sorted in the first place.
+    g_sequence_insert_sorted(ui_dl->dl_users->list, dud, ui_dl_dud_sort_func, NULL);
+    ui_listing_inserted(ui_dl->list);
+    break;
+  case UICONN_DEL: ;
+    GSequenceIter *i;
+    for(i=g_sequence_get_begin_iter(ui_dl->dl_users->list); !g_sequence_iter_is_end(i); i=g_sequence_iter_next(i))
+      if(g_sequence_get(i) == dud)
+        break;
+    if(!g_sequence_iter_is_end(i)) {
+      ui_listing_remove(ui_dl->dl_users, i);
+      g_sequence_remove(i);
+    }
     break;
   }
 }
@@ -1515,6 +1585,36 @@ static void ui_dl_draw_row(struct ui_listing *list, GSequenceIter *iter, int row
 }
 
 
+static void ui_dl_dud_draw_row(struct ui_listing *list, GSequenceIter *iter, int row, void *dat) {
+  struct dl_user_dl *dud = g_sequence_get(iter);
+  if(iter == list->sel) {
+    attron(A_BOLD);
+    mvaddch(row, 0, '>');
+  }
+
+  struct hub_user *u = g_hash_table_lookup(hub_uids, &dud->u->uid);
+  if(u) {
+    mvaddnstr(row, 2, u->name, str_offset_from_columns(u->name, 19));
+    mvaddnstr(row, 22, u->hub->tab->name, str_offset_from_columns(u->hub->tab->name, 13));
+  } else
+    mvprintw(row, 2, "ID:%016"G_GINT64_MODIFIER"x (offline)", dud->u->uid);
+
+  if(dud->error)
+    mvprintw(row, 36, "Error: %s", dl_strerror(dud->error, dud->error_sub));
+  else if(dud->u->active == dud)
+    mvaddstr(row, 36, "Downloading.");
+  else if(dud->u->state == DLU_ACT)
+    mvaddstr(row, 36, "Downloading an other file.");
+  else if(dud->u->state == DLU_EXP)
+    mvaddstr(row, 36, "Connecting.");
+  else
+    mvaddstr(row, 36, "Idle.");
+
+  if(iter == list->sel)
+    attroff(A_BOLD);
+}
+
+
 static void ui_dl_draw() {
   attron(A_BOLD);
   mvaddstr(1, 2,  "Users");
@@ -1524,12 +1624,12 @@ static void ui_dl_draw() {
   mvaddstr(1, 31, "File");
   attroff(A_BOLD);
 
-  int bottom = winrows-4;
+  int bottom = ui_dl->details ? winrows-14 : winrows-4;
   int pos = ui_listing_draw(ui_dl->list, 2, bottom-1, ui_dl_draw_row, NULL);
 
   struct dl *sel = g_sequence_iter_is_end(ui_dl->list->sel) ? NULL : g_sequence_get(ui_dl->list->sel);
 
-  // footer
+  // footer / separator
   attron(A_REVERSE);
   mvhline(bottom, 0, ' ', wincols);
   if(sel) {
@@ -1543,7 +1643,21 @@ static void ui_dl_draw() {
 
   // error info
   if(sel && sel->prio == DLP_ERR)
-    mvprintw(bottom+1, 0, "Error: %s", dl_strerror(sel->error, sel->error_sub));
+    mvprintw(++bottom, 0, "Error: %s", dl_strerror(sel->error, sel->error_sub));
+
+  // user list
+  if(sel && ui_dl->details) {
+    ui_dl_setusers(sel);
+    attron(A_BOLD);
+    mvaddstr(bottom+1, 2, "User");
+    mvaddstr(bottom+1, 22, "Hub");
+    mvaddstr(bottom+1, 36, "Status");
+    attroff(A_BOLD);
+    if(!g_sequence_get_length(ui_dl->dl_users->list))
+      mvaddstr(bottom+3, 0, "  No users for this download.");
+    else
+      ui_listing_draw(ui_dl->dl_users, bottom+2, winrows-3, ui_dl_dud_draw_row, NULL);
+  }
 }
 
 
@@ -1622,6 +1736,10 @@ static void ui_dl_key(guint64 key) {
       ui_m(NULL, 0, "Item already disabled.");
     else
       dl_queue_setprio(sel, sel->prio == -2 ? DLP_OFF : sel->prio-1);
+    break;
+  case INPT_CTRL('j'): // newline
+  case INPT_CHAR('i'): // i       (toggle user list)
+    ui_dl->details = !ui_dl->details;
     break;
   }
 }

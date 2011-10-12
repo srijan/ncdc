@@ -356,6 +356,8 @@ static void dl_user_add(struct dl *dl, guint64 uid, char error, unsigned short e
 
   // Add to du->queue and dl->u
   g_ptr_array_add(dl->u, g_sequence_insert_sorted(du->queue, dud, dl_user_dl_sort, NULL));
+  if(ui_dl)
+    ui_dl_dud_listchange(dud, UIDL_ADD);
 }
 
 
@@ -378,6 +380,8 @@ static void dl_user_rm(struct dl *dl, int i) {
     // rely on that, however.
   }
 
+  if(ui_dl)
+    ui_dl_dud_listchange(dud, UIDL_DEL);
   g_sequence_remove(dudi); // dl_user_dl_free() will be called implicitely
   g_ptr_array_remove_index_fast(dl->u, i);
   dl_user_setstate(du, -1);

@@ -574,6 +574,9 @@ static void dl_dat_saveinfo(struct dl *dl) {
 
 
 static void dl_dat_saveusers(struct dl *dl) {
+  if(dl->islist)
+    return;
+
   char key[25];
   key[0] = DLDAT_USERS;
   memcpy(key+1, dl->hash, 24);

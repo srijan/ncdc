@@ -1480,35 +1480,33 @@ static void ui_dl_draw_row(struct ui_listing *list, GSequenceIter *iter, int row
     mvaddch(row, 0, '>');
   }
 
-  /* TODO: Fix this for the multi-source downloading feature
-  struct hub_user *u = g_hash_table_lookup(hub_uids, &dl->u->uid);
-  if(u) {
-    mvaddnstr(row, 2, u->name, str_offset_from_columns(u->name, 19));
-    mvaddnstr(row, 22, u->hub->tab->name, str_offset_from_columns(u->hub->tab->name, 13));
-  } else
-    mvprintw(row, 2, "ID:%016"G_GINT64_MODIFIER"x (offline)", dl->u->uid);
-  */
+  int online = 0;
+  int i;
+  for(i=0; i<dl->u->len; i++)
+    if(g_hash_table_lookup(hub_uids, &(((struct dl_user_dl *)g_sequence_get(g_ptr_array_index(dl->u, i)))->u->uid)))
+      online++;
+  mvprintw(row, 2, "%2d/%2d", online, dl->u->len);
 
-  mvaddstr(row, 36, str_formatsize(dl->size));
+  mvaddstr(row, 8, str_formatsize(dl->size));
   if(dl->size)
-    mvprintw(row, 47, "%3d%%", (int) ((dl->have*100)/dl->size));
+    mvprintw(row, 19, "%3d%%", (int) ((dl->have*100)/dl->size));
   else
-    mvaddstr(row, 47, " -");
+    mvaddstr(row, 19, " -");
 
   if(dl->prio == DLP_ERR)
-    mvaddstr(row, 53, " ERR");
+    mvaddstr(row, 25, " ERR");
   else if(dl->prio == DLP_OFF)
-    mvaddstr(row, 53, " OFF");
+    mvaddstr(row, 25, " OFF");
   else
-    mvprintw(row, 53, "%3d", dl->prio);
+    mvprintw(row, 25, "%3d", dl->prio);
 
   if(dl->islist)
-    mvaddstr(row, 59, "files.xml.bz2");
+    mvaddstr(row, 31, "files.xml.bz2");
   else {
     char *def = conf_download_dir();
     int len = strlen(def);
     char *dest = strncmp(def, dl->dest, len) == 0 ? dl->dest+len+(dl->dest[len-1] == '/' ? 0 : 1) : dl->dest;
-    mvaddnstr(row, 59, dest, str_offset_from_columns(dest, wincols-59));
+    mvaddnstr(row, 31, dest, str_offset_from_columns(dest, wincols-31));
     g_free(def);
   }
 
@@ -1519,12 +1517,11 @@ static void ui_dl_draw_row(struct ui_listing *list, GSequenceIter *iter, int row
 
 static void ui_dl_draw() {
   attron(A_BOLD);
-  mvaddstr(1, 2,  "User");
-  mvaddstr(1, 22, "Hub");
-  mvaddstr(1, 36, "Size");
-  mvaddstr(1, 47, "Done");
-  mvaddstr(1, 53, "Prio");
-  mvaddstr(1, 59, "File");
+  mvaddstr(1, 2,  "Users");
+  mvaddstr(1, 8,  "Size");
+  mvaddstr(1, 19, "Done");
+  mvaddstr(1, 25, "Prio");
+  mvaddstr(1, 31, "File");
   attroff(A_BOLD);
 
   int bottom = winrows-4;

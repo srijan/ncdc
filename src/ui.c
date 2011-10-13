@@ -49,6 +49,7 @@ struct ui_tab {
   int type; // UIT_ type
   int prio; // UIP_ type
   char *name;
+  struct ui_tab *parent;       // the tab that opened this tab (may be NULL or dangling)
   struct ui_logwindow *log;    // MAIN, HUB, MSG
   struct hub *hub;             // HUB, USERLIST, MSG, SEARCH
   struct ui_listing *list;     // USERLIST, CONN, FL, DL, SEARCH
@@ -427,7 +428,7 @@ void ui_hub_msg(struct ui_tab *tab, struct hub_user *user, const char *msg) {
   struct ui_tab *t = ui_hub_getmsg(tab, user);
   if(!t) {
     t = ui_msg_create(tab->hub, user);
-    ui_tab_open(t, FALSE);
+    ui_tab_open(t, FALSE, tab);
   }
   ui_msg_msg(t, msg);
 }
@@ -438,7 +439,7 @@ void ui_hub_userlist_open(struct ui_tab *tab) {
     ui_tab_cur = g_list_find(ui_tabs, tab->userlist_tab);
   else {
     tab->userlist_tab = ui_userlist_create(tab->hub);
-    ui_tab_open(tab->userlist_tab, TRUE);
+    ui_tab_open(tab->userlist_tab, TRUE, tab);
   }
 }
 
@@ -783,7 +784,7 @@ static void ui_userlist_key(struct ui_tab *tab, guint64 key) {
       struct ui_tab *t = ui_hub_getmsg(tab, sel);
       if(!t) {
         t = ui_msg_create(tab->hub, sel);
-        ui_tab_open(t, TRUE);
+        ui_tab_open(t, TRUE, tab);
       } else
         ui_tab_cur = g_list_find(ui_tabs, t);
     }
@@ -801,7 +802,7 @@ static void ui_userlist_key(struct ui_tab *tab, guint64 key) {
     if(!sel)
       ui_m(NULL, 0, "No user selected.");
     else
-      ui_fl_queue(sel, key == INPT_CHAR('B'), NULL);
+      ui_fl_queue(sel, key == INPT_CHAR('B'), NULL, tab);
     break;
   }
 
@@ -1107,7 +1108,7 @@ static void ui_conn_key(guint64 key) {
         if(ui_dl)
           ui_tab_cur = g_list_find(ui_tabs, ui_dl);
         else
-          ui_tab_open(ui_dl_create(), TRUE);
+          ui_tab_open(ui_dl_create(), TRUE, ui_conn);
         // dl->iter should be valid at this point
         ui_dl->list->sel = dl->iter;
       }
@@ -1146,7 +1147,7 @@ static void ui_fl_dosel(struct ui_tab *tab, const char *sel) {
 
 
 // Open or queue a file list. (Not really a ui_* function, but where else would it belong?)
-void ui_fl_queue(struct hub_user *u, gboolean force, const char *sel) {
+void ui_fl_queue(struct hub_user *u, gboolean force, const char *sel, struct ui_tab *parent) {
   // check for u == we
   if(u && (u->hub->adc ? u->hub->sid == u->sid : u->hub->nick_valid && strcmp(u->hub->nick_hub, u->name_hub) == 0))
     u = NULL;
@@ -1175,7 +1176,7 @@ void ui_fl_queue(struct hub_user *u, gboolean force, const char *sel) {
 
   // open own list
   if(!u) {
-    ui_tab_open(ui_fl_create(0, sel), TRUE);
+    ui_tab_open(ui_fl_create(0, sel), TRUE, parent);
     return;
   }
 
@@ -1189,9 +1190,9 @@ void ui_fl_queue(struct hub_user *u, gboolean force, const char *sel) {
     g_free(tmp);
   }
   if(e)
-    ui_tab_open(ui_fl_create(uid, sel), TRUE);
+    ui_tab_open(ui_fl_create(uid, sel), TRUE, parent);
   else {
-    dl_queue_addlist(u, sel);
+    dl_queue_addlist(u, sel, parent);
     ui_mf(NULL, 0, "File list of %s added to the download queue.", u->name);
   }
 }
@@ -1432,7 +1433,7 @@ static void ui_fl_key(struct ui_tab *tab, guint64 key) {
     else if(!sel->hastth)
       ui_m(NULL, 0, "No TTH hash known.");
     else
-      search_alltth(sel->tth);
+      search_alltth(sel->tth, tab);
     break;
   }
 }
@@ -1760,7 +1761,7 @@ static void ui_dl_key(guint64 key) {
         if(ui_conn)
           ui_tab_cur = g_list_find(ui_tabs, ui_conn);
         else
-          ui_tab_open(ui_conn_create(), TRUE);
+          ui_tab_open(ui_conn_create(), TRUE, ui_dl);
         // cc->iter should be valid at this point
         ui_conn->list->sel = cc->iter;
       }
@@ -1772,7 +1773,7 @@ static void ui_dl_key(guint64 key) {
     else if(sel->islist)
       ui_m(NULL, 0, "Can't search for alternative sources for file lists.");
     else
-      search_alltth(sel->hash);
+      search_alltth(sel->hash, ui_dl);
     break;
   case INPT_CHAR('R'): // R - remove user from all queued files
   case INPT_CHAR('r'): // r - remove user from file
@@ -2060,7 +2061,7 @@ static void ui_search_key(struct ui_tab *tab, guint64 key) {
       if(!u)
         ui_m(NULL, 0, "User is not online.");
       else
-        ui_fl_queue(u, key == INPT_CHAR('B'), sel->file);
+        ui_fl_queue(u, key == INPT_CHAR('B'), sel->file, tab);
     }
     break;
   case INPT_CHAR('d'): // d - download file
@@ -2094,7 +2095,7 @@ static void ui_search_key(struct ui_tab *tab, guint64 key) {
     else if(sel->size == G_MAXUINT64)
       ui_m(NULL, 0, "Can't look for alternative sources for directories.");
     else
-      search_alltth(sel->tth);
+      search_alltth(sel->tth, tab);
     break;
   case INPT_CHAR('h'): // h - show/hide hub column
     tab->search_hide_hub = !tab->search_hide_hub;
@@ -2260,8 +2261,9 @@ void ui_mf(struct ui_tab *tab, int flags, const char *fmt, ...) {
 
 struct ui_textinput *ui_global_textinput;
 
-void ui_tab_open(struct ui_tab *tab, gboolean sel) {
+void ui_tab_open(struct ui_tab *tab, gboolean sel, struct ui_tab *parent) {
   ui_tabs = g_list_append(ui_tabs, tab);
+  tab->parent = parent;
   if(sel)
     ui_tab_cur = g_list_last(ui_tabs);
 }
@@ -2269,9 +2271,20 @@ void ui_tab_open(struct ui_tab *tab, gboolean sel) {
 
 // to be called from ui_*_close()
 void ui_tab_remove(struct ui_tab *tab) {
+  // Look for any tabs that have this one as parent, and let those inherit this tab's parent
+  GList *n = ui_tabs;
+  for(; n; n=n->next) {
+    struct ui_tab *t = n->data;
+    if(t->parent == tab)
+      t->parent = tab->parent;
+  }
+  // If this tab was selected, select its parent or a neighbour
   GList *cur = g_list_find(ui_tabs, tab);
-  if(cur == ui_tab_cur)
-    ui_tab_cur = cur->prev ? cur->prev : cur->next;
+  if(cur == ui_tab_cur) {
+    GList *par = tab->parent ? g_list_find(ui_tabs, tab->parent) : NULL;
+    ui_tab_cur = par ? par : cur->prev ? cur->prev : cur->next;
+  }
+  // And remove the tab
   ui_tabs = g_list_delete_link(ui_tabs, cur);
 }
 
@@ -2281,7 +2294,7 @@ void ui_init() {
   ui_global_textinput = ui_textinput_create(TRUE, cmd_suggest);
 
   // first tab = main tab
-  ui_tab_open(ui_main_create(), TRUE);
+  ui_tab_open(ui_main_create(), TRUE, NULL);
 
   // init curses
   initscr();

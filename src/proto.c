@@ -730,7 +730,7 @@ char *search_command(struct search_q *q, gboolean onhub) {
 // Opens the search tab. Returns FALSE on error and throws an error message at
 // ui_m(). Ownership of the search_q struct is passed to this function, and
 // should not be relied upon after calling.
-gboolean search_do(struct search_q *q, struct hub *hub) {
+gboolean search_do(struct search_q *q, struct hub *hub, struct ui_tab *parent) {
   if((!q->query || !*q->query) && q->type != 9) {
     ui_m(NULL, 0, "No search query given.");
     search_q_free(q);
@@ -767,15 +767,15 @@ gboolean search_do(struct search_q *q, struct hub *hub) {
   }
 
   // No errors? Then open a search tab and wait for the results.
-  ui_tab_open(ui_search_create(hub, q), TRUE);
+  ui_tab_open(ui_search_create(hub, q), TRUE, parent);
   return TRUE;
 }
 
 
 // Shortcut for a TTH search_do() on all hubs.
-gboolean search_alltth(char *tth) {
+gboolean search_alltth(char *tth, struct ui_tab *parent) {
   struct search_q *q = g_slice_new0(struct search_q);
   memcpy(q->tth, tth, 24);
   q->type = 9;
-  return search_do(q, NULL);
+  return search_do(q, NULL, parent);
 }

@@ -111,6 +111,7 @@ struct dl {
   unsigned short error_sub; // errno or block number (it is assumed that 0 <= errno <= USHRT_MAX)
   int incfd;                // file descriptor for this file in <incoming_dir>
   char *flsel;              // path to file/dir to select for filelists
+  struct ui_tab *flpar;     // parent of the file list browser tab for filelists (might be a dangling pointer!)
   char hash[24];            // TTH for files, tiger(uid) for filelists
   GPtrArray *u;             // list of users who have this file (GSequenceIter pointers into dl_user.queue)
   guint64 size;             // total size of the file
@@ -663,12 +664,13 @@ static void dl_queue_insert(struct dl *dl, gboolean init) {
 
 
 // Add the file list of some user to the queue
-void dl_queue_addlist(struct hub_user *u, const char *sel) {
+void dl_queue_addlist(struct hub_user *u, const char *sel, struct ui_tab *parent) {
   g_return_if_fail(u && u->hasinfo);
   struct dl *dl = g_slice_new0(struct dl);
   dl->islist = TRUE;
   if(sel)
     dl->flsel = g_strdup(sel);
+  dl->flpar = parent;
   // figure out dl->hash
   tiger_ctx tg;
   tiger_init(&tg);
@@ -1000,7 +1002,7 @@ static void dl_finished(struct dl *dl) {
   // open the file list
   if(dl->prio != DLP_ERR && dl->islist) {
     g_return_if_fail(dl->u->len == 1);
-    ui_tab_open(ui_fl_create(((struct dl_user_dl *)g_sequence_get(g_ptr_array_index(dl->u, 0)))->u->uid, dl->flsel), FALSE);
+    ui_tab_open(ui_fl_create(((struct dl_user_dl *)g_sequence_get(g_ptr_array_index(dl->u, 0)))->u->uid, dl->flsel), FALSE, dl->flpar);
   }
   // and check whether we can remove this item from the queue
   dl_queue_checkrm(dl, TRUE);

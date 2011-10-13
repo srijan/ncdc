@@ -127,7 +127,7 @@ static void c_msg(char *args) {
       // get or open tab and make sure it's selected
       struct ui_tab *t = ui_hub_getmsg(tab, u);
       if(!t)
-        ui_tab_open(ui_msg_create(tab->hub, u), TRUE);
+        ui_tab_open(ui_msg_create(tab->hub, u), TRUE, tab);
       else
         ui_tab_cur = g_list_find(ui_tabs, t);
       // if we need to send something, do so
@@ -415,7 +415,7 @@ static void c_open(char *args) {
     // Open or select tab
     if(!n) {
       tab = ui_hub_create(name, addr ? FALSE : conn);
-      ui_tab_open(tab, TRUE);
+      ui_tab_open(tab, TRUE, NULL);
     } else if(n != ui_tab_cur) {
       ui_tab_cur = n;
       tab = n->data;
@@ -442,32 +442,22 @@ static void c_open_sug(char *args, char **sug) {
 
 
 static void c_close(char *args) {
-  struct ui_tab *tab = ui_tab_cur->data;
-  if(args[0])
+  if(args[0]) {
     ui_m(NULL, 0, "This command does not accept any arguments.");
-  else if(tab->type == UIT_MAIN)
-    ui_m(NULL, 0, "Main tab cannot be closed.");
-  else if(tab->type == UIT_HUB)
-    ui_hub_close(tab);
-  else if(tab->type == UIT_USERLIST) {
-    ui_tab_cur = g_list_find(ui_tabs, tab->hub->tab);
-    ui_userlist_close(tab);
-  } else if(tab->type == UIT_MSG) {
-    ui_tab_cur = g_list_find(ui_tabs, tab->hub->tab);
-    ui_msg_close(tab);
-  } else if(tab->type == UIT_CONN)
-    ui_conn_close();
-  else if(tab->type == UIT_FL) {
-    struct hub_user *u = tab->uid ? g_hash_table_lookup(hub_uids, &tab->uid) : NULL;
-    if(u)
-      ui_tab_cur = g_list_find(ui_tabs, u->hub->tab);
-    ui_fl_close(tab);
-  } else if(tab->type == UIT_DL)
-    ui_dl_close(tab);
-  else if(tab->type == UIT_SEARCH) {
-    if(tab->hub)
-      ui_tab_cur = g_list_find(ui_tabs, tab->hub->tab);
-    ui_search_close(tab);
+    return;
+  }
+  struct ui_tab *tab = ui_tab_cur->data;
+  switch(tab->type) {
+  case UIT_MAIN:     ui_m(NULL, 0, "Main tab cannot be closed."); break;
+  case UIT_HUB:      ui_hub_close(tab);      break;
+  case UIT_USERLIST: ui_userlist_close(tab); break;
+  case UIT_MSG:      ui_msg_close(tab);      break;
+  case UIT_CONN:     ui_conn_close();        break;
+  case UIT_FL:       ui_fl_close(tab);       break;
+  case UIT_DL:       ui_dl_close(tab);       break;
+  case UIT_SEARCH:   ui_search_close(tab);   break;
+  default:
+    g_return_if_reached();
   }
 }
 
@@ -675,7 +665,7 @@ static void c_connections(char *args) {
     if(ui_conn)
       ui_tab_cur = g_list_find(ui_tabs, ui_conn);
     else
-      ui_tab_open(ui_conn_create(), TRUE);
+      ui_tab_open(ui_conn_create(), TRUE, NULL);
   }
 }
 
@@ -687,7 +677,7 @@ static void c_queue(char *args) {
     if(ui_dl)
       ui_tab_cur = g_list_find(ui_tabs, ui_dl);
     else
-      ui_tab_open(ui_dl_create(), TRUE);
+      ui_tab_open(ui_dl_create(), TRUE, NULL);
   }
 }
 
@@ -817,7 +807,7 @@ static void c_browse(char *args) {
     }
   }
 
-  ui_fl_queue(u, force, NULL);
+  ui_fl_queue(u, force, NULL, !args[0] ? NULL : tab);
 }
 
 
@@ -912,7 +902,7 @@ static void c_search(char *args) {
     goto c_search_clean;
   }
 
-  search_do(q, allhubs ? NULL : tab->hub);
+  search_do(q, allhubs ? NULL : tab->hub, allhubs ? NULL : tab);
   q = NULL; // make sure to not free it
 
 c_search_clean:

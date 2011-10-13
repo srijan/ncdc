@@ -1586,26 +1586,26 @@ static void ui_dl_draw_row(struct ui_listing *list, GSequenceIter *iter, int row
       online++;
   mvprintw(row, 2, "%2d/%2d", online, dl->u->len);
 
-  mvaddstr(row, 8, str_formatsize(dl->size));
+  mvaddstr(row, 9, str_formatsize(dl->size));
   if(dl->size)
-    mvprintw(row, 19, "%3d%%", (int) ((dl->have*100)/dl->size));
+    mvprintw(row, 20, "%3d%%", (int) ((dl->have*100)/dl->size));
   else
-    mvaddstr(row, 19, " -");
+    mvaddstr(row, 20, " -");
 
   if(dl->prio == DLP_ERR)
-    mvaddstr(row, 25, " ERR");
+    mvaddstr(row, 26, " ERR");
   else if(dl->prio == DLP_OFF)
-    mvaddstr(row, 25, " OFF");
+    mvaddstr(row, 26, " OFF");
   else
-    mvprintw(row, 25, "%3d", dl->prio);
+    mvprintw(row, 26, "%3d", dl->prio);
 
   if(dl->islist)
-    mvaddstr(row, 31, "files.xml.bz2");
+    mvaddstr(row, 32, "files.xml.bz2");
   else {
     char *def = conf_download_dir();
     int len = strlen(def);
     char *dest = strncmp(def, dl->dest, len) == 0 ? dl->dest+len+(dl->dest[len-1] == '/' ? 0 : 1) : dl->dest;
-    mvaddnstr(row, 31, dest, str_offset_from_columns(dest, wincols-31));
+    mvaddnstr(row, 32, dest, str_offset_from_columns(dest, wincols-32));
     g_free(def);
   }
 
@@ -1647,10 +1647,10 @@ static void ui_dl_dud_draw_row(struct ui_listing *list, GSequenceIter *iter, int
 static void ui_dl_draw() {
   attron(A_BOLD);
   mvaddstr(1, 2,  "Users");
-  mvaddstr(1, 8,  "Size");
-  mvaddstr(1, 19, "Done");
-  mvaddstr(1, 25, "Prio");
-  mvaddstr(1, 31, "File");
+  mvaddstr(1, 9,  "Size");
+  mvaddstr(1, 20, "Done");
+  mvaddstr(1, 26, "Prio");
+  mvaddstr(1, 32, "File");
   attroff(A_BOLD);
 
   int bottom = ui_dl->details ? winrows-14 : winrows-4;

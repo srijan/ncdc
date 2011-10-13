@@ -2086,6 +2086,7 @@ static void ui_search_key(struct ui_tab *tab, guint64 key) {
       struct search_r *r = g_sequence_get(i);
       n += dl_queue_matchfile(r->uid, r->tth);
     }
+    ui_mf(NULL, 0, "Added %d alternative sources to the download queue.", n);
     break;
   case INPT_CHAR('a'): // a - search for alternative sources
     if(!sel)

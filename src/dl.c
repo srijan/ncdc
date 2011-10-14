@@ -1258,7 +1258,7 @@ static void dl_queue_loaditem(char *hash) {
   guint64 numusers;
   memcpy(&numusers, users.dptr, 8);
   numusers = GINT64_FROM_LE(numusers);
-  g_return_if_fail(users.dsize == 8+16*numusers);
+  g_return_if_fail(users.dsize == 16 || users.dsize == 8+16*numusers);
 
   // Fix dl struct
   struct dl *dl = g_slice_new0(struct dl);
@@ -1279,10 +1279,14 @@ static void dl_queue_loaditem(char *hash) {
     guint64 uid;
     memcpy(&uid, ptr, 8);
     uid = GINT64_FROM_LE(uid);
-    guint16 errsub;
-    memcpy(&errsub, ptr+10, 2);
-    errsub = GINT16_FROM_LE(errsub);
-    dl_user_add(dl, uid, ptr[9], errsub);
+    guint16 errsub = 0;
+    char err = 0;
+    // Pre-multisource versions only stored one user, and only its uid. (=16 bytes in total)
+    if(users.dsize > 16) {
+      memcpy(&errsub, ptr+10, 2);
+      errsub = GINT16_FROM_LE(errsub);
+    }
+    dl_user_add(dl, uid, err, errsub);
   }
 
   // check what we already have

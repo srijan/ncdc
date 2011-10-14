@@ -1474,7 +1474,7 @@ static void ui_dl_setusers(struct dl *dl) {
     return;
   // free
   if(!dl) {
-    if(ui_dl->dl_cur) {
+    if(ui_dl->dl_cur && ui_dl->dl_users) {
       g_sequence_free(ui_dl->dl_users->list);
       ui_listing_free(ui_dl->dl_users);
     }
@@ -1544,7 +1544,7 @@ void ui_dl_listchange(struct dl *dl, int change) {
 
 void ui_dl_dud_listchange(struct dl_user_dl *dud, int change) {
   g_return_if_fail(ui_dl);
-  if(dud->dl != ui_dl->dl_cur)
+  if(dud->dl != ui_dl->dl_cur || !ui_dl->dl_users)
     return;
   switch(change) {
   case UICONN_ADD:
@@ -1683,7 +1683,7 @@ static void ui_dl_draw() {
     mvaddstr(bottom+1, 22, "Hub");
     mvaddstr(bottom+1, 36, "Status");
     attroff(A_BOLD);
-    if(!g_sequence_get_length(ui_dl->dl_users->list))
+    if(!ui_dl->dl_users || !g_sequence_get_length(ui_dl->dl_users->list))
       mvaddstr(bottom+3, 0, "  No users for this download.");
     else
       ui_listing_draw(ui_dl->dl_users, bottom+2, winrows-3, ui_dl_dud_draw_row, NULL);
@@ -1701,7 +1701,7 @@ static void ui_dl_key(guint64 key) {
     usel = NULL;
   else {
     ui_dl_setusers(sel);
-    usel = g_sequence_iter_is_end(ui_dl->dl_users->sel) ? NULL : g_sequence_get(ui_dl->dl_users->sel);
+    usel = !ui_dl->dl_users || g_sequence_iter_is_end(ui_dl->dl_users->sel) ? NULL : g_sequence_get(ui_dl->dl_users->sel);
   }
 
   switch(key) {
@@ -1710,14 +1710,14 @@ static void ui_dl_key(guint64 key) {
     break;
 
   case INPT_CHAR('J'): // J - user down
-    if(ui_dl->details) {
+    if(ui_dl->details && ui_dl->dl_users) {
       ui_dl->dl_users->sel = g_sequence_iter_next(ui_dl->dl_users->sel);
       if(g_sequence_iter_is_end(ui_dl->dl_users->sel))
         ui_dl->dl_users->sel = g_sequence_iter_prev(ui_dl->dl_users->sel);
     }
     break;
   case INPT_CHAR('K'): // K - user up
-    if(ui_dl->details)
+    if(ui_dl->details && ui_dl->dl_users)
       ui_dl->dl_users->sel = g_sequence_iter_prev(ui_dl->dl_users->sel);
     break;
 

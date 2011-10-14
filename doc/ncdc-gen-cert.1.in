@@ -1,4 +1,4 @@
-.TH ncdc-gen-cert 1 "September 2011" "@version@"
+.TH ncdc-gen-cert 1 "October 2011" "@version@"
 .SH NAME
 ncdc-gen-cert \- Generate client certificate for ncdc
 

@@ -518,9 +518,11 @@ static gboolean dl_queue_start_do(gpointer dat) {
       du = g_ptr_array_index(targets, i);
       if(!dl_queue_start_istarget(du))
         g_ptr_array_remove_index_fast(targets, i);
-      else if(!target || dl_queue_start_cmp(target, du) > 0) {
-        target_i = i;
-        target = du;
+      else {
+        if(!target || dl_queue_start_cmp(target, du) > 0) {
+          target_i = i;
+          target = du;
+        }
         i++;
       }
     }

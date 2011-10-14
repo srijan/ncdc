@@ -2282,7 +2282,7 @@ void ui_tab_remove(struct ui_tab *tab) {
   GList *cur = g_list_find(ui_tabs, tab);
   if(cur == ui_tab_cur) {
     GList *par = tab->parent ? g_list_find(ui_tabs, tab->parent) : NULL;
-    ui_tab_cur = par ? par : cur->prev ? cur->prev : cur->next;
+    ui_tab_cur = par && par != cur ? par : cur->prev ? cur->prev : cur->next;
   }
   // And remove the tab
   ui_tabs = g_list_delete_link(ui_tabs, cur);

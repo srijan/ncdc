@@ -655,6 +655,44 @@ void str_arg2_split(char *str, char **first, char **second) {
 }
 
 
+// Perform a binary search on a GPtrArray, returning the index of the found
+// item. The result is undefined if the array is not sorted according to `cmp'.
+// Returns -1 when nothing is found.
+int ptr_array_search(GPtrArray *a, gpointer v, GCompareFunc cmp) {
+  if(!a->len)
+    return -1;
+  int b = 0;
+  int e = a->len-1;
+  while(b <= e) {
+    int i = b + (e - b)/2;
+    int r = cmp(g_ptr_array_index(a, i), v);
+    if(r < 0) { // i < v, look into the upper half
+      b = i+1;
+    } else if(r > 0) { // i > v, look into the lower half
+      e = i-1;
+    } else // equivalent
+      return i;
+  }
+  return -1;
+}
+
+
+// Adds an element to the array before the specified index. If i >= a->len, it
+// will be appended to the array. This function preserves the order of the
+// array: all elements after the specified index will be moved.
+void ptr_array_insert_before(GPtrArray *a, int i, gpointer v) {
+  if(i >= a->len) {
+    g_ptr_array_add(a, v);
+    return;
+  }
+  // add dummy element to make sure the array has the correct size. The value
+  // will be overwritten in the memmove().
+  g_ptr_array_add(a, NULL);
+  memmove(a->pdata+i+1, a->pdata+i, sizeof(a->pdata)*(a->len-i-1));
+  a->pdata[i] = v;
+}
+
+
 // Validates a hub name
 gboolean is_valid_hubname(const char *name) {
   const char *tmp;

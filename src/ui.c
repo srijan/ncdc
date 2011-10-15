@@ -1126,6 +1126,28 @@ static void ui_conn_key(guint64 key) {
 // File list browser (UIT_FL)
 
 
+static void ui_fl_setdir(struct ui_tab *tab, struct fl_list *fl, struct fl_list *sel) {
+  // Free previously opened dir
+  if(tab->list) {
+    g_sequence_free(tab->list->list);
+    ui_listing_free(tab->list);
+  }
+  // Open this one and select *sel, if set
+  tab->fl_list = fl;
+  GSequence *seq = g_sequence_new(NULL);
+  GSequenceIter *seli = NULL;
+  int i;
+  for(i=0; i<fl->sub->len; i++) {
+    GSequenceIter *iter = g_sequence_append(seq, g_ptr_array_index(fl->sub, i));
+    if(sel == g_ptr_array_index(fl->sub, i))
+      seli = iter;
+  }
+  tab->list = ui_listing_create(seq);
+  if(seli)
+    tab->list->sel = seli;
+}
+
+
 static void ui_fl_dosel(struct ui_tab *tab, const char *sel) {
   struct fl_list *root = tab->fl_list;
   while(root->parent)
@@ -1135,14 +1157,8 @@ static void ui_fl_dosel(struct ui_tab *tab, const char *sel) {
     ui_mf(tab, 0, "Can't select `%s': item not found.", sel);
     return;
   }
-  // open the parent directory
-  tab->fl_list = n->parent;
-  if(tab->list)
-    ui_listing_free(tab->list);
-  tab->list = ui_listing_create(tab->fl_list->sub);
-  // select the file/dir
-  tab->list->sel = g_sequence_iter_prev(g_sequence_search(tab->list->list, n, fl_list_cmp, NULL));
-  g_return_if_fail(!g_sequence_iter_is_end(tab->list->sel) && g_sequence_get(tab->list->sel) == n);
+  // open the parent directory and select item
+  ui_fl_setdir(tab, n->parent, n);
 }
 
 
@@ -1210,16 +1226,15 @@ static void ui_fl_loaddone(struct fl_list *fl, GError *err, void *dat) {
   // Otherwise, update state
   struct ui_tab *tab = dat;
   tab->fl_err = err;
-  tab->fl_list = fl;
-  tab->list = tab->fl_list && tab->fl_list->sub ? ui_listing_create(tab->fl_list->sub) : NULL;
   tab->fl_loading = FALSE;
   tab->prio = err ? UIP_HIGH : UIP_MED;
   if(tab->fl_sel) {
-    if(tab->fl_list)
+    if(fl)
       ui_fl_dosel(tab, tab->fl_sel);
     g_free(tab->fl_sel);
     tab->fl_sel = NULL;
-  }
+  } else
+    ui_fl_setdir(tab, fl, NULL);
 }
 
 
@@ -1236,11 +1251,12 @@ struct ui_tab *ui_fl_create(guint64 uid, const char *sel) {
 
   // get file list
   if(!uid) {
-    tab->fl_list = fl_local_list ? fl_list_copy(fl_local_list) : NULL;
-    tab->list = tab->fl_list && tab->fl_list->sub ? ui_listing_create(tab->fl_list->sub) : NULL;
+    struct fl_list *fl = fl_local_list ? fl_list_copy(fl_local_list) : NULL;
     tab->prio = UIP_MED;
-    if(sel)
+    if(fl && fl->sub && sel)
       ui_fl_dosel(tab, sel);
+    else if(fl && fl->sub)
+      ui_fl_setdir(tab, fl, NULL);
   } else {
     char *tmp = g_strdup_printf("%016"G_GINT64_MODIFIER"x.xml.bz2", uid);
     char *fn = g_build_filename(conf_dir, "fl", tmp, NULL);
@@ -1258,7 +1274,10 @@ struct ui_tab *ui_fl_create(guint64 uid, const char *sel) {
 
 
 void ui_fl_close(struct ui_tab *tab) {
-  ui_listing_free(tab->list);
+  if(tab->list) {
+    g_sequence_free(tab->list->list);
+    ui_listing_free(tab->list);
+  }
   ui_tab_remove(tab);
   struct fl_list *p = tab->fl_list;
   while(p && p->parent)
@@ -1317,7 +1336,7 @@ static void ui_fl_draw(struct ui_tab *tab) {
     mvaddstr(3, 2, "Loading filelist...");
   else if(tab->fl_err)
     mvprintw(3, 2, "Error loading filelist: %s", tab->fl_err->message);
-  else if(tab->fl_list && tab->fl_list->sub && g_sequence_iter_get_position(g_sequence_get_end_iter(tab->fl_list->sub)))
+  else if(tab->fl_list && tab->fl_list->sub && tab->fl_list->sub->len)
     pos = ui_listing_draw(tab->list, 2, winrows-4, ui_fl_draw_row, NULL);
   else
     mvaddstr(3, 2, "Directory empty.");
@@ -1327,9 +1346,7 @@ static void ui_fl_draw(struct ui_tab *tab) {
   attron(A_REVERSE);
   mvhline(winrows-3, 0, ' ', wincols);
   if(pos >= 0)
-    mvprintw(winrows-3, wincols-34, "%6d items   %s   %3d%%",
-      g_sequence_iter_get_position(g_sequence_get_end_iter(tab->fl_list->sub)),
-      str_formatsize(tab->fl_list->size), pos);
+    mvprintw(winrows-3, wincols-34, "%6d items   %s   %3d%%", tab->fl_list->sub->len, str_formatsize(tab->fl_list->size), pos);
   if(sel && sel->isfile) {
     if(!sel->hastth)
       mvaddstr(winrows-3, 0, "Not hashed yet, this file is not visible to others.");
@@ -1341,7 +1358,7 @@ static void ui_fl_draw(struct ui_tab *tab) {
     }
   }
   if(sel && !sel->isfile) {
-    int num = sel->sub ? g_sequence_iter_get_position(g_sequence_get_end_iter(sel->sub)) : 0;
+    int num = sel->sub ? sel->sub->len : 0;
     if(!num)
       mvaddstr(winrows-3, 0, " Selected directory is empty.");
     else
@@ -1365,27 +1382,15 @@ static void ui_fl_key(struct ui_tab *tab, guint64 key) {
   case INPT_CTRL('j'):      // newline
   case INPT_KEY(KEY_RIGHT): // right
   case INPT_CHAR('l'):      // l          open selected directory
-    if(sel && !sel->isfile && sel->sub) {
-      tab->fl_list = sel;
-      ui_listing_free(tab->list);
-      tab->list = ui_listing_create(sel->sub);
-    }
+    if(sel && !sel->isfile && sel->sub)
+      ui_fl_setdir(tab, sel, NULL);
     break;
 
   case INPT_CTRL('h'):     // backspace
   case INPT_KEY(KEY_LEFT): // left
   case INPT_CHAR('h'):     // h          open parent directory
-    if(tab->fl_list && tab->fl_list->parent) {
-      // open parent dir
-      struct fl_list *o = tab->fl_list;
-      tab->fl_list = o->parent;
-      ui_listing_free(tab->list);
-      tab->list = ui_listing_create(tab->fl_list->sub);
-      // select the dir where we came from
-      tab->list->sel = g_sequence_iter_prev(g_sequence_search(tab->fl_list->sub, o, fl_list_cmp, NULL));
-      if(g_sequence_iter_is_end(tab->list->sel) || g_sequence_get(tab->list->sel) != o)
-        tab->list->sel = g_sequence_get_begin_iter(tab->fl_list->sub);
-    }
+    if(tab->fl_list && tab->fl_list->parent)
+      ui_fl_setdir(tab, tab->fl_list->parent, tab->fl_list);
     break;
 
   case INPT_CHAR('d'): // d (download)

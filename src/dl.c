@@ -733,9 +733,9 @@ void dl_queue_add_fl(guint64 uid, struct fl_list *fl, char *base, GRegex *excl) 
     if(!dl_queue_addfile(uid, fl->tth, fl->size, name))
       ui_mf(NULL, 0, "Ignoring `%s': already queued.", name);
   } else {
-    GSequenceIter *i = g_sequence_get_begin_iter(fl->sub);
-    for(; !g_sequence_iter_is_end(i); i=g_sequence_iter_next(i))
-      dl_queue_add_fl(uid, g_sequence_get(i), name, excl);
+    int i;
+    for(i=0; i<fl->sub->len; i++)
+      dl_queue_add_fl(uid, g_ptr_array_index(fl->sub, i), name, excl);
   }
   if(!base)
     ui_mf(NULL, 0, "%s added to queue.", name);
@@ -782,9 +782,9 @@ int dl_queue_match_fl(guint64 uid, struct fl_list *fl) {
 
   } else {
     int n = 0;
-    GSequenceIter *i = g_sequence_get_begin_iter(fl->sub);
-    for(; !g_sequence_iter_is_end(i); i=g_sequence_iter_next(i))
-      n += dl_queue_match_fl(uid, g_sequence_get(i));
+    int i;
+    for(i=0; i<fl->sub->len; i++)
+      n += dl_queue_match_fl(uid, g_ptr_array_index(fl->sub, i));
     return n;
   }
 }

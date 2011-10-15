@@ -450,26 +450,24 @@ static void fl_scan_dir(struct fl_list *parent, const char *path, const char *vp
     }
     g_free(vcpath);
     // and add it
-    struct fl_list *dup = fl_list_add(parent, cur);
-    if(dup) {
-      char *tmp = g_build_filename(vpath, dup->name, NULL);
-      ui_mf(ui_main, UIP_MED, "Not sharing \"%s\": Other file with same name (but different case) already shared.", tmp);
-      fl_list_remove(dup);
-      g_free(tmp);
-    }
+    fl_list_add(parent, cur, -1);
   }
   g_dir_close(dir);
 
+  // Sort
+  fl_list_sort(parent);
+  // TODO: CHECK FOR DUPLICATES!
+
   // check for directories (outside of the above loop, to avoid having too many
   // directories opened at the same time. Costs some extra CPU cycles, though...)
-  GSequenceIter *iter;
-  for(iter=g_sequence_get_begin_iter(parent->sub); !g_sequence_iter_is_end(iter); iter=g_sequence_iter_next(iter)) {
-    struct fl_list *cur = g_sequence_get(iter);
+  int i;
+  for(i=0; i<parent->sub->len; i++) {
+    struct fl_list *cur = g_ptr_array_index(parent->sub, i);
     if(!cur->isfile) {
       char *enc = g_filename_from_utf8(cur->name, -1, NULL, NULL, NULL);
       char *cpath = g_build_filename(path, enc, NULL);
       char *virtpath = g_build_filename(vpath, cur->name, NULL);
-      cur->sub = g_sequence_new(fl_list_free);
+      cur->sub = g_ptr_array_new_with_free_func(fl_list_free);
       fl_scan_dir(cur, cpath, virtpath, inc_hidden, excl);
       g_free(virtpath);
       g_free(cpath);
@@ -488,7 +486,7 @@ static void fl_scan_thread(gpointer data, gpointer udata) {
     struct fl_list *cur = g_malloc0(sizeof(struct fl_list)+1);
     cur->name[0] = 0;
     char *tmp = g_filename_from_utf8(args->path[i], -1, NULL, NULL, NULL);
-    cur->sub = g_sequence_new(fl_list_free);
+    cur->sub = g_ptr_array_new_with_free_func(fl_list_free);
     fl_scan_dir(cur, tmp, args->path[i], args->inc_hidden, args->excl_regex);
     g_free(tmp);
     args->res[i] = cur;
@@ -716,24 +714,25 @@ static struct fl_list *fl_refresh_getroot(const char *name) {
   if(!fl_local_list) {
     fl_local_list = g_malloc0(sizeof(struct fl_list)+1);
     fl_local_list->name[0] = 0;
-    fl_local_list->sub = g_sequence_new(fl_list_free);
+    fl_local_list->sub = g_ptr_array_new_with_free_func(fl_list_free);
   }
   struct fl_list *cur = fl_list_file(fl_local_list, name);
   // dir not present yet? create a stub
   if(!cur) {
     cur = g_malloc0(sizeof(struct fl_list)+strlen(name)+1);
     strcpy(cur->name, name);
-    cur->sub = g_sequence_new(fl_list_free);
-    fl_list_add(fl_local_list, cur);
+    cur->sub = g_ptr_array_new_with_free_func(fl_list_free);
+    fl_list_add(fl_local_list, cur, -1);
+    fl_list_sort(fl_local_list);
   }
   return cur;
 }
 
 
 static void fl_refresh_addhash(struct fl_list *cur) {
-  GSequenceIter *i;
-  for(i=g_sequence_get_begin_iter(cur->sub); !g_sequence_iter_is_end(i); i=g_sequence_iter_next(i)) {
-    struct fl_list *l = g_sequence_get(i);
+  int i;
+  for(i=0; i<cur->sub->len; i++) {
+    struct fl_list *l = g_ptr_array_index(cur->sub, i);
     if(l->isfile)
       fl_hash_queue_append(l);
     else
@@ -747,20 +746,21 @@ static void fl_refresh_delhash(struct fl_list *cur) {
   if(cur->isfile && cur->hastth)
     fl_hashindex_del(cur);
   else if(!cur->isfile) {
-    GSequenceIter *i;
-    for(i=g_sequence_get_begin_iter(cur->sub); !g_sequence_iter_is_end(i); i=g_sequence_iter_next(i))
-      fl_refresh_delhash(g_sequence_get(i));
+    int i;
+    for(i=0; i<cur->sub->len; i++)
+      fl_refresh_delhash(g_ptr_array_index(cur->sub, i));
   }
 }
 
 
 static void fl_refresh_compare(struct fl_list *old, struct fl_list *new) {
-  GSequenceIter *oldi = g_sequence_get_begin_iter(old->sub);
-  GSequenceIter *newi = g_sequence_get_begin_iter(new->sub);
-  while(!g_sequence_iter_is_end(oldi) || !g_sequence_iter_is_end(newi)) {
-    struct fl_list *oldl = g_sequence_iter_is_end(oldi) ? NULL : g_sequence_get(oldi);
-    struct fl_list *newl = g_sequence_iter_is_end(newi) ? NULL : g_sequence_get(newi);
-    int cmp = !oldl ? 1 : !newl ? -1 : fl_list_cmp(oldl, newl, NULL);
+  int oldi = 0;
+  int newi = 0;
+  while(oldi < old->sub->len || newi < new->sub->len) {
+    struct fl_list *oldl = oldi >= old->sub->len ? NULL : g_ptr_array_index(old->sub, oldi);
+    struct fl_list *newl = newi >= new->sub->len ? NULL : g_ptr_array_index(new->sub, newi);
+    // Don't use fl_list_cmp() here, since that one doesn't return 0
+    int cmp = !oldl ? 1 : !newl ? -1 : fl_list_cmp_strict(oldl, newl);
     gboolean check = FALSE, remove = FALSE, insert = FALSE;
 
     // special case #1: old == new, but one is a directory and the other is a file
@@ -786,26 +786,27 @@ static void fl_refresh_compare(struct fl_list *old, struct fl_list *new) {
       // If it's a dir, recurse into it
       if(!oldl->isfile)
         fl_refresh_compare(oldl, newl);
-      oldi = g_sequence_iter_next(oldi);
-      newi = g_sequence_iter_next(newi);
+      oldi++;
+      newi++;
     }
 
     // remove
     if(remove) {
-      oldi = g_sequence_iter_next(oldi);
       fl_refresh_delhash(oldl);
       fl_list_remove(oldl);
+      // don't modify oldi, after deletion it will automatically point to the next item in the list
     }
 
     // insert
     if(insert) {
       struct fl_list *tmp = fl_list_copy(newl);
-      fl_list_add(old, tmp);
+      fl_list_add(old, tmp, oldi);
       if(tmp->isfile)
         fl_hash_queue_append(tmp);
       else
         fl_refresh_addhash(tmp);
-      newi = g_sequence_iter_next(newi);
+      oldi++; // after fl_list_add(), oldi points to the new item. But we don't have to check that one again, so increase.
+      newi++;
     }
   }
 }
@@ -908,7 +909,7 @@ static gboolean fl_refresh_scanned(gpointer dat) {
   else {
     // force a flush when all queued refreshes have been processed
     fl_flush(NULL);
-    if(fl_local_list && fl_local_list->sub && g_sequence_get_length(fl_local_list->sub))
+    if(fl_local_list && fl_local_list->sub && fl_local_list->sub->len)
       ui_mf(ui_main, UIM_NOTIFY, "File list refresh finished.");
   }
   return FALSE;
@@ -977,10 +978,10 @@ void fl_unshare(const char *dir) {
 // fetches the last modification times from the hashdata file and checks
 // whether we have any incomplete directories.
 static gboolean fl_init_list(struct fl_list *fl) {
-  GSequenceIter *iter;
   gboolean incomplete = FALSE;
-  for(iter=g_sequence_get_begin_iter(fl->sub); !g_sequence_iter_is_end(iter); iter=g_sequence_iter_next(iter)) {
-    struct fl_list *c = g_sequence_get(iter);
+  int i;
+  for(i=0; i<fl->sub->len; i++) {
+    struct fl_list *c = g_ptr_array_index(fl->sub, i);
     if(c->isfile && fl_hashindex_load(c))
       incomplete = TRUE;
     if(!c->isfile && fl_init_list(c))

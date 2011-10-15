@@ -39,7 +39,7 @@
 
 struct fl_list {
   struct fl_list *parent; // root = NULL
-  GSequence *sub;
+  GPtrArray *sub;
   guint64 size;   // including sub-items
   char tth[24];
   time_t lastmod; // only used for files in own list
@@ -62,7 +62,7 @@ void fl_list_free(gpointer dat) {
   if(!fl)
     return;
   if(fl->sub)
-    g_sequence_free(fl->sub);
+    g_ptr_array_unref(fl->sub);
   g_free(fl);
 }
 
@@ -85,70 +85,73 @@ int fl_list_cmp_name(const char *a, const char *b) {
 }
 
 
-// Used for sorting items within a directory and determining whether two files
-// in the same directory are equivalent (that is, have the same name). File
-// names are case-insensitive, as required by the ADC protocol.
-gint fl_list_cmp(gconstpointer a, gconstpointer b, gpointer dat) {
+// Used for sorting and determining whether two files in the same directory are
+// equivalent (that is, have the same name). File names are case-insensitive,
+// as required by the ADC protocol.
+gint fl_list_cmp_strict(gconstpointer a, gconstpointer b) {
   return fl_list_cmp_name(((struct fl_list *)a)->name, ((struct fl_list *)b)->name);
 }
 
+// A more lenient comparison function, equivalent to fl_list_cmp_strict() in
+// all cases except when that one would return 0. This function will return
+// zero only if the file list names are byte-equivalent.
+gint fl_list_cmp(gconstpointer a, gconstpointer b) {
+  const struct fl_list *la = a;
+  const struct fl_list *lb = b;
+  gint r = fl_list_cmp_name(la->name, lb->name);
+  if(!r)
+    r = strcmp(la->name, lb->name);
+  return r;
+}
 
-// Adds `cur' to the directory `parent'. Returns NULL on success.
-// This may fail when an item with the same name (according to fl_list_cmp())
-// is already present. In such an event, two things can happen:
-// 1. strcmp(dup, cur) <= 0:
-//    `cur' is not inserted and this function returns `cur'.
-// 2. strcmp(dup, cur) > 0:
-//    `cur' is inserted and `dup' is returned.
-// In either case, if the return value is non-NULL, fl_list_remove() should be
-// called on it.
-struct fl_list *fl_list_add(struct fl_list *parent, struct fl_list *cur) {
-  // Check for duplicate.
-  GSequenceIter *iter = g_sequence_iter_prev(g_sequence_search(parent->sub, cur, fl_list_cmp, NULL));
-  struct fl_list *dup = g_sequence_iter_is_end(iter) ? NULL : g_sequence_get(iter);
-  if(dup && fl_list_cmp_name(cur->name, dup->name) != 0)
-    dup = NULL;
-  if(dup)
-    g_debug("fl_list_add(): Duplicate file found: \"%s\" == \"%s\"", cur->name, dup->name);
-  if(dup && strcmp(dup->name, cur->name) <= 0)
-    return cur;
+// A sort function suitable for g_ptr_array_sort()
+static gint fl_list_cmp_sort(gconstpointer a, gconstpointer b) {
+  return fl_list_cmp(*((struct fl_list **)a), *((struct fl_list **)b));
+}
 
+
+// Adds `cur' to the directory `parent'. Make sure to call fl_list_sort()
+// afterwards.
+void fl_list_add(struct fl_list *parent, struct fl_list *cur, int before) {
   cur->parent = parent;
-  g_sequence_insert_sorted(parent->sub, cur, fl_list_cmp, NULL);
+  if(before >= 0)
+    ptr_array_insert_before(parent->sub, before, cur);
+  else
+    g_ptr_array_add(parent->sub, cur);
   // update parents size
   while(parent) {
     parent->size += cur->size;
     parent = parent->parent;
   }
-  return dup;
+}
+
+
+// Sort the contents of a directory. Should be called after doing a (batch of)
+// fl_list_add().
+void fl_list_sort(struct fl_list *fl) {
+  g_return_if_fail(!fl->isfile && fl->sub);
+  g_ptr_array_sort(fl->sub, fl_list_cmp_sort);
 }
 
 
 // Removes an item from the file list, making sure to update the parents.
+// This function assumes that the list has been properly sorted.
 void fl_list_remove(struct fl_list *fl) {
-  struct fl_list *par = fl->parent;
-  GSequenceIter *iter = NULL;
-  if(par) {
-    // Can't use _lookup(), too new (2.28).
-    // Note that in normal situations, there are no two items in a directory
-    // for which fl_list_cmp() returns 0. However, since this does happen just
-    // after fl_list_add() has returned `dup', we need to handle it in order to
-    // create a correct list again.
-    iter = g_sequence_iter_prev(g_sequence_search(par->sub, fl, fl_list_cmp, NULL));
-    g_return_if_fail(!g_sequence_iter_is_end(iter));
-    while(g_sequence_get(iter) != fl && fl_list_cmp_name(((struct fl_list *)g_sequence_get(iter))->name, fl->name) == 0)
-      iter = g_sequence_iter_prev(iter);
-    g_return_if_fail(g_sequence_get(iter) == fl);
-  }
   // update parents size
+  struct fl_list *par = fl->parent;
   while(par) {
     par->size -= fl->size;
     par = par->parent;
   }
-  // and free
-  if(iter)
-    g_sequence_remove(iter); // also frees the item
-  else
+  // remove from parent
+  int i = -1;
+  if(fl->parent) {
+    i = ptr_array_search(fl->parent->sub, fl, fl_list_cmp);
+    if(i >= 0)
+      g_ptr_array_remove_index(fl->parent->sub, i);
+  }
+  // And free if it wasn't removed yet. (The remove would have implicitely freed it already)
+  if(i < 0)
     fl_list_free(fl);
 }
 
@@ -157,14 +160,13 @@ struct fl_list *fl_list_copy(const struct fl_list *fl) {
   struct fl_list *cur = g_memdup(fl, sizeof(struct fl_list)+strlen(fl->name)+1);
   cur->parent = NULL;
   if(fl->sub) {
-    cur->sub = g_sequence_new(fl_list_free);
-    GSequenceIter *iter;
-    // No need to use _insert_sorted() here, since we walk through the list in
-    // the correct order already.
-    for(iter=g_sequence_get_begin_iter(fl->sub); !g_sequence_iter_is_end(iter); iter=g_sequence_iter_next(iter)) {
-      struct fl_list *tmp = fl_list_copy(g_sequence_get(iter));
+    cur->sub = g_ptr_array_sized_new(fl->sub->len);
+    g_ptr_array_set_free_func(cur->sub, fl_list_free);
+    int i;
+    for(i=0; i<fl->sub->len; i++) {
+      struct fl_list *tmp = fl_list_copy(g_ptr_array_index(fl->sub, i));
       tmp->parent = cur;
-      g_sequence_append(cur->sub, tmp);
+      g_ptr_array_add(cur->sub, tmp);
     }
   }
   return cur;
@@ -176,9 +178,9 @@ struct fl_list *fl_list_copy(const struct fl_list *fl) {
 gboolean fl_list_isempty(struct fl_list *fl) {
   g_return_val_if_fail(!fl->isfile, FALSE);
 
-  GSequenceIter *iter;
-  for(iter=g_sequence_get_begin_iter(fl->sub); !g_sequence_iter_is_end(iter); iter=g_sequence_iter_next(iter)) {
-    struct fl_list *f = g_sequence_get(iter);
+  int i;
+  for(i=0; i<fl->sub->len; i++) {
+    struct fl_list *f = g_ptr_array_index(fl->sub, i);
     if(!f->isfile || f->hastth)
       return FALSE;
   }
@@ -190,9 +192,8 @@ gboolean fl_list_isempty(struct fl_list *fl) {
 struct fl_list *fl_list_file(const struct fl_list *dir, const char *name) {
   struct fl_list *cmp = g_alloca(sizeof(struct fl_list)+strlen(name)+1);
   strcpy(cmp->name, name);
-  GSequenceIter *iter = g_sequence_iter_prev(g_sequence_search(dir->sub, cmp, fl_list_cmp, NULL));
-  return g_sequence_iter_is_end(iter)
-    || fl_list_cmp_name(name, ((struct fl_list *)g_sequence_get(iter))->name) != 0 ? NULL : g_sequence_get(iter);
+  int i = ptr_array_search(dir->sub, cmp, fl_list_cmp);
+  return i < 0 ? NULL : g_ptr_array_index(dir->sub, i);
 }
 
 
@@ -262,13 +263,13 @@ void fl_list_suggest(struct fl_list *root, char *opath, char **sug) {
     path = "";
   }
   if(parent) {
-    int i = 0, len = strlen(name);
-    // Note: performance can be improved by using _search() instead
-    GSequenceIter *iter;
-    for(iter=g_sequence_get_begin_iter(parent->sub); i<20 && !g_sequence_iter_is_end(iter); iter=g_sequence_iter_next(iter)) {
-      struct fl_list *n = g_sequence_get(iter);
-      if(strncmp(n->name, name, len) == 0)
-        sug[i++] = n->isfile ? g_strconcat(path, "/", n->name, NULL) : g_strconcat(path, "/", n->name, "/", NULL);
+    int n = 0, len = strlen(name);
+    // Note: performance can be improved by using a binary search instead
+    int i;
+    for(i=0; i<parent->sub->len && n<20; i++) {
+      struct fl_list *f = g_ptr_array_index(parent->sub, i);
+      if(strncmp(f->name, name, len) == 0)
+        sug[n++] = f->isfile ? g_strconcat(path, "/", f->name, NULL) : g_strconcat(path, "/", f->name, "/", NULL);
     }
   }
   if(sep)
@@ -337,7 +338,6 @@ gboolean fl_search_match_name(struct fl_list *fl, struct fl_search *s) {
 int fl_search_rec(struct fl_list *parent, struct fl_search *s, struct fl_list **res, int max) {
   if(!parent || !parent->sub)
     return 0;
-  GSequenceIter *iter;
   // weed out stuff from 'and' if it's already matched in parent (I'm assuming
   // that stuff matching the parent of parent has already been removed)
   char **o = s->and;
@@ -350,16 +350,16 @@ int fl_search_rec(struct fl_list *parent, struct fl_search *s, struct fl_list **
   o = s->and;
   s->and = nand;
   // loop through the directory
-  i = 0;
-  for(iter=g_sequence_get_begin_iter(parent->sub); i<max && !g_sequence_iter_is_end(iter); iter=g_sequence_iter_next(iter)) {
-    struct fl_list *n = g_sequence_get(iter);
-    if(fl_search_match(n, s))
-      res[i++] = n;
-    if(!n->isfile && i < max)
-      i += fl_search_rec(n, s, res+i, max-i);
+  int n = 0;
+  for(i=0; i<parent->sub->len; i++) {
+    struct fl_list *f = g_ptr_array_index(parent->sub, i);
+    if(fl_search_match(f, s))
+      res[n++] = f;
+    if(!f->isfile && n < max)
+      n += fl_search_rec(f, s, res+n, max-n);
   }
   s->and = o;
-  return i;
+  return n;
 }
 
 
@@ -491,13 +491,8 @@ static int fl_load_handle(xmlTextReaderPtr reader, gboolean *havefl, gboolean *n
       tmp = g_malloc0(sizeof(struct fl_list)+strlen(attr[0])+1);
       strcpy(tmp->name, attr[0]);
       tmp->isfile = FALSE;
-      tmp->sub = g_sequence_new(fl_list_free);
-      if(fl_list_add(*newdir ? *cur : (*cur)->parent, tmp)) {
-        fl_list_remove(tmp);
-        free(attr[0]);
-        free(attr[1]);
-        return -1;
-      }
+      tmp->sub = g_ptr_array_new_with_free_func(fl_list_free);
+      fl_list_add(*newdir ? *cur : (*cur)->parent, tmp, -1);
       *cur = tmp;
       *newdir = !xmlTextReaderIsEmptyElement(reader);
       free(attr[0]);
@@ -525,13 +520,7 @@ static int fl_load_handle(xmlTextReaderPtr reader, gboolean *havefl, gboolean *n
       tmp->size = g_ascii_strtoull(attr[1], NULL, 10);
       tmp->hastth = TRUE;
       base32_decode(attr[2], tmp->tth);
-      if(fl_list_add(*newdir ? *cur : (*cur)->parent, tmp)) {
-        fl_list_remove(tmp);
-        free(attr[0]);
-        free(attr[1]);
-        free(attr[2]);
-        return -1;
-      }
+      fl_list_add(*newdir ? *cur : (*cur)->parent, tmp, -1);
       *cur = tmp;
       *newdir = FALSE;
       free(attr[0]);
@@ -547,6 +536,7 @@ static int fl_load_handle(xmlTextReaderPtr reader, gboolean *havefl, gboolean *n
         *cur = (*cur)->parent;
       else
         *newdir = FALSE;
+      fl_list_sort(*cur);
     // </FileListing>
     } else if(strcmp(name, "FileListing") == 0) {
       return 0; // stop reading
@@ -614,7 +604,7 @@ struct fl_list *fl_load(const char *file, GError **err) {
 
   root = g_malloc0(sizeof(struct fl_list)+1);
   root->name[0] = 0;
-  root->sub = g_sequence_new(fl_list_free);
+  root->sub = g_ptr_array_new_with_free_func(fl_list_free);
   cur = root;
 
   while((ret = xmlTextReaderRead(reader)) == 1)
@@ -626,7 +616,8 @@ struct fl_list *fl_load(const char *file, GError **err) {
       g_set_error_literal(err, 1, 0, !havefl ? "No <FileListing> tag found." : "Error parsing or validating XML.");
     fl_list_free(root);
     root = NULL;
-  }
+  } else
+    fl_list_sort(root);
 
   // close (ignoring errors)
   xmlTextReaderClose(reader);
@@ -726,9 +717,9 @@ static int fl_save_close(void *context) {
 
 // recursive
 static gboolean fl_save_childs(xmlTextWriterPtr writer, struct fl_list *fl, int level) {
-  GSequenceIter *iter;
-  for(iter=g_sequence_get_begin_iter(fl->sub); !g_sequence_iter_is_end(iter); iter=g_sequence_iter_next(iter)) {
-    struct fl_list *cur = g_sequence_get(iter);
+  int i;
+  for(i=0; i<fl->sub->len; i++) {
+    struct fl_list *cur = g_ptr_array_index(fl->sub, i);
 #define CHECKFAIL(f) if(f < 0) return FALSE
     if(cur->isfile && cur->hastth) {
       char tth[40];

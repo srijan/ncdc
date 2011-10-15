@@ -45,7 +45,7 @@ struct fl_list {
   time_t lastmod; // only used for files in own list
   gboolean isfile : 1;
   gboolean hastth : 1; // only if isfile==TRUE
-  char name[];
+  char name[1];
 };
 
 #endif
@@ -56,6 +56,14 @@ struct fl_list {
 
 // Utility functions
 
+
+// Calculates the minimum required size for an fl_list allocation.
+static int fl_list_size(const char *name) {
+  static struct fl_list f;
+  return (((char *)f.name) - ((char *)&f)) + strlen(name) + 1;
+}
+
+
 // only frees the given item and its childs. leaves the parent(s) untouched
 void fl_list_free(gpointer dat) {
   struct fl_list *fl = dat;
@@ -63,7 +71,16 @@ void fl_list_free(gpointer dat) {
     return;
   if(fl->sub)
     g_ptr_array_unref(fl->sub);
-  g_free(fl);
+  g_slice_free1(fl_list_size(fl->name), fl);
+}
+
+
+// Create a new fl_list structure with the given name. Can't be renamed later
+// on due to the way the data is stored in memory.
+struct fl_list *fl_list_create(const char *name) {
+  struct fl_list *fl = g_slice_alloc0(fl_list_size(name));
+  strcpy(fl->name, name);
+  return fl;
 }
 
 
@@ -157,7 +174,8 @@ void fl_list_remove(struct fl_list *fl) {
 
 
 struct fl_list *fl_list_copy(const struct fl_list *fl) {
-  struct fl_list *cur = g_memdup(fl, sizeof(struct fl_list)+strlen(fl->name)+1);
+  struct fl_list *cur = g_slice_alloc(fl_list_size(fl->name));
+  memcpy(cur, fl, fl_list_size(fl->name));
   cur->parent = NULL;
   if(fl->sub) {
     cur->sub = g_ptr_array_sized_new(fl->sub->len);
@@ -190,9 +208,9 @@ gboolean fl_list_isempty(struct fl_list *fl) {
 
 // get a file by name in a directory
 struct fl_list *fl_list_file(const struct fl_list *dir, const char *name) {
-  struct fl_list *cmp = g_alloca(sizeof(struct fl_list)+strlen(name)+1);
-  strcpy(cmp->name, name);
+  struct fl_list *cmp = fl_list_create(name);
   int i = ptr_array_search(dir->sub, cmp, fl_list_cmp);
+  fl_list_free(cmp);
   return i < 0 ? NULL : g_ptr_array_index(dir->sub, i);
 }
 
@@ -488,8 +506,7 @@ static int fl_load_handle(xmlTextReaderPtr reader, gboolean *havefl, gboolean *n
         free(attr[0]);
         return -1;
       }
-      tmp = g_malloc0(sizeof(struct fl_list)+strlen(attr[0])+1);
-      strcpy(tmp->name, attr[0]);
+      tmp = fl_list_create(attr[0]);
       tmp->isfile = FALSE;
       tmp->sub = g_ptr_array_new_with_free_func(fl_list_free);
       fl_list_add(*newdir ? *cur : (*cur)->parent, tmp, -1);
@@ -514,8 +531,7 @@ static int fl_load_handle(xmlTextReaderPtr reader, gboolean *havefl, gboolean *n
         free(attr[1]);
         return -1;
       }
-      tmp = g_malloc0(sizeof(struct fl_list)+strlen(attr[0])+1);
-      strcpy(tmp->name, attr[0]);
+      tmp = fl_list_create(attr[0]);
       tmp->isfile = TRUE;
       tmp->size = g_ascii_strtoull(attr[1], NULL, 10);
       tmp->hastth = TRUE;
@@ -602,8 +618,7 @@ struct fl_list *fl_load(const char *file, GError **err) {
   gboolean havefl = FALSE, newdir = TRUE;
   int ret;
 
-  root = g_malloc0(sizeof(struct fl_list)+1);
-  root->name[0] = 0;
+  root = fl_list_create("");
   root->sub = g_ptr_array_new_with_free_func(fl_list_free);
   cur = root;
 

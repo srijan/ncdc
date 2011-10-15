@@ -985,7 +985,7 @@ static gboolean fl_init_list(struct fl_list *fl) {
     struct fl_list *c = g_sequence_get(iter);
     if(c->isfile && fl_hashindex_load(c))
       incomplete = TRUE;
-    if(!c->isfile && (fl_init_list(c) || c->incomplete))
+    if(!c->isfile && fl_init_list(c))
       incomplete = TRUE;
   }
   return incomplete;
@@ -1054,12 +1054,15 @@ void fl_init() {
     dorefresh = TRUE;
   }
 
-  // Get last modification times, check for any incomplete directories and
-  // initiate a refresh if there is one.  (If there is an incomplete directory,
-  // it means that ncdc was closed while it was hashing files, a refresh will
-  // continue where it left off)
+  // If ncdc was previously closed while hashing, make sure to force a refresh
+  // this time to continue the hash progress.
+  if(!fl_hashdat_getdone())
+    dorefresh = TRUE;
+
+  // Get last modification times and check that all hashdata is present.
   if(fl_local_list) {
-    dorefresh = fl_init_list(fl_local_list);
+    if(fl_init_list(fl_local_list))
+      dorefresh = TRUE;
     if(dorefresh)
       ui_m(ui_main, UIM_NOTIFY, "File list incomplete, refreshing...");
   }

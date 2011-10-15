@@ -341,6 +341,7 @@ static void fl_hashindex_del(struct fl_list *fl) {
     fl_hashdat_del(fl->tth);
     return;
   }
+  fl->hastth = FALSE;
 
   cur = g_slist_remove(cur, fl);
   if(!cur) {
@@ -778,6 +779,7 @@ static void fl_refresh_compare(struct fl_list *old, struct fl_list *new) {
     if(check) {
       // If it's a file, it may have been modified or we're missing the TTH
       if(oldl->isfile && (!oldl->hastth || newl->lastmod > oldl->lastmod || newl->size != oldl->size)) {
+        fl_hashindex_del(oldl);
         oldl->size = newl->size;
         fl_hash_queue_append(oldl);
       }

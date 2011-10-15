@@ -386,6 +386,23 @@ struct fl_scan_args {
   gboolean (*donefun)(gpointer);
 };
 
+
+static void fl_scan_rmdupes(struct fl_list *fl, const char *vpath) {
+  int i = 1;
+  while(i<fl->sub->len) {
+    struct fl_list *a = g_ptr_array_index(fl->sub, i-1);
+    struct fl_list *b = g_ptr_array_index(fl->sub, i);
+    if(fl_list_cmp_strict(a, b) == 0) {
+      char *tmp = g_build_filename(vpath, b->name, NULL);
+      ui_mf(ui_main, UIP_MED, "Not sharing \"%s\": Other file with same name (but different case) already shared.", tmp);
+      fl_list_remove(b);
+      g_free(tmp);
+    } else
+      i++;
+  }
+}
+
+
 // recursive
 // Doesn't handle paths longer than PATH_MAX, but I don't think it matters all that much.
 static void fl_scan_dir(struct fl_list *parent, const char *path, const char *vpath, gboolean inc_hidden, GRegex *excl) {
@@ -456,7 +473,7 @@ static void fl_scan_dir(struct fl_list *parent, const char *path, const char *vp
 
   // Sort
   fl_list_sort(parent);
-  // TODO: CHECK FOR DUPLICATES!
+  fl_scan_rmdupes(parent, vpath);
 
   // check for directories (outside of the above loop, to avoid having too many
   // directories opened at the same time. Costs some extra CPU cycles, though...)

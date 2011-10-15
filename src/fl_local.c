@@ -145,6 +145,7 @@ gboolean fl_flush(gpointer dat) {
 
 #define HASHDAT_INFO 0
 #define HASHDAT_TTHL 1
+#define HASHDAT_DONE 2
 
 struct fl_hashdat_info {
   time_t lastmod;
@@ -158,6 +159,27 @@ static void fl_hashdat_open(gboolean trash) {
   // this is a bit extreme, but I have no idea what else to do
   if(!fl_hashdat)
     g_error("Unable to open hashdata.dat.");
+}
+
+
+static gboolean fl_hashdat_getdone() {
+  char dat[] = { HASHDAT_DONE };
+  datum key = { dat, 1 };
+  return gdbm_exists(fl_hashdat, key) ? TRUE : FALSE;
+}
+
+
+// Also performs a flush to make sure the value is stored.
+static void fl_hashdat_setdone(gboolean val) {
+  if(!!fl_hashdat_getdone() == !!val)
+    return;
+  char dat[] = { HASHDAT_DONE };
+  datum key = { dat, 1 }; // also used as value
+  if(val)
+    gdbm_store(fl_hashdat, key, key, GDBM_REPLACE);
+  else
+    gdbm_delete(fl_hashdat, key);
+  gdbm_sync(fl_hashdat);
 }
 
 
@@ -627,8 +649,10 @@ static void fl_hash_process() {
   if(!g_hash_table_size(fl_hash_queue)) {
     ratecalc_unregister(&fl_hash_rate);
     ratecalc_reset(&fl_hash_rate);
+    fl_hashdat_setdone(TRUE);
     return;
   }
+  fl_hashdat_setdone(FALSE);
   ratecalc_register(&fl_hash_rate);
 
   // get one item from fl_hash_queue
@@ -867,6 +891,11 @@ static gboolean fl_refresh_scanned(gpointer dat) {
     fl_list_free(args->res[i]);
   }
 
+  // If the hash queue is empty after calling fl_refresh_compare() then it
+  // means the file list is completely hashed.
+  if(!g_hash_table_size(fl_hash_queue))
+    fl_hashdat_setdone(TRUE);
+
   fl_needflush = TRUE;
   g_strfreev(args->path);
   if(args->excl_regex)
@@ -881,7 +910,7 @@ static gboolean fl_refresh_scanned(gpointer dat) {
   else {
     // force a flush when all queued refreshes have been processed
     fl_flush(NULL);
-    if(fl_local_list && fl_local_list->hastth)
+    if(fl_local_list && fl_local_list->hastth) // Just checks whether something is shared
       ui_mf(ui_main, UIM_NOTIFY, "File list refresh finished.");
   }
   return FALSE;

@@ -1289,9 +1289,7 @@ static void ui_fl_draw_row(struct ui_listing *list, GSequenceIter *iter, int row
     mvaddch(row, 0, '>');
   }
 
-  mvaddch(row, 2,
-    fl->isfile && !fl->hastth ? 'H' :
-    !fl->isfile && (fl->incomplete || fl->hastth != g_sequence_iter_get_position(g_sequence_get_end_iter(fl->sub))) ? 'I' : ' ');
+  mvaddch(row, 2, fl->isfile && !fl->hastth ? 'H' :' ');
 
   mvaddstr(row, 4, str_formatsize(fl->size));
   if(!fl->isfile)
@@ -1329,9 +1327,9 @@ static void ui_fl_draw(struct ui_tab *tab) {
   attron(A_REVERSE);
   mvhline(winrows-3, 0, ' ', wincols);
   if(pos >= 0)
-    mvprintw(winrows-3, wincols-34, "%6d items   %s%c  %3d%%",
+    mvprintw(winrows-3, wincols-34, "%6d items   %s   %3d%%",
       g_sequence_iter_get_position(g_sequence_get_end_iter(tab->fl_list->sub)),
-      str_formatsize(tab->fl_list->size), tab->fl_list->incomplete ? '+' : ' ', pos);
+      str_formatsize(tab->fl_list->size), pos);
   if(sel && sel->isfile) {
     if(!sel->hastth)
       mvaddstr(winrows-3, 0, "Not hashed yet, this file is not visible to others.");
@@ -1395,10 +1393,10 @@ static void ui_fl_key(struct ui_tab *tab, guint64 key) {
       ui_m(NULL, 0, "Nothing selected.");
     else if(!tab->uid)
       ui_m(NULL, 0, "Can't download from yourself.");
-    else if(!sel->hastth && !sel->isfile)
+    else if(!sel->isfile && fl_list_isempty(sel))
       ui_m(NULL, 0, "Directory empty.");
     else {
-      g_return_if_fail(sel->hastth);
+      g_return_if_fail(!sel->isfile || sel->hastth);
       char *excl = g_key_file_get_string(conf_file, "global", "download_exclude", NULL);
       GRegex *r = excl ? g_regex_new(excl, 0, 0, NULL) : NULL;
       g_free(excl);

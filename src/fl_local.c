@@ -359,8 +359,6 @@ static void fl_hashindex_sethash(struct fl_list *fl, char *tth, time_t lastmod, 
 
   // update file
   memcpy(fl->tth, tth, 24);
-  if(!fl->hastth)
-    fl->parent->hastth++;
   fl->hastth = 1;
   fl->lastmod = lastmod;
   fl_hashindex_insert(fl);
@@ -724,7 +722,6 @@ static struct fl_list *fl_refresh_getroot(const char *name) {
   if(!cur) {
     cur = g_malloc0(sizeof(struct fl_list)+strlen(name)+1);
     strcpy(cur->name, name);
-    cur->incomplete = TRUE;
     cur->sub = g_sequence_new(fl_list_free);
     fl_list_add(fl_local_list, cur);
   }
@@ -809,7 +806,6 @@ static void fl_refresh_compare(struct fl_list *old, struct fl_list *new) {
       newi = g_sequence_iter_next(newi);
     }
   }
-  old->incomplete = FALSE;
 }
 
 /* A visual explanation of the above algorithm:
@@ -910,7 +906,7 @@ static gboolean fl_refresh_scanned(gpointer dat) {
   else {
     // force a flush when all queued refreshes have been processed
     fl_flush(NULL);
-    if(fl_local_list && fl_local_list->hastth) // Just checks whether something is shared
+    if(fl_local_list && fl_local_list->sub && g_sequence_get_length(fl_local_list->sub))
       ui_mf(ui_main, UIM_NOTIFY, "File list refresh finished.");
   }
   return FALSE;

@@ -43,9 +43,8 @@ struct fl_list {
   guint64 size;   // including sub-items
   char tth[24];
   time_t lastmod; // only used for files in own list
-  int hastth;     // for files: 1/0, directories: (number of directories) + (number of files with hastth==1)
   gboolean isfile : 1;
-  gboolean incomplete : 1; // when a directory is missing files
+  gboolean hastth : 1; // only if isfile==TRUE
   char name[];
 };
 
@@ -116,8 +115,6 @@ struct fl_list *fl_list_add(struct fl_list *parent, struct fl_list *cur) {
 
   cur->parent = parent;
   g_sequence_insert_sorted(parent->sub, cur, fl_list_cmp, NULL);
-  if(!cur->isfile || (cur->isfile && cur->hastth))
-    parent->hastth++;
   // update parents size
   while(parent) {
     parent->size += cur->size;
@@ -142,10 +139,6 @@ void fl_list_remove(struct fl_list *fl) {
     while(g_sequence_get(iter) != fl && fl_list_cmp_name(((struct fl_list *)g_sequence_get(iter))->name, fl->name) == 0)
       iter = g_sequence_iter_prev(iter);
     g_return_if_fail(g_sequence_get(iter) == fl);
-
-    // update parent->hastth
-    if(!fl->isfile || (fl->isfile && fl->hastth))
-      par->hastth--;
   }
   // update parents size
   while(par) {
@@ -175,6 +168,21 @@ struct fl_list *fl_list_copy(const struct fl_list *fl) {
     }
   }
   return cur;
+}
+
+
+// Determines whether a directory is "empty", i.e. it has no subdirectories or
+// hashed files.
+gboolean fl_list_isempty(struct fl_list *fl) {
+  g_return_val_if_fail(!fl->isfile, FALSE);
+
+  GSequenceIter *iter;
+  for(iter=g_sequence_get_begin_iter(fl->sub); !g_sequence_iter_is_end(iter); iter=g_sequence_iter_next(iter)) {
+    struct fl_list *f = g_sequence_get(iter);
+    if(!f->isfile || f->hastth)
+      return FALSE;
+  }
+  return TRUE;
 }
 
 
@@ -483,7 +491,6 @@ static int fl_load_handle(xmlTextReaderPtr reader, gboolean *havefl, gboolean *n
       tmp = g_malloc0(sizeof(struct fl_list)+strlen(attr[0])+1);
       strcpy(tmp->name, attr[0]);
       tmp->isfile = FALSE;
-      tmp->incomplete = attr[1] && attr[1][0] == '1';
       tmp->sub = g_sequence_new(fl_list_free);
       if(fl_list_add(*newdir ? *cur : (*cur)->parent, tmp)) {
         fl_list_remove(tmp);
@@ -516,7 +523,7 @@ static int fl_load_handle(xmlTextReaderPtr reader, gboolean *havefl, gboolean *n
       strcpy(tmp->name, attr[0]);
       tmp->isfile = TRUE;
       tmp->size = g_ascii_strtoull(attr[1], NULL, 10);
-      tmp->hastth = 1;
+      tmp->hastth = TRUE;
       base32_decode(attr[2], tmp->tth);
       if(fl_list_add(*newdir ? *cur : (*cur)->parent, tmp)) {
         fl_list_remove(tmp);
@@ -736,8 +743,7 @@ static gboolean fl_save_childs(xmlTextWriterPtr writer, struct fl_list *fl, int 
     if(!cur->isfile) {
       CHECKFAIL(xmlTextWriterStartElement(writer, (xmlChar *)"Directory"));
       CHECKFAIL(xmlTextWriterWriteAttribute(writer, (xmlChar *)"Name", (xmlChar *)cur->name));
-      if(cur->incomplete || cur->hastth != g_sequence_iter_get_position(g_sequence_get_end_iter(cur->sub))
-          || (cur->hastth && level < 1))
+      if(level < 1 && fl_list_isempty(cur))
         CHECKFAIL(xmlTextWriterWriteAttribute(writer, (xmlChar *)"Incomplete", (xmlChar *)"1"));
       if(level > 0)
         fl_save_childs(writer, cur, level-1);

@@ -369,7 +369,7 @@ int fl_search_rec(struct fl_list *parent, struct fl_search *s, struct fl_list **
   s->and = nand;
   // loop through the directory
   int n = 0;
-  for(i=0; i<parent->sub->len; i++) {
+  for(i=0; n<max && i<parent->sub->len; i++) {
     struct fl_list *f = g_ptr_array_index(parent->sub, i);
     if(fl_search_match(f, s))
       res[n++] = f;

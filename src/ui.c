@@ -54,7 +54,7 @@ struct ui_tab {
   struct hub *hub;             // HUB, USERLIST, MSG, SEARCH
   struct ui_listing *list;     // USERLIST, CONN, FL, DL, SEARCH
   guint64 uid;                 // FL, MSG
-  int order : 4;               // USERLIST, SEARCH (has different interpretation per tab)
+  int order : 4;               // USERLIST, SEARCH, FL (has different interpretation per tab)
   gboolean o_reverse : 1;      // USERLIST, SEARCH
   gboolean details : 1;        // USERLIST, CONN, DL
   // MSG
@@ -74,7 +74,8 @@ struct ui_tab {
   // FL
   struct fl_list *fl_list;
   char *fl_uname;
-  gboolean fl_loading;
+  gboolean fl_loading : 1;
+  gboolean fl_dirfirst : 1;
   GError *fl_err;
   char *fl_sel;
   // DL
@@ -1125,6 +1126,26 @@ static void ui_conn_key(guint64 key) {
 
 // File list browser (UIT_FL)
 
+// Columns to sort on
+#define UIFL_NAME  0
+#define UIFL_SIZE  1
+
+
+static gint ui_fl_sort(gconstpointer a, gconstpointer b, gpointer dat) {
+  const struct fl_list *la = a;
+  const struct fl_list *lb = b;
+  struct ui_tab *tab = dat;
+
+  // dirs before files
+  if(tab->fl_dirfirst && !!la->isfile != !!lb->isfile)
+    return la->isfile ? 1 : -1;
+
+  int r = tab->order == UIFL_NAME ? fl_list_cmp(la, lb) : (la->size > lb->size ? 1 : la->size < lb->size ? -1 : 0);
+  if(!r)
+    r = tab->order == UIFL_NAME ? (la->size > lb->size ? 1 : la->size < lb->size ? -1 : 0) : fl_list_cmp(la, lb);
+  return tab->o_reverse ? -r : r;
+}
+
 
 static void ui_fl_setdir(struct ui_tab *tab, struct fl_list *fl, struct fl_list *sel) {
   // Free previously opened dir
@@ -1138,7 +1159,7 @@ static void ui_fl_setdir(struct ui_tab *tab, struct fl_list *fl, struct fl_list 
   GSequenceIter *seli = NULL;
   int i;
   for(i=0; i<fl->sub->len; i++) {
-    GSequenceIter *iter = g_sequence_append(seq, g_ptr_array_index(fl->sub, i));
+    GSequenceIter *iter = g_sequence_insert_sorted(seq, g_ptr_array_index(fl->sub, i), ui_fl_sort, tab);
     if(sel == g_ptr_array_index(fl->sub, i))
       seli = iter;
   }
@@ -1248,6 +1269,8 @@ struct ui_tab *ui_fl_create(guint64 uid, const char *sel) {
   tab->name = !uid ? g_strdup("/own") : u ? g_strdup_printf("/%s", u->name) : g_strdup_printf("/%016"G_GINT64_MODIFIER"x", uid);
   tab->fl_uname = u ? g_strdup(u->name) : NULL;
   tab->uid = uid;
+  tab->fl_dirfirst = TRUE;
+  tab->order = UIFL_NAME;
 
   // get file list
   if(!uid) {
@@ -1373,6 +1396,7 @@ static void ui_fl_key(struct ui_tab *tab, guint64 key) {
     return;
 
   struct fl_list *sel = !tab->list || g_sequence_iter_is_end(tab->list->sel) ? NULL : g_sequence_get(tab->list->sel);
+  gboolean sort = FALSE;
 
   switch(key) {
   case INPT_CHAR('?'):
@@ -1392,6 +1416,24 @@ static void ui_fl_key(struct ui_tab *tab, guint64 key) {
     if(tab->fl_list && tab->fl_list->parent)
       ui_fl_setdir(tab, tab->fl_list->parent, tab->fl_list);
     break;
+
+  // Sorting
+#define SETSORT(c) \
+  tab->o_reverse = tab->order == c ? !tab->o_reverse : FALSE;\
+  tab->order = c;\
+  sort = TRUE;
+
+  case INPT_CHAR('s'): // s - sort on file size
+    SETSORT(UIFL_SIZE);
+    break;
+  case INPT_CHAR('n'): // n - sort on file name
+    SETSORT(UIFL_NAME);
+    break;
+  case INPT_CHAR('t'): // o - toggle sorting dirs before files
+    tab->fl_dirfirst = !tab->fl_dirfirst;
+    sort = TRUE;
+    break;
+#undef SETSORT
 
   case INPT_CHAR('d'): // d (download)
     if(!sel)
@@ -1438,6 +1480,14 @@ static void ui_fl_key(struct ui_tab *tab, guint64 key) {
     else
       search_alltth(sel->tth, tab);
     break;
+  }
+
+  if(sort && tab->fl_list) {
+    g_sequence_sort(tab->list->list, ui_fl_sort, tab);
+    ui_listing_sorted(tab->list);
+    ui_mf(NULL, 0, "Ordering by %s (%s%s)",
+      tab->order == UIFL_NAME  ? "file name" : "file size",
+      tab->o_reverse ? "descending" : "ascending", tab->fl_dirfirst ? ", dirs first" : "");
   }
 }
 

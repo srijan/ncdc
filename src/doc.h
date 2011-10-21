@@ -495,6 +495,9 @@ static const struct doc_key {
   LISTING_KEYS
   "Right/l      Open selected directory.\n"
   "Left/h       Open parent directory.\n"
+  "o            Toggle sorting directories before files.\n"
+  "s            Order by file size.\n"
+  "n            Order by file name.\n"
   "d            Add selected file/directory to the download queue.\n"
   "m            Match selected item with the download queue.\n"
   "M            Match entire file list with the download queue.\n"

@@ -742,12 +742,12 @@ void hub_say(struct hub *hub, const char *str, gboolean me) {
 }
 
 
-void hub_msg(struct hub *hub, struct hub_user *user, const char *str, gboolean me) {
+void hub_msg(struct hub *hub, struct hub_user *user, const char *str, gboolean me, int dest) {
   if(hub->adc) {
-    GString *c = adc_generate('E', ADCC_MSG, hub->sid, user->sid);
+    GString *c = adc_generate('E', ADCC_MSG, hub->sid, dest ? dest : user->sid);
     adc_append(c, NULL, str);
     char enc[5] = {};
-    ADC_EFCC(hub->sid, enc);
+    ADC_EFCC(dest ? dest : hub->sid, enc);
     g_string_append_printf(c, " PM%s", enc);
     if(me)
       g_string_append(c, " ME1");
@@ -760,7 +760,7 @@ void hub_msg(struct hub *hub, struct hub_user *user, const char *str, gboolean m
     g_free(msg);
     // emulate protocol echo
     msg = g_strdup_printf(me ? "<%s> /me %s" : "<%s> %s", hub->nick, str);
-    ui_hub_msg(hub->tab, user, msg);
+    ui_hub_msg(hub->tab, user, msg, dest);
     g_free(msg);
   }
 }
@@ -1076,7 +1076,7 @@ static void adc_handle(struct hub *hub, char *msg) {
     break;
 
   case ADCC_MSG:;
-    if(cmd.argc < 1 || (cmd.type != 'B' && cmd.type != 'E' && cmd.type != 'D' && cmd.type != 'I'))
+    if(cmd.argc < 1 || (cmd.type != 'B' && cmd.type != 'E' && cmd.type != 'D' && cmd.type != 'I' && cmd.type != 'F'))
       g_warning("Invalid message from %s: %s", net_remoteaddr(hub->net), msg);
     else {
       char *pm = adc_getparam(cmd.argv+1, "PM", NULL);
@@ -1084,14 +1084,13 @@ static void adc_handle(struct hub *hub, char *msg) {
       struct hub_user *u = cmd.type != 'I' ? g_hash_table_lookup(hub->sessions, GINT_TO_POINTER(cmd.source)) : NULL;
       struct hub_user *d = (cmd.type == 'E' || cmd.type == 'D') && cmd.source == hub->sid
         ? g_hash_table_lookup(hub->sessions, GINT_TO_POINTER(cmd.dest)) : NULL;
-      if(pm && (cmd.type != 'E' || strlen(pm) != 4 || ADC_DFCC(pm) != cmd.source))
-        g_warning("Group chat is not supported yet. (%s: %s)", net_remoteaddr(hub->net), msg);
-      else if(cmd.type != 'I' && !u && !d)
+      if(cmd.type != 'I' && !u && !d)
         g_warning("Message from someone not on this hub. (%s: %s)", net_remoteaddr(hub->net), msg);
       else {
         char *m = g_strdup_printf(me ? "** %s %s" : "<%s> %s", cmd.type == 'I' ? "hub" : u->name, cmd.argv[0]);
-        if(cmd.type == 'E' || cmd.type == 'D')
-          ui_hub_msg(hub->tab, cmd.source == hub->sid ? d : u, m);
+        if(cmd.type == 'E' || cmd.type == 'D' || cmd.type == 'F')
+          ui_hub_msg(hub->tab, cmd.source == hub->sid ? d : u, m,
+            pm && strlen(pm) == 4 && ADC_DFCC(pm) != cmd.source ? ADC_DFCC(pm) : 0);
         else
           ui_m(hub->tab, UIM_CHAT|UIP_MED, m);
         g_free(m);
@@ -1419,7 +1418,7 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
       g_warning("[hub: %s] Got a $To from `%s', who is not on this hub!", hub->tab->name, from);
     else {
       char *msge = nmdc_unescape_and_decode(hub, msg);
-      ui_hub_msg(hub->tab, u, msge);
+      ui_hub_msg(hub->tab, u, msge, 0);
       g_free(msge);
     }
     g_free(from);

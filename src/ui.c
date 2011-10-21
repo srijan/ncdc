@@ -57,8 +57,6 @@ struct ui_tab {
   int order : 4;               // USERLIST, SEARCH, FL (has different interpretation per tab)
   gboolean o_reverse : 1;      // USERLIST, SEARCH
   gboolean details : 1;        // USERLIST, CONN, DL
-  // MSG
-  gboolean msg_online : 1;
   // USERLIST
   gboolean user_opfirst : 1;
   gboolean user_hide_desc : 1;
@@ -66,6 +64,9 @@ struct ui_tab {
   gboolean user_hide_mail : 1;
   gboolean user_hide_conn : 1;
   gboolean user_hide_ip : 1;
+  // MSG
+  gboolean msg_online : 1;
+  int msg_replyto;
   // HUB
   gboolean hub_joincomplete : 1;
   GRegex *hub_highlight;
@@ -231,8 +232,9 @@ static void ui_msg_key(struct ui_tab *tab, guint64 key) {
 }
 
 
-static void ui_msg_msg(struct ui_tab *tab, const char *msg) {
+static void ui_msg_msg(struct ui_tab *tab, const char *msg, int replyto) {
   ui_m(tab, UIP_HIGH, msg);
+  tab->msg_replyto = replyto;
 }
 
 
@@ -425,13 +427,13 @@ void ui_hub_userchange(struct ui_tab *tab, int change, struct hub_user *user) {
 }
 
 
-void ui_hub_msg(struct ui_tab *tab, struct hub_user *user, const char *msg) {
+void ui_hub_msg(struct ui_tab *tab, struct hub_user *user, const char *msg, int replyto) {
   struct ui_tab *t = ui_hub_getmsg(tab, user);
   if(!t) {
     t = ui_msg_create(tab->hub, user);
     ui_tab_open(t, FALSE, tab);
   }
-  ui_msg_msg(t, msg);
+  ui_msg_msg(t, msg, replyto);
 }
 
 

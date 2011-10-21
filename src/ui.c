@@ -99,6 +99,9 @@ int winrows;
 
 gboolean ui_beep = FALSE; // set to true anywhere to send a beep
 
+// uid -> tab lookup table for MSG tabs.
+GHashTable *ui_msg_tabs = NULL;
+
 
 
 
@@ -162,6 +165,8 @@ static void ui_main_keys(const char *s) {
 // User message tab
 
 struct ui_tab *ui_msg_create(struct hub *hub, struct hub_user *user) {
+  g_return_val_if_fail(!g_hash_table_lookup(ui_msg_tabs, &user->uid), NULL);
+
   struct ui_tab *tab = g_new0(struct ui_tab, 1);
   tab->type = UIT_MSG;
   tab->hub = hub;
@@ -173,12 +178,14 @@ struct ui_tab *ui_msg_create(struct hub *hub, struct hub_user *user) {
   tab->log->checkchat = ui_hub_log_checkchat;
 
   ui_mf(tab, 0, "Chatting with %s on %s.", user->name, hub->tab->name);
+  g_hash_table_insert(ui_msg_tabs, &tab->uid, tab);
 
   return tab;
 }
 
 
 void ui_msg_close(struct ui_tab *tab) {
+  g_hash_table_remove(ui_msg_tabs, &tab->uid);
   ui_tab_remove(tab);
   ui_logwindow_free(tab->log);
   g_free(tab->name);
@@ -397,19 +404,6 @@ static void ui_hub_key(struct ui_tab *tab, guint64 key) {
 }
 
 
-struct ui_tab *ui_hub_getmsg(struct ui_tab *tab, struct hub_user *user) {
-  // This is slow when many tabs are open, should be improved...
-  GList *t;
-  struct ui_tab *mt;
-  for(t=ui_tabs; t; t=t->next) {
-    mt = t->data;
-    if(mt->type == UIT_MSG && mt->hub == tab->hub && mt->uid == user->uid)
-      return mt;
-  }
-  return NULL;
-}
-
-
 void ui_hub_userchange(struct ui_tab *tab, int change, struct hub_user *user) {
   // notify the userlist, when it is open
   if(tab->userlist_tab)
@@ -428,7 +422,7 @@ void ui_hub_userchange(struct ui_tab *tab, int change, struct hub_user *user) {
 
 
 void ui_hub_msg(struct ui_tab *tab, struct hub_user *user, const char *msg, int replyto) {
-  struct ui_tab *t = ui_hub_getmsg(tab, user);
+  struct ui_tab *t = g_hash_table_lookup(ui_msg_tabs, &user->uid);
   if(!t) {
     t = ui_msg_create(tab->hub, user);
     ui_tab_open(t, FALSE, tab);
@@ -784,7 +778,7 @@ static void ui_userlist_key(struct ui_tab *tab, guint64 key) {
     if(!sel)
       ui_m(NULL, 0, "No user selected.");
     else {
-      struct ui_tab *t = ui_hub_getmsg(tab, sel);
+      struct ui_tab *t = g_hash_table_lookup(ui_msg_tabs, &sel->uid);
       if(!t) {
         t = ui_msg_create(tab->hub, sel);
         ui_tab_open(t, TRUE, tab);
@@ -2345,6 +2339,8 @@ void ui_tab_remove(struct ui_tab *tab) {
 
 
 void ui_init() {
+  ui_msg_tabs = g_hash_table_new(g_int64_hash, g_int64_equal);
+
   // global textinput field
   ui_global_textinput = ui_textinput_create(TRUE, cmd_suggest);
 

@@ -125,7 +125,7 @@ static void c_msg(char *args) {
       ui_m(NULL, 0, "No user found with that name. Note that usernames are case-sensitive.");
     else {
       // get or open tab and make sure it's selected
-      struct ui_tab *t = ui_hub_getmsg(tab, u);
+      struct ui_tab *t = g_hash_table_lookup(ui_msg_tabs, &u->uid);
       if(!t)
         ui_tab_open(ui_msg_create(tab->hub, u), TRUE, tab);
       else

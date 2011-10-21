@@ -43,6 +43,9 @@
 
 //  name            default fg       default bg       default attr
 #define UI_COLORS \
+  C(list_default,   COLOR_DEFAULT,   COLOR_DEFAULT,   0)\
+  C(list_header,    COLOR_DEFAULT,   COLOR_DEFAULT,   A_BOLD)\
+  C(list_select,    COLOR_DEFAULT,   COLOR_DEFAULT,   A_BOLD)\
   C(log_default,    COLOR_DEFAULT,   COLOR_DEFAULT,   0)\
   C(log_highlight,  COLOR_YELLOW,    COLOR_DEFAULT,   A_BOLD)\
   C(log_join,       COLOR_CYAN,      COLOR_DEFAULT,   A_BOLD)\

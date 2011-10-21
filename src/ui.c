@@ -567,10 +567,12 @@ static void ui_userlist_draw_row(struct ui_listing *list, GSequenceIter *iter, i
   char *tag = hub_user_tag(user);
   char *conn = hub_user_conn(user);
   int j=5;
-  if(iter == list->sel) {
-    attron(A_BOLD);
+
+  attron(iter == list->sel ? UIC(list_select) : UIC(list_default));
+  mvhline(row, 0, ' ', wincols);
+  if(iter == list->sel)
     mvaddstr(row, 0, ">");
-  }
+
   if(user->isop)
     mvaddch(row, 2, 'O');
   if(!user->active)
@@ -584,8 +586,8 @@ static void ui_userlist_draw_row(struct ui_listing *list, GSequenceIter *iter, i
   DRAW_COL(row, j, o->cw_ip,    user->ip4?ip4_unpack(user->ip4):"");
   g_free(conn);
   g_free(tag);
-  if(iter == list->sel)
-    attroff(A_BOLD);
+
+  attroff(iter == list->sel ? UIC(list_select) : UIC(list_default));
 }
 
 
@@ -652,7 +654,8 @@ static void ui_userlist_draw(struct ui_tab *tab) {
 
   // header
   int i = 5;
-  attron(A_BOLD);
+  attron(UIC(list_header));
+  mvhline(1, 0, ' ', wincols);
   mvaddstr(1, 2, "OP");
   DRAW_COL(1, i, o.cw_user,  "Username");
   DRAW_COL(1, i, o.cw_share, "Share");
@@ -661,7 +664,7 @@ static void ui_userlist_draw(struct ui_tab *tab) {
   DRAW_COL(1, i, o.cw_mail,  "E-Mail");
   DRAW_COL(1, i, o.cw_conn,  "Connection");
   DRAW_COL(1, i, o.cw_ip,    "IP");
-  attroff(A_BOLD);
+  attroff(UIC(list_header));
 
   // rows
   int bottom = tab->details ? winrows-7 : winrows-3;
@@ -921,10 +924,11 @@ static char *ui_conn_title() {
 
 static void ui_conn_draw_row(struct ui_listing *list, GSequenceIter *iter, int row, void *dat) {
   struct cc *cc = g_sequence_get(iter);
-  if(iter == list->sel) {
-    attron(A_BOLD);
-    mvaddch(row, 0, '>');
-  }
+
+  attron(iter == list->sel ? UIC(list_select) : UIC(list_default));
+  mvhline(row, 0, ' ', wincols);
+  if(iter == list->sel)
+    mvaddstr(row, 0, ">");
 
   mvaddch(row, 2,
     cc->state == CCS_CONN      ? 'C' :
@@ -973,8 +977,7 @@ static void ui_conn_draw_row(struct ui_listing *list, GSequenceIter *iter, int r
       mvaddnstr(row, 58, file, str_offset_from_columns(file, wincols-58));
   }
 
-  if(iter == list->sel)
-    attroff(A_BOLD);
+  attroff(iter == list->sel ? UIC(list_select) : UIC(list_default));
 }
 
 
@@ -986,7 +989,8 @@ static void ui_conn_draw_details(int l) {
   }
 
   // labels
-  attron(A_BOLD);
+  attron(UIC(list_header));
+  mvhline(1, 0, ' ', wincols);
   mvaddstr(l+1,  3, "Username:");
   mvaddstr(l+1, 42, "Hub:");
   mvaddstr(l+2,  4, "IP/port:");
@@ -1001,7 +1005,7 @@ static void ui_conn_draw_details(int l) {
   mvaddstr(l+6, 41, "Idle:");
   mvaddstr(l+7,  7, "File:");
   mvaddstr(l+8,  1, "Last error:");
-  attroff(A_BOLD);
+  attroff(UIC(list_header));
 
   // line 1
   mvaddstr(l+1, 13, cc->nick ? cc->nick : "Unknown / connecting");
@@ -1328,10 +1332,10 @@ static char *ui_fl_title(struct ui_tab *tab) {
 static void ui_fl_draw_row(struct ui_listing *list, GSequenceIter *iter, int row, void *dat) {
   struct fl_list *fl = g_sequence_get(iter);
 
-  if(iter == list->sel) {
-    attron(A_BOLD);
-    mvaddch(row, 0, '>');
-  }
+  attron(iter == list->sel ? UIC(list_select) : UIC(list_default));
+  mvhline(row, 0, ' ', wincols);
+  if(iter == list->sel)
+    mvaddstr(row, 0, ">");
 
   mvaddch(row, 2, fl->isfile && !fl->hastth ? 'H' :' ');
 
@@ -1340,8 +1344,7 @@ static void ui_fl_draw_row(struct ui_listing *list, GSequenceIter *iter, int row
     mvaddch(row, 17, '/');
   mvaddnstr(row, 18, fl->name, str_offset_from_columns(fl->name, wincols-19));
 
-  if(iter == list->sel)
-    attroff(A_BOLD);
+  attroff(iter == list->sel ? UIC(list_select) : UIC(list_default));
 }
 
 
@@ -1630,10 +1633,11 @@ static char *ui_dl_title() {
 
 static void ui_dl_draw_row(struct ui_listing *list, GSequenceIter *iter, int row, void *dat) {
   struct dl *dl = g_sequence_get(iter);
-  if(iter == list->sel) {
-    attron(A_BOLD);
-    mvaddch(row, 0, '>');
-  }
+
+  attron(iter == list->sel ? UIC(list_select) : UIC(list_default));
+  mvhline(row, 0, ' ', wincols);
+  if(iter == list->sel)
+    mvaddstr(row, 0, ">");
 
   int online = 0;
   int i;
@@ -1665,17 +1669,17 @@ static void ui_dl_draw_row(struct ui_listing *list, GSequenceIter *iter, int row
     g_free(def);
   }
 
-  if(iter == list->sel)
-    attroff(A_BOLD);
+  attroff(iter == list->sel ? UIC(list_select) : UIC(list_default));
 }
 
 
 static void ui_dl_dud_draw_row(struct ui_listing *list, GSequenceIter *iter, int row, void *dat) {
   struct dl_user_dl *dud = g_sequence_get(iter);
-  if(iter == list->sel) {
-    attron(A_BOLD);
-    mvaddch(row, 0, '>');
-  }
+
+  attron(iter == list->sel ? UIC(list_select) : UIC(list_default));
+  mvhline(row, 0, ' ', wincols);
+  if(iter == list->sel)
+    mvaddstr(row, 0, ">");
 
   struct hub_user *u = g_hash_table_lookup(hub_uids, &dud->u->uid);
   if(u) {
@@ -1695,19 +1699,19 @@ static void ui_dl_dud_draw_row(struct ui_listing *list, GSequenceIter *iter, int
   else
     mvaddstr(row, 36, "Idle.");
 
-  if(iter == list->sel)
-    attroff(A_BOLD);
+  attroff(iter == list->sel ? UIC(list_select) : UIC(list_default));
 }
 
 
 static void ui_dl_draw() {
-  attron(A_BOLD);
+  attron(UIC(list_header));
+  mvhline(1, 0, ' ', wincols);
   mvaddstr(1, 2,  "Users");
   mvaddstr(1, 9,  "Size");
   mvaddstr(1, 20, "Done");
   mvaddstr(1, 26, "Prio");
   mvaddstr(1, 32, "File");
-  attroff(A_BOLD);
+  attroff(UIC(list_header));
 
   int bottom = ui_dl->details ? winrows-14 : winrows-4;
   int pos = ui_listing_draw(ui_dl->list, 2, bottom-1, ui_dl_draw_row, NULL);
@@ -2011,10 +2015,10 @@ static void ui_search_draw_row(struct ui_listing *list, GSequenceIter *iter, int
   struct search_r *r = g_sequence_get(iter);
   struct ui_tab *tab = dat;
 
-  if(iter == list->sel) {
-    attron(A_BOLD);
-    mvaddch(row, 0, '>');
-  }
+  attron(iter == list->sel ? UIC(list_select) : UIC(list_default));
+  mvhline(row, 0, ' ', wincols);
+  if(iter == list->sel)
+    mvaddstr(row, 0, ">");
 
   struct hub_user *u = g_hash_table_lookup(hub_uids, &r->uid);
   if(u) {
@@ -2043,13 +2047,13 @@ static void ui_search_draw_row(struct ui_listing *list, GSequenceIter *iter, int
     fn = r->file;
   mvaddnstr(row, i+21, fn, str_offset_from_columns(fn, wincols-i-21));
 
-  if(iter == list->sel)
-    attroff(A_BOLD);
+  attroff(iter == list->sel ? UIC(list_select) : UIC(list_default));
 }
 
 
 static void ui_search_draw(struct ui_tab *tab) {
-  attron(A_BOLD);
+  attron(UIC(list_header));
+  mvhline(1, 0, ' ', wincols);
   mvaddstr(1,    2, "User");
   if(!tab->search_hide_hub)
     mvaddstr(1, 22, "Hub");
@@ -2057,7 +2061,7 @@ static void ui_search_draw(struct ui_tab *tab) {
   mvaddstr(1, i,    "Size");
   mvaddstr(1, i+12, "Slots");
   mvaddstr(1, i+21, "File");
-  attroff(A_BOLD);
+  attroff(UIC(list_header));
 
   int bottom = winrows-4;
   int pos = ui_listing_draw(tab->list, 2, bottom-1, ui_search_draw_row, tab);

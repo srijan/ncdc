@@ -278,6 +278,9 @@ static const struct doc_set {
 { "color_*", "<color>",
   "The settings starting with the `color_' prefix allow you to change the"
   " interface colors. The following is a list of available color settings:\n"
+  "  list_default  - default item in a list\n"
+  "  list_header   - header of a list\n"
+  "  list_select   - selected item in a list\n"
   "  log_default   - default log color\n"
   "  log_time      - the time prefix in log messages\n"
   "  log_nick      - default nick color\n"

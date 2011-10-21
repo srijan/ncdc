@@ -64,9 +64,6 @@ struct ui_tab {
   gboolean user_hide_mail : 1;
   gboolean user_hide_conn : 1;
   gboolean user_hide_ip : 1;
-  // MSG
-  gboolean msg_online : 1;
-  int msg_replyto;
   // HUB
   gboolean hub_joincomplete : 1;
   GRegex *hub_highlight;
@@ -86,6 +83,8 @@ struct ui_tab {
   struct search_q *search_q;
   time_t search_t;
   gboolean search_hide_hub : 1;
+  // MSG
+  int msg_replyto;
 };
 
 #endif
@@ -170,7 +169,6 @@ struct ui_tab *ui_msg_create(struct hub *hub, struct hub_user *user) {
   struct ui_tab *tab = g_new0(struct ui_tab, 1);
   tab->type = UIT_MSG;
   tab->hub = hub;
-  tab->msg_online = TRUE;
   tab->uid = user->uid;
   tab->name = g_strdup_printf("~%s", user->name);
   tab->log = ui_logwindow_create(tab->name, g_key_file_get_integer(conf_file, "global", "backlog", NULL));
@@ -193,23 +191,30 @@ void ui_msg_close(struct ui_tab *tab) {
 }
 
 
-static void ui_msg_draw(struct ui_tab *tab) {
-  // Check that the user is online and still has the same name
-  struct hub_user *u = g_hash_table_lookup(hub_uids, &tab->uid);
-  if(u && !tab->msg_online)
+static void ui_msg_userchange(struct ui_tab *tab, int change, struct hub_user *u) {
+  switch(change) {
+  case UIHUB_UC_JOIN:
     ui_mf(tab, 0, "--> %s has joined.", u->name);
-  else if(!u && tab->msg_online)
+    break;
+  case UIHUB_UC_QUIT:
     ui_mf(tab, 0, "--< %s has quit.", tab->name+1);
-  else if(u && strcmp(u->name, tab->name+1) != 0) {
-    ui_mf(tab, 0, "%s is now known as %s.", tab->name+1, u->name);
-    g_free(tab->name);
-    tab->name = g_strdup_printf("~%s", u->name);
+    break;
+  case UIHUB_UC_NFO:
+    // Detect nick changes.
     // Note: the name of the log file remains the same even after a nick
     // change. This probably isn't a major problem, though. Nick changes are
     // not very common and are only detected on ADC hubs.
+    if(strcmp(u->name, tab->name+1) != 0) {
+      ui_mf(tab, 0, "%s is now known as %s.", tab->name+1, u->name);
+      g_free(tab->name);
+      tab->name = g_strdup_printf("~%s", u->name);
+    }
+    break;
   }
-  tab->msg_online = !!u;
+}
 
+
+static void ui_msg_draw(struct ui_tab *tab) {
   ui_logwindow_draw(tab->log, 1, 0, winrows-4, wincols);
 
   mvaddstr(winrows-3, 0, tab->name);
@@ -220,12 +225,8 @@ static void ui_msg_draw(struct ui_tab *tab) {
 
 
 static char *ui_msg_title(struct ui_tab *tab) {
-  // Note that tab->msg_online is set in ui_msg_draw(), which is called *after*
-  // ui_msg_title(), so the "(offline)" indication will be displayed on the
-  // next redraw. This is noticable as a slight lag of max. 1s in the user
-  // interface, not very major.
   return g_strdup_printf("Chatting with %s on %s%s.",
-      tab->name+1, tab->hub->tab->name, tab->msg_online ? "" : " (offline)");
+    tab->name+1, tab->hub->tab->name, g_hash_table_lookup(hub_uids, &tab->uid) ? "" : " (offline)");
 }
 
 
@@ -408,6 +409,11 @@ void ui_hub_userchange(struct ui_tab *tab, int change, struct hub_user *user) {
   // notify the userlist, when it is open
   if(tab->userlist_tab)
     ui_userlist_userchange(tab->userlist_tab, change, user);
+
+  // notify the MSG tab, if we have one open for this user
+  struct ui_tab *mt = g_hash_table_lookup(ui_msg_tabs, &user->uid);
+  if(mt)
+    ui_msg_userchange(mt, change, user);
 
   // display the join/quit, when requested
   gboolean log = conf_hub_get(boolean, tab->name, "show_joinquit");

@@ -355,7 +355,7 @@ void ui_hub_close(struct ui_tab *tab) {
 static void ui_hub_draw(struct ui_tab *tab) {
   ui_logwindow_draw(tab->log, 1, 0, winrows-5, wincols);
 
-  attron(A_REVERSE);
+  attron(UIC(separator));
   mvhline(winrows-4, 0, ' ', wincols);
   if(tab->hub->net->connecting)
     mvaddstr(winrows-4, wincols-15, "Connecting...");
@@ -376,7 +376,7 @@ static void ui_hub_draw(struct ui_tab *tab) {
     mvaddstr(winrows-4, wincols-26, tmp);
     g_free(tmp);
   }
-  attroff(A_REVERSE);
+  attroff(UIC(separator));
 
   mvaddstr(winrows-3, 0, tab->name);
   addstr("> ");
@@ -671,14 +671,14 @@ static void ui_userlist_draw(struct ui_tab *tab) {
   int pos = ui_listing_draw(tab->list, 2, bottom-1, ui_userlist_draw_row, &o);
 
   // footer
-  attron(A_REVERSE);
+  attron(UIC(separator));
   mvhline(bottom, 0, ' ', wincols);
   int count = g_hash_table_size(tab->hub->users);
   mvaddstr(bottom, 0, "Totals:");
   mvprintw(bottom, o.cw_user+5, "%s%c   %d users",
     str_formatsize(tab->hub->sharesize), tab->hub->sharecount == count ? ' ' : '+', count);
   mvprintw(bottom, wincols-6, "%3d%%", pos);
-  attroff(A_REVERSE);
+  attroff(UIC(separator));
 
   // detailed info box
   if(!tab->details)
@@ -1061,10 +1061,10 @@ static void ui_conn_draw() {
   int pos = ui_listing_draw(ui_conn->list, 2, bottom-1, ui_conn_draw_row, NULL);
 
   // footer
-  attron(A_REVERSE);
+  attron(UIC(separator));
   mvhline(bottom, 0, ' ', wincols);
   mvprintw(bottom, wincols-24, "%3d connections    %3d%%", g_sequence_iter_get_position(g_sequence_get_end_iter(ui_conn->list->list)), pos);
-  attroff(A_REVERSE);
+  attroff(UIC(separator));
 
   // detailed info
   if(ui_conn->details)
@@ -1371,7 +1371,7 @@ static void ui_fl_draw(struct ui_tab *tab) {
 
   // footer
   struct fl_list *sel = pos >= 0 && !g_sequence_iter_is_end(tab->list->sel) ? g_sequence_get(tab->list->sel) : NULL;
-  attron(A_REVERSE);
+  attron(UIC(separator));
   mvhline(winrows-3, 0, ' ', wincols);
   if(pos >= 0)
     mvprintw(winrows-3, wincols-34, "%6d items   %s   %3d%%", tab->fl_list->sub->len, str_formatsize(tab->fl_list->size), pos);
@@ -1392,7 +1392,7 @@ static void ui_fl_draw(struct ui_tab *tab) {
     else
       mvprintw(winrows-3, 0, " %d items, %s bytes", num, str_fullsize(sel->size));
   }
-  attroff(A_REVERSE);
+  attroff(UIC(separator));
 }
 
 
@@ -1719,7 +1719,7 @@ static void ui_dl_draw() {
   struct dl *sel = g_sequence_iter_is_end(ui_dl->list->sel) ? NULL : g_sequence_get(ui_dl->list->sel);
 
   // footer / separator
-  attron(A_REVERSE);
+  attron(UIC(separator));
   mvhline(bottom, 0, ' ', wincols);
   if(sel) {
     char hash[40] = {};
@@ -1728,7 +1728,7 @@ static void ui_dl_draw() {
   } else
     mvaddstr(bottom, 0, "Nothing selected.");
   mvprintw(bottom, wincols-19, "%5d files - %3d%%", g_hash_table_size(dl_queue), pos);
-  attroff(A_REVERSE);
+  attroff(UIC(separator));
 
   // error info
   if(sel && sel->prio == DLP_ERR)
@@ -2069,7 +2069,7 @@ static void ui_search_draw(struct ui_tab *tab) {
   struct search_r *sel = g_sequence_iter_is_end(tab->list->sel) ? NULL : g_sequence_get(tab->list->sel);
 
   // footer
-  attron(A_REVERSE);
+  attron(UIC(separator));
   mvhline(bottom,   0, ' ', wincols);
   if(!sel)
     mvaddstr(bottom, 0, "Nothing selected.");
@@ -2082,7 +2082,7 @@ static void ui_search_draw(struct ui_tab *tab) {
   }
   mvprintw(bottom, wincols-29, "%5d results in%4ds - %3d%%",
     g_sequence_get_length(tab->list->list), time(NULL)-tab->search_t, pos);
-  attroff(A_REVERSE);
+  attroff(UIC(separator));
   if(sel)
     mvaddnstr(bottom+1, 3, sel->file, str_offset_from_columns(sel->file, wincols-3));
 }

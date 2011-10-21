@@ -288,6 +288,7 @@ static const struct doc_set {
   "  log_ownnick   - color of your own nick\n"
   "  log_join      - color of join messages\n"
   "  log_quit      - color of quit messages\n"
+  "  separator     - the list separator/footer bar\n"
   "  tabprio_low   - low priority tab notification color\n"
   "  tabprio_med   - medium priority tab notification color\n"
   "  tabprio_high  - high priority tab notification color\n"

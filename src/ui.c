@@ -2518,10 +2518,10 @@ void ui_draw() {
     curtab->type == UIT_FL       ? ui_fl_title(curtab) :
     curtab->type == UIT_DL       ? ui_dl_title() :
     curtab->type == UIT_SEARCH   ? ui_search_title(curtab) : g_strdup("");
-  attron(A_REVERSE);
+  attron(UIC(title));
   mvhline(0, 0, ' ', wincols);
   mvaddstr(0, 0, title);
-  attroff(A_REVERSE);
+  attroff(UIC(title));
   g_free(title);
 
   // second-last line - time and tab list

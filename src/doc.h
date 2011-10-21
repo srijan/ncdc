@@ -288,6 +288,7 @@ static const struct doc_set {
   "  tabprio_low   - low priority tab notification color\n"
   "  tabprio_med   - medium priority tab notification color\n"
   "  tabprio_high  - high priority tab notification color\n"
+  "  title         - the title bar\n"
   "\n"
   "The actual color value can be set with a comma-separated list of color names"
   " and/or attributes. The first color in the list is the foreground color, the"

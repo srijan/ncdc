@@ -1470,8 +1470,9 @@ static void ui_fl_key(struct ui_tab *tab, guint64 key) {
       struct fl_list *root = tab->fl_list;
       while(root->parent)
         root = root->parent;
-      int n = dl_queue_match_fl(tab->uid, key == INPT_CHAR('m') ? sel : root);
-      ui_mf(NULL, 0, "Added user to queue for %d files.", n);
+      int a = 0;
+      int n = dl_queue_match_fl(tab->uid, key == INPT_CHAR('m') ? sel : root, &a);
+      ui_mf(NULL, 0, "Matched %d files, %d new.", n, a);
     }
     break;
 
@@ -2136,17 +2137,25 @@ static void ui_search_key(struct ui_tab *tab, guint64 key) {
       ui_m(NULL, 0, "Nothing selected.");
     else if(sel->size == G_MAXUINT64)
       ui_m(NULL, 0, "Can't download directories from the search. Use 'b' to browse the file list instead.");
-    else
-      ui_m(NULL, 0, dl_queue_matchfile(sel->uid, sel->tth) ? "Added user to queue for the selected file." : "File not in the queue, or user is already listed.");
+    else {
+      int r = dl_queue_matchfile(sel->uid, sel->tth);
+      ui_m(NULL, 0, r < 0 ? "File not in the queue." :
+                   r == 0 ? "User already in the queue."
+                          : "Added user to queue for the selected file.");
+    }
     break;
   case INPT_CHAR('M'):;// M - match all results with queue
-    int n = 0;
+    int n = 0, a = 0;
     GSequenceIter *i = g_sequence_get_begin_iter(tab->list->list);
     for(; !g_sequence_iter_is_end(i); i=g_sequence_iter_next(i)) {
       struct search_r *r = g_sequence_get(i);
-      n += dl_queue_matchfile(r->uid, r->tth);
+      int v = dl_queue_matchfile(r->uid, r->tth);
+      if(v >= 0)
+        n++;
+      if(v == 1)
+        a++;
     }
-    ui_mf(NULL, 0, "Added %d alternative sources to the download queue.", n);
+    ui_mf(NULL, 0, "Matched %d files, %d new.", n, a);
     break;
   case INPT_CHAR('a'): // a - search for alternative sources
     if(!sel)

@@ -1175,15 +1175,13 @@ static void ui_fl_setdir(struct ui_tab *tab, struct fl_list *fl, struct fl_list 
 }
 
 
-static void ui_fl_dosel(struct ui_tab *tab, const char *sel) {
-  struct fl_list *root = tab->fl_list;
+static void ui_fl_dosel(struct ui_tab *tab, struct fl_list *fl, const char *sel) {
+  struct fl_list *root = fl;
   while(root->parent)
     root = root->parent;
   struct fl_list *n = fl_list_from_path(root, sel);
-  if(!n) {
+  if(!n)
     ui_mf(tab, 0, "Can't select `%s': item not found.", sel);
-    return;
-  }
   // open the parent directory and select item
   ui_fl_setdir(tab, n->parent, n);
 }
@@ -1208,7 +1206,7 @@ void ui_fl_queue(struct hub_user *u, gboolean force, const char *sel, struct ui_
     ui_tab_cur = n;
     if(sel) {
       if(!t->fl_loading)
-        ui_fl_dosel(n->data, sel);
+        ui_fl_dosel(n->data, t->fl_list, sel);
       else {
         g_free(t->fl_sel);
         t->fl_sel = g_strdup(sel);
@@ -1257,7 +1255,7 @@ static void ui_fl_loaddone(struct fl_list *fl, GError *err, void *dat) {
   tab->prio = err ? UIP_HIGH : UIP_MED;
   if(tab->fl_sel) {
     if(fl)
-      ui_fl_dosel(tab, tab->fl_sel);
+      ui_fl_dosel(tab, fl, tab->fl_sel);
     g_free(tab->fl_sel);
     tab->fl_sel = NULL;
   } else
@@ -1283,7 +1281,7 @@ struct ui_tab *ui_fl_create(guint64 uid, const char *sel) {
     struct fl_list *fl = fl_local_list ? fl_list_copy(fl_local_list) : NULL;
     tab->prio = UIP_MED;
     if(fl && fl->sub && sel)
-      ui_fl_dosel(tab, sel);
+      ui_fl_dosel(tab, fl, sel);
     else if(fl && fl->sub)
       ui_fl_setdir(tab, fl, NULL);
   } else {

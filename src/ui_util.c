@@ -95,6 +95,7 @@ struct ui_color ui_colors[] = {
 
 struct ui_attr ui_attr_names[] = {
   { "black",     TRUE,  COLOR_BLACK   },
+  { "blink",     FALSE, A_BLINK       },
   { "blue",      TRUE,  COLOR_BLUE    },
   { "bold",      FALSE, A_BOLD        },
   { "cyan",      TRUE,  COLOR_CYAN    },

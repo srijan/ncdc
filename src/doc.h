@@ -300,7 +300,7 @@ static const struct doc_set {
   " is not specified, the default colors of your terminal will be used.\n"
   "The following color names can be used: black, blue, cyan, default, green,"
   " magenta, red, white and yellow.\n"
-  "The following attributes can be used: bold, reverse and underline.\n"
+  "The following attributes can be used: bold, blink, reverse and underline.\n"
   "The actual color values displayed by your terminal may vary. Adding the"
   " `bold' attribute usually makes the foreground color appear brighter as well."
 },

@@ -27,6 +27,13 @@ MOSTLYCLEANFILES = $(auto_headers)
 endif
 
 
+# append -DGIT_VERSION, when enabled
+if USE_GIT_VERSION
+GIT_VERSION := $(shell sh -c 'git describe --abbrev=4 --dirty=-d | sed s/^v//')
+ncdc_CFLAGS += -DGIT_VERSION=\"$(GIT_VERSION)\"
+endif
+
+
 # This trick seems to work only with GNU make. I have no idea how to do this in
 # a portable way, other than writing a separate rule for each header file. :-(
 ${auto_headers}: %.h: %.c

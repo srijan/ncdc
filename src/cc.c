@@ -1068,7 +1068,7 @@ static void nmdc_mynick(struct cc *cc, const char *nick) {
 
   if(cc->active) {
     net_sendf(cc->net, "$MyNick %s", cc->hub->nick_hub);
-    net_sendf(cc->net, "$Lock EXTENDEDPROTOCOL/wut? Pk=%s-%s", PACKAGE_NAME, PACKAGE_VERSION);
+    net_sendf(cc->net, "$Lock EXTENDEDPROTOCOL/wut? Pk=%s-%s", PACKAGE_NAME, VERSION);
   }
 }
 
@@ -1358,7 +1358,7 @@ static void handle_connect(struct net *n) {
     net_sendf(n, "CSTA 000 referrer RFadc://%s", net_remoteaddr(cc->hub->net));
   } else {
     net_sendf(n, "$MyNick %s", cc->hub->nick_hub);
-    net_sendf(n, "$Lock EXTENDEDPROTOCOL/wut? Pk=%s-%s,Ref=%s", PACKAGE_NAME, PACKAGE_VERSION, net_remoteaddr(cc->hub->net));
+    net_sendf(n, "$Lock EXTENDEDPROTOCOL/wut? Pk=%s-%s,Ref=%s", PACKAGE_NAME, VERSION, net_remoteaddr(cc->hub->net));
   }
   cc->state = CCS_HANDSHAKE;
 }

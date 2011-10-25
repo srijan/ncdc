@@ -214,7 +214,7 @@ char *ncdc_version() {
   if(ver)
     return ver->str;
   ver = g_string_new("");
-  g_string_printf(ver, msg, PACKAGE_NAME, PACKAGE_VERSION,
+  g_string_printf(ver, msg, PACKAGE_NAME, VERSION,
     __DATE__, __TIME__,
 #ifdef HAVE_LINUX_SENDFILE
     "Linux",

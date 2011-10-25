@@ -138,6 +138,27 @@ have_tls=no
 PKG_CHECK_EXISTS([gio-2.0 >= 2.28], [have_tls=yes])
 
 
+
+
+# Check whether we should use the version string from AC_INIT(), or use
+# git-describe to create one. This trick is copied from the pacman source.
+
+AC_ARG_ENABLE(git-version,
+  AS_HELP_STRING([--enable-git-version], [enable use of git version in version string if available]),
+  [wantgitver=$enableval], [wantgitver=yes])
+
+usegitver=no
+if test "x$wantgitver" = "xyes" ; then
+  AC_CHECK_PROGS([GIT], [git])
+  AC_CHECK_FILE([.git/], hasgitdir=yes)
+  test $GIT -a "x$hasgitdir" = "xyes" && usegitver=yes
+fi
+AM_CONDITIONAL(USE_GIT_VERSION, test "x$usegitver" = "xyes")
+
+
+
+
+
 AC_OUTPUT([GNUmakefile doc/GNUmakefile src/GNUmakefile util/GNUmakefile])
 
 

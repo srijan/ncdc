@@ -1183,7 +1183,7 @@ static void ui_fl_dosel(struct ui_tab *tab, struct fl_list *fl, const char *sel)
   if(!n)
     ui_mf(tab, 0, "Can't select `%s': item not found.", sel);
   // open the parent directory and select item
-  ui_fl_setdir(tab, n->parent, n);
+  ui_fl_setdir(tab, n?n->parent:fl, n);
 }
 
 

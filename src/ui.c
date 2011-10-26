@@ -989,8 +989,7 @@ static void ui_conn_draw_details(int l) {
   }
 
   // labels
-  attron(UIC(list_header));
-  mvhline(1, 0, ' ', wincols);
+  attron(A_BOLD);
   mvaddstr(l+1,  3, "Username:");
   mvaddstr(l+1, 42, "Hub:");
   mvaddstr(l+2,  4, "IP/port:");
@@ -1005,7 +1004,7 @@ static void ui_conn_draw_details(int l) {
   mvaddstr(l+6, 41, "Idle:");
   mvaddstr(l+7,  7, "File:");
   mvaddstr(l+8,  1, "Last error:");
-  attroff(UIC(list_header));
+  attroff(A_BOLD);
 
   // line 1
   mvaddstr(l+1, 13, cc->nick ? cc->nick : "Unknown / connecting");
@@ -1049,13 +1048,14 @@ static void ui_conn_draw_details(int l) {
 
 
 static void ui_conn_draw() {
-  attron(A_BOLD);
+  attron(UIC(list_header));
+  mvhline(1, 0, ' ', wincols);
   mvaddstr(1, 2,  "St Username");
   mvaddstr(1, 21, "Hub");
   mvaddstr(1, 33, "Chunk          %");
   mvaddstr(1, 50, " KiB/s");
   mvaddstr(1, 58, "File");
-  attroff(A_BOLD);
+  attroff(UIC(list_header));
 
   int bottom = ui_conn->details ? winrows-11 : winrows-3;
   int pos = ui_listing_draw(ui_conn->list, 2, bottom-1, ui_conn_draw_row, NULL);

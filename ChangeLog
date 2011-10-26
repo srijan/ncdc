@@ -1,3 +1,17 @@
+1.4 - 2011-10-26
+	- Added sorting functionality to file list
+	- Added color settings: title, separator, list_default, list_header and
+	  list_select
+	- Added "blink" color attribute
+	- Allow /disconnect to be used on the main tab
+	- Display number of matched and added items when using match queue feature
+	- Use git-describe to create a version string, if available
+	- Decreased memory usage for large file lists
+	- Handle duplicate filenames in other users' file list
+	- Fixed incorrect setting of the "Incomplete" flag in files.xml.bz2
+	- Fixed handling of the PM param in MSG commands on ADC
+	- Fixed user change notifications for PM tabs
+
 1.3 - 2011-10-14
 	- Added multi-source downloading
 	- Added user information view and management keys to download queue tab

@@ -28,17 +28,41 @@
 #include <stdlib.h>
 
 
-// List (well, table) of users who are granted a slot. Key = CID (g_strdup'ed),
-// value = (void *)1. cc_init_global() is responsible for initializing it.
+// List (well, table) of users who are granted a slot. Key = UID (g_memdup'ed),
+// value = (void *)1. cc_init_global() is responsible for initializing it, but
+// the list is otherwise managed in commands.c.
 GHashTable *cc_granted = NULL;
 
-
 void cc_grant(struct hub_user *u) {
-  if(!g_hash_table_lookup(cc_granted, &(u->uid)))
-    g_hash_table_insert(cc_granted, g_memdup(&(u->uid), 8), (void *)1);
+  if(!g_hash_table_lookup(cc_granted, &u->uid))
+    g_hash_table_insert(cc_granted, g_memdup(&u->uid, 8), (void *)1);
 }
 
 
+// For use with qsort()
+static int cc_grant_cmp(const void *pa, const void *pb) {
+  guint64 a = *((guint64 *)pa);
+  guint64 b = *((guint64 *)pb);
+  struct hub_user *ua = g_hash_table_lookup(hub_uids, &a);
+  struct hub_user *ub = g_hash_table_lookup(hub_uids, &b);
+  return !ua && !ub ? (a > b ? 1 : a < b ? -1 : 0) :
+     ua && !ub ? 1 : !ua && ub ? -1 : g_utf8_collate(ua->name, ub->name);
+}
+
+
+// Get an ordered list of granted users. Must be g_free()'d after user.
+guint64 *cc_grant_list() {
+  guint64 *list = g_new(guint64, g_hash_table_size(cc_granted)+1);
+  guint64 *key;
+  GHashTableIter iter;
+  g_hash_table_iter_init(&iter, cc_granted);
+  int n = 0;
+  while(g_hash_table_iter_next(&iter, (gpointer *)&key, NULL))
+    list[n++] = *key;
+  list[n] = 0;
+  qsort(list, n, 8, cc_grant_cmp);
+  return list;
+}
 
 
 

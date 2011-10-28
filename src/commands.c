@@ -727,13 +727,33 @@ static void c_whois(char *args) {
 }
 
 
+static void listgrants() {
+  guint64 *list = cc_grant_list();
+  if(!*list)
+    ui_m(NULL, 0, "No slots granted to anyone.");
+  else {
+    ui_m(NULL, 0, "\nGranted slots to:");
+    guint64 *n = list;
+    for(; *n; n++) {
+      struct hub_user *u = g_hash_table_lookup(hub_uids, n);
+      if(u)
+        ui_mf(NULL, 0, "  %"G_GINT64_MODIFIER"x (%s on %s)", *n, u->name, u->hub->tab->name);
+      else
+        ui_mf(NULL, 0, "  %"G_GINT64_MODIFIER"x (user offline)", *n);
+    }
+    ui_m(NULL, 0, "");
+  }
+  g_free(list);
+}
+
+
 static void c_grant(char *args) {
   struct ui_tab *tab = ui_tab_cur->data;
   struct hub_user *u = NULL;
-  if(tab->type != UIT_HUB && tab->type != UIT_MSG)
+  if((!*args && tab->type != UIT_MSG) || strcmp(args, "-list") == 0)
+    listgrants();
+  else if(tab->type != UIT_HUB && tab->type != UIT_MSG)
     ui_m(NULL, 0, "This command can only be used on hub and message tabs.");
-  else if(!args[0] && tab->type != UIT_MSG)
-    ui_m(NULL, 0, "No user specified. See `/help grant' for more information.");
   else if(args[0]) {
     u = hub_user_get(tab->hub, args);
     if(!u)

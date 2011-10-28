@@ -79,11 +79,15 @@ static const struct doc_cmd {
   "This command may take some time to complete, and will fully block ncdc while"
   " it is running. You won't have to perform this command very often."
 },
-{ "grant", "[<user>]", "Grant someone a slot.",
+{ "grant", "[-list|<user>]", "Grant someone a slot.",
   "Grant someone a slot. This allows the user to download from you even if you"
   " have no free slots.  The slot will be granted for as long as ncdc stays"
   " open. If you restart ncdc, the user will have to wait for a regular slot."
   " Unless, of course, you /grant a slot again.\n\n"
+  "To get a list of users whom you have granted a slot, use `/grant' without"
+  " arguments or with `-list'. Be warned that using `/grant' without arguments on"
+  " a PM tab will grant the slot to the user you are talking with. Make sure to"
+  " use `-all' in that case.\n\n"
   "Note that a granted slot is specific to a single hub. If the same user is"
   " also on other hubs, he/she will not be granted a slot on those hubs."
 },

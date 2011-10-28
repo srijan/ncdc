@@ -599,6 +599,56 @@ guint64 str_parsesize(const char *str) {
 }
 
 
+char *str_formatinterval(int sec) {
+  static char buf[100];
+  int l=0;
+  if(sec >= 24*3600) {
+    l += g_snprintf(buf+l, 99-l, "%dd ", sec/(24*3600));
+    sec %= 24*3600;
+  }
+  if(sec >= 3600) {
+    l += g_snprintf(buf+l, 99-l, "%dh ", sec/3600);
+    sec %= 3600;
+  }
+  if(sec >= 60) {
+    l += g_snprintf(buf+l, 99-l, "%dm ", sec/60);
+    sec %= 60;
+  }
+  if(sec || !l)
+    g_snprintf(buf+l, 99-l, "%ds", sec);
+  return buf;
+}
+
+
+// Parses an interval string, returns -1 on error.
+int str_parseinterval(const char *str) {
+  int sec = 0;
+  while(*str) {
+    if(*str == ' ')
+      str++;
+    else if(*str >= '0' && *str <= '9') {
+      char *e;
+      int num = strtoull(str, &e, 0);
+      if(!e || e == str)
+        return -1;
+      if(!*e || *e == ' ' || *e == 's' || *e == 'S')
+        sec += num;
+      else if(*e == 'm' || *e == 'M')
+        sec += num*60;
+      else if(*e == 'h' || *e == 'H')
+        sec += num*3600;
+      else if(*e == 'd' || *e == 'D')
+        sec += num*3600*24;
+      else
+        return -1;
+      str = e+1;
+    } else
+      return -1;
+  }
+  return sec;
+}
+
+
 // Prefixes all strings in the array-of-strings with a string, obtained by
 // concatenating all arguments together. Last argument must be NULL.
 void strv_prefix(char **arr, const char *str, ...) {
@@ -1102,26 +1152,8 @@ GSList *ratecalc_list = NULL;
 
 // calculates an ETA and formats it into a "?d ?h ?m ?s" thing
 char *ratecalc_eta(struct ratecalc *rc, guint64 left) {
-  static char buf[100];
   int sec = left / MAX(1, ratecalc_get(rc));
-  int l = 0;
-  buf[0] = 0;
-  if(sec > 356*24*3600)
-    return "-";
-  if(sec >= 24*3600) {
-    l += g_snprintf(buf+l, 99-l, "%dd ", sec/(24*3600));
-    sec %= 24*3600;
-  }
-  if(sec >= 3600) {
-    l += g_snprintf(buf+l, 99-l, "%dh ", sec/3600);
-    sec %= 3600;
-  }
-  if(sec >= 60) {
-    l += g_snprintf(buf+l, 99-l, "%dm ", sec/60);
-    sec %= 60;
-  }
-  g_snprintf(buf+l, 99-l, "%ds", sec);
-  return buf;
+  return sec > 356*24*3600 ? "-" : str_formatinterval(sec);
 }
 
 

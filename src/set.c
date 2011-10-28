@@ -717,8 +717,7 @@ static void set_old_sug(char *group, char *key, char *val, char **sug) {
 
 
 static void get_filelist_maxage(char *group, char *key) {
-  int a = conf_filelist_maxage();
-  ui_mf(NULL, 0, "%s.%s = %d", group, key, a);
+  ui_mf(NULL, 0, "%s.%s = %s", group, key, str_formatinterval(conf_filelist_maxage()));
 }
 
 
@@ -726,8 +725,8 @@ static void set_filelist_maxage(char *group, char *key, char *val) {
   if(!val)
     UNSET(group, key);
   else {
-    long v = strtol(val, NULL, 10);
-    if((!v && errno == EINVAL) || v < INT_MIN || v > INT_MAX || v < 0)
+    int v = str_parseinterval(val);
+    if(v < 0)
       ui_m(NULL, 0, "Invalid number.");
     else {
       g_key_file_set_integer(conf_file, group, key, v);

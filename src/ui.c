@@ -26,6 +26,7 @@
 
 #include "ncdc.h"
 #include <math.h>
+#include <unistd.h>
 
 
 #if INTERFACE
@@ -1226,7 +1227,8 @@ void ui_fl_queue(struct hub_user *u, gboolean force, const char *sel, struct ui_
   if(!force) {
     char *tmp = g_strdup_printf("%"G_GINT64_MODIFIER"x.xml.bz2", uid);
     char *fn = g_build_filename(conf_dir, "fl", tmp, NULL);
-    e = g_file_test(fn, G_FILE_TEST_IS_REGULAR);
+    struct stat st;
+    e = stat(fn, &st) < 0 || st.st_mtime < time(NULL)-conf_filelist_maxage() ? FALSE : TRUE;
     g_free(fn);
     g_free(tmp);
   }

@@ -139,7 +139,8 @@ Filelist containing a listing of all shared files.
 .I $NCDC_DIR/fl/
 Directory where downloaded file lists from other users are stored. The names of
 the files are hex-encoded user IDs that are used internally by ncdc. Old file
-lists are deleted automatically after one week.
+lists are deleted automatically after a confirable interval. See the
+`filelist_maxage' configuration option.
 .TP
 .I $NCDC_DIR/hashdata.dat
 File information and hash data for shared files.

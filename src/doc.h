@@ -350,6 +350,14 @@ static const struct doc_set {
   "  KOI8-R      (Cyrillic)\n"
   "  UTF-8       (International)"
 },
+{ "filelist_maxage", "<interval>",
+  "The maximum age of a downloaded file list. If a file list was downloaded"
+  " longer ago than the configured interval, it will be removed from the cache"
+  " (the fl/ directory) and subsequent requests to open the file list will"
+  " result in the list being downloaded from the user again. Recognized"
+  " suffices are 's' for seconds, 'm' for minutes, 'h' for hours and 'd' for"
+  " days. Set to 0 to disable the cache altogether."
+},
 { "hubname", "<string>",
   "The name of the currently opened hub tab. This is a user-assigned name, and"
   " is only used within ncdc itself. This is the same name as given to the"

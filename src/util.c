@@ -292,7 +292,7 @@ void conf_init() {
 
   // make sure that there is no other ncdc instance working with the same config directory
   char *ver_file = g_build_filename(conf_dir, "version", NULL);
-  int ver_fd = g_open(ver_file, O_WRONLY|O_CREAT, 0600);
+  int ver_fd = g_open(ver_file, O_RDWR|O_CREAT, 0600);
   struct flock lck;
   lck.l_type = F_WRLCK;
   lck.l_whence = SEEK_SET;

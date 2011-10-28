@@ -110,19 +110,19 @@ AC_CHECK_LIB([m],
 # Check for ncursesw
 AC_CHECK_LIB([ncursesw],
              [get_wch],
-             [LIBS="$LIBS -lncursesw"],
+             [AC_SUBST([NCURSES_LIBS],[-lncursesw])],
              [AC_MSG_ERROR(ncursesw library is required)])
 
 # Check for libbz2
 AC_CHECK_LIB([bz2],
              [BZ2_bzReadOpen],
-             [LIBS="$LIBS -lbz2"],
+             [AC_SUBST([BZ2_LIBS],[-lbz2])],
              [AC_MSG_ERROR(bzip2 library is required)])
 
 # Check for gdbm
 AC_CHECK_LIB([gdbm],
              [gdbm_open],
-             [LIBS="$LIBS -lgdbm"],
+             [AC_SUBST([GDBM_LIBS],[-lgdbm])],
              [AC_MSG_ERROR(gdbm library is required)])
 
 # Check for modules (We assume gthread and gio come from the same glib version)

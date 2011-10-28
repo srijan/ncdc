@@ -114,6 +114,10 @@ char conf_pid[24];
   !g_key_file_has_key(conf_file, "global", "ui_time_format", NULL) ? g_strdup("[%H:%M:%S]")\
     : g_key_file_get_string(conf_file, "global", "ui_time_format", NULL))
 
+#define conf_filelist_maxage() (\
+  !g_key_file_has_key(conf_file, "global", "filelist_maxage", NULL) ? (7*24*3600) \
+    : g_key_file_get_integer(conf_file, "global", "filelist_maxage", NULL))
+
 
 #define CONF_TLSP_DISABLE 0
 #define CONF_TLSP_ALLOW   1

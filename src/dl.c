@@ -1368,7 +1368,7 @@ gboolean dl_fl_clean(gpointer dat) {
   }
 
   const char *n;
-  time_t ref = time(NULL) - 7*24*3600; // keep lists for one week
+  time_t ref = time(NULL) - conf_filelist_maxage();
   while((n = g_dir_read_name(d))) {
     if(strcmp(n, ".") == 0 || strcmp(n, "..") == 0)
       continue;

@@ -3,6 +3,7 @@ AC_INIT([ncdc], [1.5g], [projects@yorhel.nl])
 AC_CONFIG_SRCDIR([src/ncdc.h])
 AC_CONFIG_HEADER([config.h])
 AM_INIT_AUTOMAKE([foreign])
+PKG_PROG_PKG_CONFIG([0.18])
 
 
 # Check for programs.
@@ -126,6 +127,19 @@ AC_CHECK_LIB([gdbm],
              [gdbm_open],
              [AC_SUBST([GDBM_LIBS],[-lgdbm])],
              [AC_MSG_ERROR(gdbm library is required)])
+
+# Check for SQLite3
+PKG_CHECK_EXISTS([sqlite3],[
+    PKG_CHECK_MODULES([SQLITE],[sqlite3])
+  ],[
+    AC_CHECK_HEADERS([sqlite3.h],[],
+                     [AC_MSG_ERROR([sqlite3 header file not found])])
+    AC_CHECK_LIB([sqlite3],
+                 [sqlite3_open],
+                 [AC_SUBST([SQLITE_LIBS],[-lsqlite3])],
+                 [AC_MSG_ERROR([sqlite3 library is required])])
+  ]
+)
 
 # Check for modules (We assume gthread and gio come from the same glib version)
 PKG_CHECK_MODULES([DEPS], [

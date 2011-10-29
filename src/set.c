@@ -737,42 +737,66 @@ static void set_filelist_maxage(char *group, char *key, char *val) {
 }
 
 
+static void get_flush_file_cache(char *group, char *key) {
+#if HAVE_POSIX_FADVISE
+  ui_mf(NULL, 0, "%s.%s = %s", group, key, g_atomic_int_get(&fadv_enabled) ? "true" : "false");
+#else
+  ui_mf(NULL, 0, "%s.%s = false (not supported)", group, key);
+#endif
+}
+
+
+static void set_flush_file_cache(char *group, char *key, char *val) {
+  if(!val)
+    UNSET(group, key);
+  else {
+    int v = bool_var(val);
+    g_key_file_set_boolean(conf_file, group, key, v);
+    conf_save();
+    g_atomic_int_set(&fadv_enabled, v);
+    get_flush_file_cache(group, key);
+  }
+}
+
+
+
 // the settings list
 static struct setting settings[] = {
-  { "active",           "global", get_bool_f,         set_active,         set_bool_sug       },
-  { "active_bind",      "global", get_string,         set_active_bind,    set_old_sug        },
-  { "active_ip",        "global", get_string,         set_active_ip,      set_old_sug        },
-  { "active_port",      "global", get_int,            set_active_port,    NULL,              },
-  { "autoconnect",      NULL,     get_bool_f,         set_autoconnect,    set_bool_sug       },
-  { "autorefresh",      "global", get_autorefresh,    set_autorefresh,    NULL               },
-  { "backlog",          NULL,     get_backlog,        set_backlog,        NULL,              },
-  { "chat_only",        NULL,     get_bool_f,         set_bool_f,         set_bool_sug       },
+  { "active",           "global", get_bool_f,          set_active,          set_bool_sug       },
+  { "active_bind",      "global", get_string,          set_active_bind,     set_old_sug        },
+  { "active_ip",        "global", get_string,          set_active_ip,       set_old_sug        },
+  { "active_port",      "global", get_int,             set_active_port,     NULL,              },
+  { "autoconnect",      NULL,     get_bool_f,          set_autoconnect,     set_bool_sug       },
+  { "autorefresh",      "global", get_autorefresh,     set_autorefresh,     NULL               },
+  { "backlog",          NULL,     get_backlog,         set_backlog,         NULL,              },
+  { "chat_only",        NULL,     get_bool_f,          set_bool_f,          set_bool_sug       },
 #define C(n, a,b,c) { "color_" G_STRINGIFY(n), "color", get_color, set_color, set_color_sug },
   UI_COLORS
 #undef C
-  { "connection",       NULL,     get_string,         set_userinfo,       set_old_sug        },
-  { "description",      NULL,     get_string,         set_userinfo,       set_old_sug        },
-  { "download_dir",     "global", get_download_dir,   set_dl_inc_dir,     set_path_sug       },
-  { "download_slots",   "global", get_download_slots, set_download_slots, NULL               },
-  { "download_exclude", "global", get_string,         set_regex,          set_old_sug        },
-  { "email",            NULL,     get_string,         set_userinfo,       set_old_sug        },
-  { "encoding",         NULL,     get_encoding,       set_encoding,       set_encoding_sug   },
-  { "filelist_maxage",  "global", get_filelist_maxage,set_filelist_maxage,set_old_sug        },
-  { "hubname",          NULL,     get_hubname,        set_hubname,        set_hubname_sug    },
-  { "incoming_dir",     "global", get_incoming_dir,   set_dl_inc_dir,     set_path_sug       },
-  { "log_debug",        "log",    get_bool_f,         set_bool_f,         set_bool_sug       },
-  { "log_downloads",    "log",    get_bool_t,         set_bool_t,         set_bool_sug       },
-  { "log_uploads",      "log",    get_bool_t,         set_bool_t,         set_bool_sug       },
-  { "minislots",        "global", get_minislots,      set_minislots,      NULL               },
-  { "minislot_size",    "global", get_minislot_size,  set_minislot_size,  NULL               },
-  { "nick",             NULL,     get_string,         set_nick,           set_old_sug        },
-  { "password",         NULL,     get_password,       set_password,       NULL               },
-  { "share_hidden",     "global", get_bool_f,         set_bool_f,         set_bool_sug       },
-  { "share_exclude",    "global", get_string,         set_regex,          set_old_sug        },
-  { "show_joinquit",    NULL,     get_bool_f,         set_bool_f,         set_bool_sug       },
-  { "slots",            "global", get_slots,          set_slots,          NULL               },
-  { "tls_policy",       NULL,     get_tls_policy,     set_tls_policy,     set_tls_policy_sug },
-  { "ui_time_format",   "global", get_ui_time_format, set_ui_time_format, set_old_sug        },
+  { "connection",       NULL,     get_string,          set_userinfo,        set_old_sug        },
+  { "description",      NULL,     get_string,          set_userinfo,        set_old_sug        },
+  { "download_dir",     "global", get_download_dir,    set_dl_inc_dir,      set_path_sug       },
+  { "download_slots",   "global", get_download_slots,  set_download_slots,  NULL               },
+  { "download_exclude", "global", get_string,          set_regex,           set_old_sug        },
+  { "email",            NULL,     get_string,          set_userinfo,        set_old_sug        },
+  { "encoding",         NULL,     get_encoding,        set_encoding,        set_encoding_sug   },
+  { "filelist_maxage",  "global", get_filelist_maxage, set_filelist_maxage, set_old_sug        },
+  { "flush_file_cache", "global", get_flush_file_cache,set_flush_file_cache,set_bool_sug       },
+  { "hubname",          NULL,     get_hubname,         set_hubname,         set_hubname_sug    },
+  { "incoming_dir",     "global", get_incoming_dir,    set_dl_inc_dir,      set_path_sug       },
+  { "log_debug",        "log",    get_bool_f,          set_bool_f,          set_bool_sug       },
+  { "log_downloads",    "log",    get_bool_t,          set_bool_t,          set_bool_sug       },
+  { "log_uploads",      "log",    get_bool_t,          set_bool_t,          set_bool_sug       },
+  { "minislots",        "global", get_minislots,       set_minislots,       NULL               },
+  { "minislot_size",    "global", get_minislot_size,   set_minislot_size,   NULL               },
+  { "nick",             NULL,     get_string,          set_nick,            set_old_sug        },
+  { "password",         NULL,     get_password,        set_password,        NULL               },
+  { "share_hidden",     "global", get_bool_f,          set_bool_f,          set_bool_sug       },
+  { "share_exclude",    "global", get_string,          set_regex,           set_old_sug        },
+  { "show_joinquit",    NULL,     get_bool_f,          set_bool_f,          set_bool_sug       },
+  { "slots",            "global", get_slots,           set_slots,           NULL               },
+  { "tls_policy",       NULL,     get_tls_policy,      set_tls_policy,      set_tls_policy_sug },
+  { "ui_time_format",   "global", get_ui_time_format,  set_ui_time_format,  set_old_sug        },
   { NULL }
 };
 

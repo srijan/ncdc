@@ -357,6 +357,9 @@ void conf_init() {
   if(have_tls_support)
     conf_load_cert();
 #endif
+
+  // load fadv_enabled
+  g_atomic_int_set(&fadv_enabled, g_key_file_get_boolean(conf_file, "global", "flush_file_cache", NULL));
 }
 
 
@@ -1313,6 +1316,10 @@ struct fadv {
 
 #endif
 
+// Enable/disable calling of posix_fadvise(). Use g_atomic_int_() functions to
+// read/write this variable!
+int fadv_enabled = 0;
+
 
 #ifdef HAVE_POSIX_FADVISE
 
@@ -1321,7 +1328,7 @@ void fadv_purge(struct fadv *a, int length) {
   if(length > 0)
     a->chunk += length;
   // flush every 5MB. Some magical value, don't think too much into it.
-  if(a->chunk > 5*1024*1024 || (length < 0 && a->chunk > 0)) {
+  if(g_atomic_int_get(&fadv_enabled) && (a->chunk > 5*1024*1024 || (length < 0 && a->chunk > 0))) {
     posix_fadvise(a->fd, a->offset, a->chunk, POSIX_FADV_DONTNEED);
     a->offset += a->chunk;
     a->chunk = 0;

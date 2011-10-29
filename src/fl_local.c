@@ -27,6 +27,7 @@
 #include "ncdc.h"
 #include <errno.h>
 #include <stdlib.h>
+#include <fcntl.h>
 #include <gdbm.h>
 
 
@@ -583,12 +584,12 @@ static void fl_hash_thread(gpointer data, gpointer udata) {
   static struct tth_ctx tth;
   static char buf[10240];
 
-  time(&(args->lastmod));
+  time(&args->lastmod);
   GTimer *tm = g_timer_new();
 
-  FILE *f = NULL;
-  if(!(f = fopen(args->path, "r"))) {
-    g_set_error(&(args->err), 1, 0, "Error reading file: %s", g_strerror(errno));
+  int f = open(args->path, O_RDONLY);
+  if(f < 0) {
+    g_set_error(&args->err, 1, 0, "Error reading file: %s", g_strerror(errno));
     goto fl_hash_finish;
   }
 
@@ -599,19 +600,23 @@ static void fl_hash_thread(gpointer data, gpointer udata) {
   args->blocks = g_malloc(24*blocks_num);
   tth_init(&tth);
 
+  struct fadv adv;
+  fadv_init(&adv, f, 0);
+
   int r;
-  guint64 read = 0;
+  guint64 rd = 0;
   int block_cur = 0;
   guint64 block_len = 0;
 
-  while((r = fread(buf, 1, 10240, f)) > 0) {
-    read += r;
+  while((r = read(f, buf, 10240)) > 0) {
+    rd += r;
+    fadv_purge(&adv, r);
     // no need to hash any further? quit!
     if(g_atomic_int_get(&fl_hash_reset) != args->resetnum)
       goto fl_hash_finish;
     // file has been modified. time to back out
-    if(read > args->filesize) {
-      g_set_error_literal(&(args->err), 1, 0, "File has been modified.");
+    if(rd > args->filesize) {
+      g_set_error_literal(&args->err, 1, 0, "File has been modified.");
       goto fl_hash_finish;
     }
     ratecalc_add(&fl_hash_rate, r);
@@ -631,12 +636,12 @@ static void fl_hash_thread(gpointer data, gpointer udata) {
       }
     }
   }
-  if(ferror(f)) {
-    g_set_error(&(args->err), 1, 0, "Error reading file: %s", g_strerror(errno));
+  if(r < 0) {
+    g_set_error(&args->err, 1, 0, "Error reading file: %s", g_strerror(errno));
     goto fl_hash_finish;
   }
-  if(read != args->filesize) {
-    g_set_error_literal(&(args->err), 1, 0, "File has been modified.");
+  if(rd != args->filesize) {
+    g_set_error_literal(&args->err, 1, 0, "File has been modified.");
     goto fl_hash_finish;
   }
   // Calculate last block
@@ -649,8 +654,10 @@ static void fl_hash_thread(gpointer data, gpointer udata) {
   tth_root(args->blocks, blocks_num, args->root);
 
 fl_hash_finish:
-  if(f)
-    fclose(f);
+  if(f > 0) {
+    fadv_close(&adv);
+    close(f);
+  }
   args->time = g_timer_elapsed(tm, NULL);
   g_timer_destroy(tm);
   g_idle_add_full(G_PRIORITY_HIGH_IDLE, fl_hash_done, args, NULL);

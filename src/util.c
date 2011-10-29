@@ -1261,3 +1261,72 @@ void logfile_global_reopen() {
   }
 }
 
+
+
+
+
+// OS cache invalidation after reading data from a file. This is pretty much a
+// wrapper around posix_fadvise(), but multiple sequential reads are bulked
+// together in a single call to posix_fadvise(). This should work a lot better
+// than calling the function multiple times on smaller chunks if the OS
+// implementation works on page sizes internally.
+//
+// Usage:
+//   int fd = open(..);
+//   struct fadv a;
+//   fadv_init(&a, fd, offset);
+//   while((int len = read(..)) > 0)
+//     fadv_purge(&a, len);
+//   fadv_close(&a);
+//   close(fd);
+//
+// These functions are thread-safe, as long as they are not used on the same
+// struct from multiple threads at the same time.
+
+#if INTERFACE
+
+struct fadv {
+  int fd;
+  int chunk;
+  guint64 offset;
+};
+
+#ifdef HAVE_POSIX_FADVISE
+
+#define fadv_init(a, f, o) do {\
+    (a)->fd = f;\
+    (a)->chunk = 0;\
+    (a)->offset = o;\
+  } while(0)
+
+#define fadv_close(a) fadv_purge(a, -1)
+
+#else // HAVE_POSIX_FADVISE
+
+// Some pointless assignments to make sure the compiler doesn't complain about
+// unused variables.
+#define fadv_init(a, f, o) ((a)->fd = 0)
+#define fadv_purge(a, l)   ((a)->fd = 0)
+#define fadv_close(a)      ((a)->fd = 0)
+
+#endif
+
+#endif
+
+
+#ifdef HAVE_POSIX_FADVISE
+
+// call with length = -1 to force a flush
+void fadv_purge(struct fadv *a, int length) {
+  if(length > 0)
+    a->chunk += length;
+  // flush every 5MB. Some magical value, don't think too much into it.
+  if(a->chunk > 5*1024*1024 || (length < 0 && a->chunk > 0)) {
+    posix_fadvise(a->fd, a->offset, a->chunk, POSIX_FADV_DONTNEED);
+    a->offset += a->chunk;
+    a->chunk = 0;
+  }
+}
+
+#endif
+

@@ -50,6 +50,8 @@ AC_CHECK_FUNCS(
   [setlocale sigaction fcntl ftruncate],[],
   AC_MSG_ERROR([Required function missing]))
 
+# Check for posix_fadvise()
+AC_CHECK_FUNCS([posix_fadvise])
 
 
 # Check for sendfile() support (not required)

@@ -793,7 +793,7 @@ static void handle_adcget(struct cc *cc, char *type, char *id, guint64 start, gi
       tmp, start, cc->last_length);
     cc->state = CCS_TRANSFER;
     time(&cc->last_start);
-    net_sendfile(cc->net, path, start, cc->last_length, handle_sendcomplete);
+    net_sendfile(cc->net, path, start, cc->last_length, strcmp(vpath, "files.xml.bz2") == 0 ? FALSE : TRUE, handle_sendcomplete);
     g_free(tmp);
   } else {
     g_set_error_literal(err, 1, 53, "No Slots Available");

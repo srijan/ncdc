@@ -94,7 +94,8 @@ struct net {
   // A file upload will start when out_buf->len == 0 && file_left > 0 && !file_busy.
   // file_left will be updated from the file transfer thread.
   int file_left;
-  gboolean file_busy;
+  gboolean file_busy : 1;
+  gboolean file_flush : 1;
   guint64 file_offset;
   GFileInputStream *file_in;
   void (*file_cb)(struct net *);
@@ -522,6 +523,7 @@ struct file_ctx {
   GFileInputStream *file; // file stream to send
   guint64 offset;
   GError *err;
+  gboolean flush;
 };
 
 
@@ -562,11 +564,15 @@ static void file_thread(gpointer dat, gpointer udat) {
   int total = g_atomic_int_get(&c->n->file_left);
   int left = total;
 
+  int fd = G_IS_FILE_DESCRIPTOR_BASED(c->file)
+    ? g_file_descriptor_based_get_fd(G_FILE_DESCRIPTOR_BASED(c->file)) : -1;
+  struct fadv adv;
+  if(fd > 0 && c->flush)
+    fadv_init(&adv, fd, c->offset);
+
   // sendfile()-based sending
 #ifdef HAVE_SENDFILE
-  int fd = c->sock && G_IS_FILE_DESCRIPTOR_BASED(c->file)
-    ? g_file_descriptor_based_get_fd(G_FILE_DESCRIPTOR_BASED(c->file)) : -1;
-  while(fd > 0 && left > 0) {
+  while(c->sock && fd > 0 && left > 0) {
     // Wait for the socket to be writable, to ensure that sendfile() won't
     // block for too long. sendfile() isn't cancellable, after all.
     if(!g_socket_condition_wait(c->sock, G_IO_OUT, c->can, &c->err))
@@ -588,6 +594,8 @@ static void file_thread(gpointer dat, gpointer udat) {
     // check for errors
     if(r >= 0) {
       left -= r;
+      if(c->flush)
+        fadv_purge(&adv, MIN(r, G_MAXINT));
       ratecalc_add(&net_out, r);
       ratecalc_add(c->n->rate_out, r);
       g_atomic_int_set(&c->n->file_left, left);
@@ -618,6 +626,8 @@ static void file_thread(gpointer dat, gpointer udat) {
     r = g_input_stream_read(G_INPUT_STREAM(c->file), buf, MIN(left, sizeof(buf)), c->can, &c->err);
     if(r < 0)
       break;
+    if(fd > 0 && c->flush)
+      fadv_purge(&adv, r);
 
     if(r == 0) {
       g_set_error_literal(&c->err, 1, 0, "Unexpected EOF.");
@@ -642,6 +652,9 @@ static void file_thread(gpointer dat, gpointer udat) {
     }
   }
 
+  if(fd > 0 && c->flush)
+    fadv_close(&adv);
+
 file_thread_done:
   g_idle_add(file_done, c);
 }
@@ -660,6 +673,7 @@ static void file_start(struct net *n) {
   c->file = n->file_in; // we now claim ownership of it
   n->file_in = NULL;
   c->offset = n->file_offset;
+  c->flush = n->file_flush;
   n->file_busy = TRUE;
 
 #if TLS_SUPPORT
@@ -758,7 +772,7 @@ void net_sendf(struct net *n, const char *fmt, ...) {
 }
 
 
-void net_sendfile(struct net *n, const char *path, guint64 offset, int length, void (*cb)(struct net *)) {
+void net_sendfile(struct net *n, const char *path, guint64 offset, int length, gboolean flush, void (*cb)(struct net *)) {
   if(!length) {
     if(cb)
       cb(n);
@@ -783,6 +797,7 @@ void net_sendfile(struct net *n, const char *path, guint64 offset, int length, v
   n->file_left = length;
   n->file_cb = cb;
   n->file_offset = offset;
+  n->file_flush = flush;
   setup_write(n);
 }
 

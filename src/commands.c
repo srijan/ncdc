@@ -804,6 +804,24 @@ static void c_ungrant(char *args) {
 }
 
 
+static void c_ungrant_sug(char *args, char **sug) {
+  int len = strlen(args);
+  char id[17] = {};
+  guint64 *list = cc_grant_list();
+  guint64 *i = list;
+  int n = 0;
+  for(; n<20 && *i; i++) {
+    struct hub_user *u = g_hash_table_lookup(hub_uids, i);
+    g_snprintf(id, 17, "%"G_GINT64_MODIFIER"x", *i);
+    if((u && strncasecmp(u->name, args, len) == 0))
+      sug[n++] = g_strdup(u->name);
+    if(n < 20 && g_ascii_strncasecmp(id, args, len) == 0)
+      sug[n++] = g_strdup(id);
+  }
+  g_free(list);
+}
+
+
 static void c_password(char *args) {
   struct ui_tab *tab = ui_tab_cur->data;
   if(tab->type != UIT_HUB)
@@ -1002,7 +1020,7 @@ static struct cmd cmds[] = {
   { "search",      c_search,      NULL             },
   { "set",         c_set,         c_set_sug        },
   { "share",       c_share,       c_share_sug      },
-  { "ungrant",     c_ungrant,     NULL,            },
+  { "ungrant",     c_ungrant,     c_ungrant_sug    },
   { "unset",       c_unset,       c_set_sugkey     },
   { "unshare",     c_unshare,     c_unshare_sug    },
   { "userlist",    c_userlist,    NULL             },

@@ -761,13 +761,46 @@ static void c_grant(char *args) {
   } else {
     u = g_hash_table_lookup(hub_uids, &tab->uid);
     if(!u)
-      ui_m(NULL, 0, "User not line.");
+      ui_m(NULL, 0, "User not online.");
   }
 
   if(u) {
     cc_grant(u);
     ui_m(NULL, 0, "Slot granted.");
   }
+}
+
+
+static void c_ungrant(char *args) {
+  struct ui_tab *tab = ui_tab_cur->data;
+  guint64 uid = 0;
+  if(!*args && tab->type != UIT_MSG) {
+    listgrants();
+    return;
+  } else if(!*args && tab->type == UIT_MSG)
+    uid = tab->uid;
+  else {
+    guint64 *key;
+    char id[17] = {};
+    GHashTableIter iter;
+    g_hash_table_iter_init(&iter, cc_granted);
+    while(g_hash_table_iter_next(&iter, (gpointer *)&key, NULL)) {
+      struct hub_user *u = g_hash_table_lookup(hub_uids, key);
+      g_snprintf(id, 17, "%"G_GINT64_MODIFIER"x", *key);
+      if((u && strcasecmp(u->name, args) == 0) || g_ascii_strncasecmp(id, args, strlen(args)) == 0) {
+        if(uid) {
+          ui_mf(NULL, 0, "Ambiguous user `%s'.", args);
+          return;
+        }
+        uid = *key;
+      }
+    }
+  }
+
+  if(uid && g_hash_table_remove(cc_granted, &uid))
+    ui_mf(NULL, 0, "Slot for `%"G_GINT64_MODIFIER"x' revoked.", uid);
+  else
+    ui_mf(NULL, 0, "No slot granted to `%s'.", !*args && tab->type == UIT_MSG ? tab->name+1 : args);
 }
 
 
@@ -969,6 +1002,7 @@ static struct cmd cmds[] = {
   { "search",      c_search,      NULL             },
   { "set",         c_set,         c_set_sug        },
   { "share",       c_share,       c_share_sug      },
+  { "ungrant",     c_ungrant,     NULL,            },
   { "unset",       c_unset,       c_set_sugkey     },
   { "unshare",     c_unshare,     c_unshare_sug    },
   { "userlist",    c_userlist,    NULL             },

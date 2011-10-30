@@ -75,6 +75,7 @@ struct ui_tab {
   char *fl_uname;
   gboolean fl_loading : 1;
   gboolean fl_dirfirst : 1;
+  gboolean fl_match : 1;
   GError *fl_err;
   char *fl_sel;
   // DL
@@ -809,7 +810,7 @@ static void ui_userlist_key(struct ui_tab *tab, guint64 key) {
     if(!sel)
       ui_m(NULL, 0, "No user selected.");
     else
-      ui_fl_queue(sel, key == INPT_CHAR('B'), NULL, tab);
+      ui_fl_queue(sel->uid, key == INPT_CHAR('B'), NULL, tab, TRUE, FALSE);
     break;
   }
 
@@ -1176,6 +1177,24 @@ static void ui_fl_setdir(struct ui_tab *tab, struct fl_list *fl, struct fl_list 
 }
 
 
+static void ui_fl_matchqueue(struct ui_tab *tab, struct fl_list *root) {
+  if(!tab->fl_list) {
+    tab->fl_match = TRUE;
+    return;
+  }
+
+  if(!root) {
+    root = tab->fl_list;
+    while(root->parent)
+      root = root->parent;
+  }
+  int a;
+  int n = dl_queue_match_fl(tab->uid, root, &a);
+  ui_mf(NULL, 0, "Matched %d files, %d new.", n, a);
+  tab->fl_match = FALSE;
+}
+
+
 static void ui_fl_dosel(struct ui_tab *tab, struct fl_list *fl, const char *sel) {
   struct fl_list *root = fl;
   while(root->parent)
@@ -1188,12 +1207,18 @@ static void ui_fl_dosel(struct ui_tab *tab, struct fl_list *fl, const char *sel)
 }
 
 
-// Open or queue a file list. (Not really a ui_* function, but where else would it belong?)
-void ui_fl_queue(struct hub_user *u, gboolean force, const char *sel, struct ui_tab *parent) {
+// Open/match or queue a file list. (Not really a ui_* function, but where else would it belong?)
+void ui_fl_queue(guint64 uid, gboolean force, const char *sel, struct ui_tab *parent, gboolean open, gboolean match) {
+  if(!open && !match)
+    return;
+
+  struct hub_user *u = g_hash_table_lookup(hub_uids, &uid);
   // check for u == we
-  if(u && (u->hub->adc ? u->hub->sid == u->sid : u->hub->nick_valid && strcmp(u->hub->nick_hub, u->name_hub) == 0))
+  if(u && (u->hub->adc ? u->hub->sid == u->sid : u->hub->nick_valid && strcmp(u->hub->nick_hub, u->name_hub) == 0)) {
     u = NULL;
-  guint64 uid = u ? u->uid : 0;
+    uid = 0;
+  }
+  g_warn_if_fail(!uid || !match);
 
   // check for existing tab
   GList *n;
@@ -1204,7 +1229,8 @@ void ui_fl_queue(struct hub_user *u, gboolean force, const char *sel, struct ui_
       break;
   }
   if(n) {
-    ui_tab_cur = n;
+    if(open)
+      ui_tab_cur = n;
     if(sel) {
       if(!t->fl_loading)
         ui_fl_dosel(n->data, t->fl_list, sel);
@@ -1213,12 +1239,15 @@ void ui_fl_queue(struct hub_user *u, gboolean force, const char *sel, struct ui_
         t->fl_sel = g_strdup(sel);
       }
     }
+    if(match)
+      ui_fl_matchqueue(t, NULL);
     return;
   }
 
   // open own list
-  if(!u) {
-    ui_tab_open(ui_fl_create(0, sel), TRUE, parent);
+  if(!uid) {
+    if(open)
+      ui_tab_open(ui_fl_create(0, sel), TRUE, parent);
     return;
   }
 
@@ -1232,10 +1261,19 @@ void ui_fl_queue(struct hub_user *u, gboolean force, const char *sel, struct ui_
     g_free(fn);
     g_free(tmp);
   }
-  if(e)
-    ui_tab_open(ui_fl_create(uid, sel), TRUE, parent);
-  else {
-    dl_queue_addlist(u, sel, parent);
+  if(e) {
+    if(open) {
+      t = ui_fl_create(uid, sel);
+      ui_tab_open(t, TRUE, parent);
+      if(match)
+        ui_fl_matchqueue(t, NULL);
+    } else if(match) {
+      // TODO: load-and-match in the background
+      g_warn_if_reached();
+    }
+  } else {
+    g_return_if_fail(u); // the caller should have checked this
+    dl_queue_addlist(u, sel, parent, open, match);
     ui_mf(NULL, 0, "File list of %s added to the download queue.", u->name);
   }
 }
@@ -1466,14 +1504,8 @@ static void ui_fl_key(struct ui_tab *tab, guint64 key) {
       ui_m(NULL, 0, "Can't download from yourself.");
     else if(key == INPT_CHAR('m') && !sel)
       ui_m(NULL, 0, "Nothing selected.");
-    else {
-      struct fl_list *root = tab->fl_list;
-      while(root->parent)
-        root = root->parent;
-      int a = 0;
-      int n = dl_queue_match_fl(tab->uid, key == INPT_CHAR('m') ? sel : root, &a);
-      ui_mf(NULL, 0, "Matched %d files, %d new.", n, a);
-    }
+    else
+      ui_fl_matchqueue(tab, key == INPT_CHAR('m') ? sel : NULL);
     break;
 
   case INPT_CHAR('a'): // a - search for alternative sources
@@ -2122,7 +2154,7 @@ static void ui_search_key(struct ui_tab *tab, guint64 key) {
       if(!u)
         ui_m(NULL, 0, "User is not online.");
       else
-        ui_fl_queue(u, key == INPT_CHAR('B'), sel->file, tab);
+        ui_fl_queue(u->uid, key == INPT_CHAR('B'), sel->file, tab, TRUE, FALSE);
     }
     break;
   case INPT_CHAR('d'): // d - download file

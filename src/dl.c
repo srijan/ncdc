@@ -106,6 +106,8 @@ struct dl {
   gboolean islist : 1;
   gboolean hastthl : 1;
   gboolean active : 1;      // Whether it is being downloaded by someone
+  gboolean flopen : 1;      // For lists: Whether to open a browse tab after completed download
+  gboolean flmatch : 1;     // For lists: Whether to match queue after completed download
   char prio;                // DLP_*
   char error;               // DLE_*
   unsigned short error_sub; // errno or block number (it is assumed that 0 <= errno <= USHRT_MAX)
@@ -666,20 +668,27 @@ static void dl_queue_insert(struct dl *dl, gboolean init) {
 
 
 // Add the file list of some user to the queue
-void dl_queue_addlist(struct hub_user *u, const char *sel, struct ui_tab *parent) {
+void dl_queue_addlist(struct hub_user *u, const char *sel, struct ui_tab *parent, gboolean open, gboolean match) {
   g_return_if_fail(u && u->hasinfo);
   struct dl *dl = g_slice_new0(struct dl);
   dl->islist = TRUE;
   if(sel)
     dl->flsel = g_strdup(sel);
   dl->flpar = parent;
+  dl->flopen = open;
+  dl->flmatch = match;
   // figure out dl->hash
   tiger_ctx tg;
   tiger_init(&tg);
   tiger_update(&tg, (char *)&u->uid, 8);
   tiger_final(&tg, dl->hash);
-  if(g_hash_table_lookup(dl_queue, dl->hash)) {
-    g_warning("dl:%016"G_GINT64_MODIFIER"x: files.xml.bz2 already in the queue.", u->uid);
+  struct dl *dup = g_hash_table_lookup(dl_queue, dl->hash);
+  if(dup) {
+    if(open)
+      dup->flopen = TRUE;
+    if(match)
+      dup->flmatch = TRUE;
+    g_warning("dl:%016"G_GINT64_MODIFIER"x: files.xml.bz2 already in the queue, updating flags.", u->uid);
     g_slice_free(struct dl, dl);
     return;
   }
@@ -1029,9 +1038,13 @@ static void dl_finished(struct dl *dl) {
   g_free(dest);
 
   // open the file list
-  if(dl->prio != DLP_ERR && dl->islist) {
+  if(dl->islist && dl->prio != DLP_ERR) {
     g_return_if_fail(dl->u->len == 1);
-    ui_tab_open(ui_fl_create(((struct dl_user_dl *)g_sequence_get(g_ptr_array_index(dl->u, 0)))->u->uid, dl->flsel), FALSE, dl->flpar);
+    // Ugly hack: make sure to not select the browse tab, if one is opened
+    GList *cur = ui_tab_cur;
+    ui_fl_queue(((struct dl_user_dl *)g_sequence_get(g_ptr_array_index(dl->u, 0)))->u->uid,
+        FALSE, dl->flsel, dl->flpar, dl->flopen, dl->flmatch);
+    ui_tab_cur = cur;
   }
   // and check whether we can remove this item from the queue
   dl_queue_checkrm(dl, TRUE);

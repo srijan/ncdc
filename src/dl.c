@@ -889,24 +889,44 @@ void dl_queue_setprio(struct dl *dl, char prio) {
   } while(0)
 
 
-// Set a user-specific error
+// Set a user-specific error. If tth = NULL, the error will be set for all
+// files in the queue.
 void dl_queue_setuerr(guint64 uid, char *tth, char e, unsigned short sub) {
-  struct dl *dl = g_hash_table_lookup(dl_queue, tth);
+  struct dl *dl = tth ? g_hash_table_lookup(dl_queue, tth) : NULL;
   struct dl_user *du = g_hash_table_lookup(queue_users, &uid);
-  if(!dl || !du)
+  if(!dl || (tth && !du))
     return;
-  int i;
-  for(i=0; i<dl->u->len; i++) {
-    GSequenceIter *iter = g_ptr_array_index(dl->u, i);
-    struct dl_user_dl *dud = g_sequence_get(iter);
-    if(dud->u == du) {
+
+  // from a single dl item
+  if(dl) {
+    int i;
+    for(i=0; i<dl->u->len; i++) {
+      GSequenceIter *iter = g_ptr_array_index(dl->u, i);
+      struct dl_user_dl *dud = g_sequence_get(iter);
+      if(dud->u == du) {
+        dud->error = e;
+        dud->error_sub = sub;
+        g_sequence_sort_changed(iter, dl_user_dl_sort, NULL);
+        break;
+      }
+    }
+    dl_dat_saveusers(dl);
+
+  // for all dl items
+  } else {
+    GSequenceIter *i = g_sequence_get_begin_iter(du->queue);
+    for(; !g_sequence_iter_is_end(i); i=g_sequence_iter_next(i)) {
+      struct dl_user_dl *dud = g_sequence_get(i);
       dud->error = e;
       dud->error_sub = sub;
-      g_sequence_sort_changed(iter, dl_user_dl_sort, NULL);
-      break;
+      dl_dat_saveusers(dud->dl);
     }
+    // Do the sort after looping through all items - looping through the list
+    // while changing the ordering may cause problems.
+    g_sequence_sort(du->queue, dl_user_dl_sort, NULL);
   }
-  dl_dat_saveusers(dl);
+
+  dl_queue_start();
 }
 
 
@@ -915,7 +935,7 @@ void dl_queue_setuerr(guint64 uid, char *tth, char e, unsigned short sub) {
 void dl_queue_rmuser(guint64 uid, char *tth) {
   struct dl *dl = tth ? g_hash_table_lookup(dl_queue, tth) : NULL;
   struct dl_user *du = g_hash_table_lookup(queue_users, &uid);
-  if(!du)
+  if(!du || (tth && !dl))
     return;
 
   // from a single dl item

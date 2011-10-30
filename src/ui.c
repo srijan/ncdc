@@ -1845,12 +1845,13 @@ static void ui_dl_key(guint64 key) {
     }
     break;
   case INPT_CHAR('x'): // x - clear user-specific error state
+  case INPT_CHAR('X'): // X - clear user-specific error state for all files
     if(!usel)
       ui_m(NULL, 0, "No user selected.");
-    else if(!usel->error)
+    else if(key == INPT_CHAR('x') && !usel->error)
       ui_m(NULL, 0, "Selected user is not in an error state.");
     else
-      dl_queue_setuerr(usel->u->uid, sel->hash, 0, 0);
+      dl_queue_setuerr(usel->u->uid, key == INPT_CHAR('X') ? NULL : sel->hash, 0, 0);
     break;
   case INPT_CHAR('+'): // +
   case INPT_CHAR('='): // = - increase priority

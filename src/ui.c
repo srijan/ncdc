@@ -1215,7 +1215,7 @@ static void ui_fl_loadmatch(struct fl_list *fl, GError *err, void *dat) {
   struct hub_user *u = g_hash_table_lookup(hub_uids, &uid);
   char *user = u
     ? g_strdup_printf("%s on %s", u->name, u->hub->tab->name)
-    : g_strdup_printf("%"G_GINT64_MODIFIER"x (user offline)", uid);
+    : g_strdup_printf("%016"G_GINT64_MODIFIER"x (user offline)", uid);
 
   if(err) {
     ui_mf(ui_main, 0, "Error opening file list of %s for matching: %s", user, err->message);
@@ -1241,8 +1241,7 @@ void ui_fl_queue(guint64 uid, gboolean force, const char *sel, struct ui_tab *pa
     u = NULL;
     uid = 0;
   }
-  if(!uid)
-    match = FALSE;
+  g_warn_if_fail(uid || !match);
 
   // check for existing tab
   GList *n;
@@ -1276,7 +1275,7 @@ void ui_fl_queue(guint64 uid, gboolean force, const char *sel, struct ui_tab *pa
   }
 
   // check for cached file list, otherwise queue it
-  char *tmp = g_strdup_printf("%"G_GINT64_MODIFIER"x.xml.bz2", uid);
+  char *tmp = g_strdup_printf("%016"G_GINT64_MODIFIER"x.xml.bz2", uid);
   char *fn = g_build_filename(conf_dir, "fl", tmp, NULL);
   g_free(tmp);
 

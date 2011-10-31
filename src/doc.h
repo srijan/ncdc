@@ -563,6 +563,7 @@ static const struct doc_key {
   LISTING_KEYS
   "f            Find user in user list.\n"
   "b/B          Browse the selected users' list, B to force a redownload.\n"
+  "d            Add selected file to the download queue.\n"
   "h            Toggle hub column visibility.\n"
   "u            Order by username.\n"
   "s            Order by file size.\n"
@@ -570,6 +571,8 @@ static const struct doc_key {
   "n            Order by file name.\n"
   "m            Match selected item with the download queue.\n"
   "M            Match all search results with the download queue.\n"
+  "q            Match selected users' list with the download queue.\n"
+  "Q            Match all matched users' lists with the download queue.\n"
   "a            Search for alternative download sources."
 },
 { "userlist", "User list tab",

@@ -1207,6 +1207,29 @@ static void ui_fl_dosel(struct ui_tab *tab, struct fl_list *fl, const char *sel)
 }
 
 
+// Callback function for use in ui_fl_queue() - not associated with any tab.
+// Will just match the list against the queue and free it.
+static void ui_fl_loadmatch(struct fl_list *fl, GError *err, void *dat) {
+  guint64 uid = *(guint64 *)dat;
+  g_free(dat);
+  struct hub_user *u = g_hash_table_lookup(hub_uids, &uid);
+  char *user = u
+    ? g_strdup_printf("%s on %s", u->name, u->hub->tab->name)
+    : g_strdup_printf("%"G_GINT64_MODIFIER"x (user offline)", uid);
+
+  if(err) {
+    ui_mf(ui_main, 0, "Error opening file list of %s for matching: %s", user, err->message);
+    g_error_free(err);
+  } else {
+    int a;
+    int n = dl_queue_match_fl(uid, fl, &a);
+    ui_mf(NULL, 0, "Matched queue for %s: %d files, %d new.", user, n, a);
+    fl_list_free(fl);
+  }
+  g_free(user);
+}
+
+
 // Open/match or queue a file list. (Not really a ui_* function, but where else would it belong?)
 void ui_fl_queue(guint64 uid, gboolean force, const char *sel, struct ui_tab *parent, gboolean open, gboolean match) {
   if(!open && !match)
@@ -1218,7 +1241,8 @@ void ui_fl_queue(guint64 uid, gboolean force, const char *sel, struct ui_tab *pa
     u = NULL;
     uid = 0;
   }
-  g_warn_if_fail(!uid || !match);
+  if(!uid)
+    match = FALSE;
 
   // check for existing tab
   GList *n;
@@ -1252,14 +1276,14 @@ void ui_fl_queue(guint64 uid, gboolean force, const char *sel, struct ui_tab *pa
   }
 
   // check for cached file list, otherwise queue it
+  char *tmp = g_strdup_printf("%"G_GINT64_MODIFIER"x.xml.bz2", uid);
+  char *fn = g_build_filename(conf_dir, "fl", tmp, NULL);
+  g_free(tmp);
+
   gboolean e = !force;
   if(!force) {
-    char *tmp = g_strdup_printf("%"G_GINT64_MODIFIER"x.xml.bz2", uid);
-    char *fn = g_build_filename(conf_dir, "fl", tmp, NULL);
     struct stat st;
     e = stat(fn, &st) < 0 || st.st_mtime < time(NULL)-conf_filelist_maxage() ? FALSE : TRUE;
-    g_free(fn);
-    g_free(tmp);
   }
   if(e) {
     if(open) {
@@ -1267,15 +1291,15 @@ void ui_fl_queue(guint64 uid, gboolean force, const char *sel, struct ui_tab *pa
       ui_tab_open(t, TRUE, parent);
       if(match)
         ui_fl_matchqueue(t, NULL);
-    } else if(match) {
-      // TODO: load-and-match in the background
-      g_warn_if_reached();
-    }
+    } else if(match)
+      fl_load_async(fn, ui_fl_loadmatch, g_memdup(&uid, 8));
   } else {
     g_return_if_fail(u); // the caller should have checked this
     dl_queue_addlist(u, sel, parent, open, match);
     ui_mf(NULL, 0, "File list of %s added to the download queue.", u->name);
   }
+
+  g_free(fn);
 }
 
 
@@ -2165,6 +2189,7 @@ static void ui_search_key(struct ui_tab *tab, guint64 key) {
     else
       dl_queue_add_res(sel);
     break;
+
   case INPT_CHAR('m'): // m - match selected item with queue
     if(!sel)
       ui_m(NULL, 0, "Nothing selected.");
@@ -2177,6 +2202,7 @@ static void ui_search_key(struct ui_tab *tab, guint64 key) {
                           : "Added user to queue for the selected file.");
     }
     break;
+
   case INPT_CHAR('M'):;// M - match all results with queue
     int n = 0, a = 0;
     GSequenceIter *i = g_sequence_get_begin_iter(tab->list->list);
@@ -2190,6 +2216,32 @@ static void ui_search_key(struct ui_tab *tab, guint64 key) {
     }
     ui_mf(NULL, 0, "Matched %d files, %d new.", n, a);
     break;
+
+  case INPT_CHAR('q'): // q - download filelist and match queue for selected user
+    if(!sel)
+      ui_m(NULL, 0, "Nothing selected.");
+    else
+      ui_fl_queue(sel->uid, FALSE, NULL, NULL, FALSE, TRUE);
+    break;
+
+  case INPT_CHAR('Q'):{// Q - download filelist and match queue for all results
+    GSequenceIter *i = g_sequence_get_begin_iter(tab->list->list);
+    // Use a hash table to avoid checking the same filelist more than once
+    GHashTable *uids = g_hash_table_new(g_int64_hash, g_int64_equal);
+    for(; !g_sequence_iter_is_end(i); i=g_sequence_iter_next(i)) {
+      struct search_r *r = g_sequence_get(i);
+      if(dl_queue_matchfile(r->uid, r->tth) >= 0)
+        g_hash_table_insert(uids, &r->uid, (void *)1);
+    }
+    GHashTableIter iter;
+    g_hash_table_iter_init(&iter, uids);
+    guint64 *uid;
+    while(g_hash_table_iter_next(&iter, (gpointer *)&uid, NULL))
+      ui_fl_queue(*uid, FALSE, NULL, NULL, FALSE, TRUE);
+    ui_mf(NULL, 0, "Matching %d file lists...", g_hash_table_size(uids));
+    g_hash_table_unref(uids);
+  } break;
+
   case INPT_CHAR('a'): // a - search for alternative sources
     if(!sel)
       ui_m(NULL, 0, "Nothing selected.");

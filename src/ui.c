@@ -1283,7 +1283,8 @@ void ui_fl_queue(guint64 uid, gboolean force, const char *sel, struct ui_tab *pa
   gboolean e = !force;
   if(!force) {
     struct stat st;
-    e = stat(fn, &st) < 0 || st.st_mtime < time(NULL)-conf_filelist_maxage() ? FALSE : TRUE;
+    int age = conf_filelist_maxage();
+    e = stat(fn, &st) < 0 || st.st_mtime < time(NULL)-MAX(age, 30) ? FALSE : TRUE;
   }
   if(e) {
     if(open) {

@@ -1188,7 +1188,7 @@ static void ui_fl_matchqueue(struct ui_tab *tab, struct fl_list *root) {
     while(root->parent)
       root = root->parent;
   }
-  int a;
+  int a = 0;
   int n = dl_queue_match_fl(tab->uid, root, &a);
   ui_mf(NULL, 0, "Matched %d files, %d new.", n, a);
   tab->fl_match = FALSE;
@@ -1221,7 +1221,7 @@ static void ui_fl_loadmatch(struct fl_list *fl, GError *err, void *dat) {
     ui_mf(ui_main, 0, "Error opening file list of %s for matching: %s", user, err->message);
     g_error_free(err);
   } else {
-    int a;
+    int a = 0;
     int n = dl_queue_match_fl(uid, fl, &a);
     ui_mf(NULL, 0, "Matched queue for %s: %d files, %d new.", user, n, a);
     fl_list_free(fl);

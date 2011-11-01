@@ -1118,8 +1118,7 @@ static void ui_conn_key(guint64 key) {
           ui_tab_cur = g_list_find(ui_tabs, ui_dl);
         else
           ui_tab_open(ui_dl_create(), TRUE, ui_conn);
-        // dl->iter should be valid at this point
-        ui_dl->list->sel = dl->iter;
+        ui_dl_select(dl, cc->uid);
       }
     }
     break;
@@ -1621,6 +1620,26 @@ struct ui_tab *ui_dl_create() {
     dl->iter = g_sequence_insert_sorted(l, dl, ui_dl_sort_func, NULL);
   ui_dl->list = ui_listing_create(l);
   return ui_dl;
+}
+
+
+void ui_dl_select(struct dl *dl, guint64 uid) {
+  g_return_if_fail(ui_dl);
+
+  // dl->iter should always be valid if the dl tab is open
+  ui_dl->list->sel = dl->iter;
+
+  // select the right user
+  if(uid) {
+    ui_dl->details = TRUE;
+    ui_dl_setusers(dl);
+    GSequenceIter *i = g_sequence_get_begin_iter(ui_dl->dl_users->list);
+    for(; !g_sequence_iter_is_end(i); i=g_sequence_iter_next(i))
+      if(((struct dl_user_dl *)g_sequence_get(i))->u->uid == uid) {
+        ui_dl->dl_users->sel = i;
+        break;
+      }
+  }
 }
 
 

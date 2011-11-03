@@ -1,3 +1,13 @@
+1.5 - 2011-11-03
+	- Added filelist_maxage setting
+	- Added flush_file_cache setting
+	- Added /ungrant and improved /grant management
+	- Added key to download queue to clear user state for all files
+	- Added keys to search results to download file list and match queue
+	- Select the right user when using the 'q' key in connection tab
+	- Fixed possible crash when opening file list from search results
+	- Fixed detection of incompatible session directory version
+
 1.4 - 2011-10-26
 	- Added sorting functionality to file list
 	- Added color settings: title, separator, list_default, list_header and

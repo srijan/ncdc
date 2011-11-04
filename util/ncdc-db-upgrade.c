@@ -38,6 +38,7 @@
 #include <glib.h>
 #include <glib/gstdio.h>
 #include <sqlite3.h>
+#include <gdbm.h>
 
 
 static const char *db_dir = NULL;
@@ -59,6 +60,22 @@ static void confirm(const char *msg, ...) {
     puts("Aborted.");
     exit(0);
   }
+}
+
+
+static void base32_encode(const char *from, char *to, int len) {
+  static char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  int i, bits = 0, idx = 0, value = 0;
+  for(i=0; i<len; i++) {
+    value = (value << 8) | (unsigned char)from[i];
+    bits += 8;
+    while(bits > 5) {
+      to[idx++] = alphabet[(value >> (bits-5)) & 0x1F];
+      bits -= 5;
+    }
+  }
+  if(bits > 0)
+    to[idx++] = alphabet[(value << (5-bits)) & 0x1F];
 }
 
 
@@ -108,6 +125,7 @@ static int db_getversion() {
 // Upgrades the directory from 1.0 to 2.0
 
 static char *u20_sql_fn;
+static char *u20_hashdat_fn;
 static sqlite3 *u20_sql;
 
 static void u20_revert(const char *msg, ...) {
@@ -119,7 +137,7 @@ static void u20_revert(const char *msg, ...) {
   va_end(va);
 
   puts("");
-  fputs("Reverting changes...", stdout);
+  fputs("-- Reverting changes...", stdout);
   fflush(stdout);
 
   // clean up
@@ -138,8 +156,128 @@ static void u20_initsqlite() {
     u20_revert("%s", sqlite3_errmsg(u20_sql));
 
   char *err = NULL;
-  if(sqlite3_exec(u20_sql, "PRAGMA user_version = 1", NULL, NULL, &err))
+  if(sqlite3_exec(u20_sql,
+      "PRAGMA user_version = 1;"
+
+      "CREATE TABLE hashdata ("
+      "  root TEXT NOT NULL PRIMARY KEY,"
+      "  size INTEGER NOT NULL,"
+      "  tthl BLOB NOT NULL"
+      ");"
+
+      "CREATE TABLE hashfiles ("
+      "  filename TEXT NOT NULL,"
+      "  tth TEXT NOT NULL REFERENCES hashdata(root),"
+      "  lastmod INTEGER NOT NULL"
+      ");"
+
+    , NULL, NULL, &err))
     u20_revert("%s", err?err:sqlite3_errmsg(u20_sql));
+
+  puts(" done.");
+}
+
+
+static void u20_hashdata_item(GDBM_FILE dat, datum key, sqlite3_stmt *data, sqlite3_stmt *files) {
+  char *k = key.dptr;
+
+  char hash[40] = {};
+  base32_encode(k+1, hash, 24);
+  sqlite3_bind_text(data, 1, hash, -1, SQLITE_STATIC);
+  sqlite3_bind_text(files, 1, hash, -1, SQLITE_STATIC);
+
+  // fetch info
+  datum res = gdbm_fetch(dat, key);
+  if(res.dsize != 3*8) {
+    printf("WARNING: Invalid TTH data for `%s' - ignoring.\n", hash);
+    if(res.dsize > 0)
+      free(res.dptr);
+    return;
+  }
+
+  // lastmod, filesize, blocksize (ignored)
+  guint64 *r = (guint64 *)res.dptr;
+  sqlite3_bind_int64(files, 2, GINT64_FROM_LE(r[0]));
+  sqlite3_bind_int64(data, 2, GINT64_FROM_LE(r[1]));
+  free(res.dptr);
+
+  // fetch tthl data
+  k[0] = 1;
+  res = gdbm_fetch(dat, key);
+  k[0] = 0;
+  if(res.dsize < 0) {
+    printf("WARNING: Invalid TTH data for `%s' - ignoring.\n", hash);
+    if(res.dsize > 0)
+      free(res.dptr);
+    return;
+  }
+
+  // let sqlite3 free the data when it's done with it.
+  sqlite3_bind_blob(data, 3, res.dptr, res.dsize, free);
+  sqlite3_bind_text(files, 3, "", -1, SQLITE_STATIC);
+
+  if(sqlite3_step(data) != SQLITE_DONE || sqlite3_reset(data) || sqlite3_step(files) != SQLITE_DONE || sqlite3_reset(files))
+    u20_revert("%s", sqlite3_errmsg(u20_sql));
+}
+
+
+// TODO: The `filename' column isn't set yet
+// TODO: The `done' flag in hashdata.dat should also be transferred to somewhere.
+static void u20_hashdata() {
+  printf("-- Converting hashdata.dat...");
+  fflush(stdout);
+
+  GDBM_FILE dat = gdbm_open(u20_hashdat_fn, 0, GDBM_READER, 0600, NULL);
+  if(!dat)
+    u20_revert("%s", gdbm_strerror(gdbm_errno));
+
+  char *err = NULL;
+  if(sqlite3_exec(u20_sql, "BEGIN EXCLUSIVE TRANSACTION", NULL, NULL, &err))
+    u20_revert("%s", err?err:sqlite3_errmsg(u20_sql));
+
+  sqlite3_stmt *data, *files;
+  if(sqlite3_prepare_v2(u20_sql, "INSERT INTO hashdata (root, size, tthl) VALUES(?, ?, ?)", -1, &data, NULL))
+    u20_revert("%s", sqlite3_errmsg(u20_sql));
+  if(sqlite3_prepare_v2(u20_sql, "INSERT INTO hashfiles (tth, lastmod, filename) VALUES(?, ?, ?)", -1, &files, NULL))
+    u20_revert("%s", sqlite3_errmsg(u20_sql));
+
+  // walk through the keys
+  datum key = gdbm_firstkey(dat);
+  char *freethis = NULL;
+  for(; key.dptr; key=gdbm_nextkey(dat, key)) {
+    if(freethis)
+      free(freethis);
+    freethis = key.dptr;
+
+    // Only check for INFO keys
+    if(key.dsize != 25 || *((char *)key.dptr) != 0)
+      continue;
+    u20_hashdata_item(dat, key, data, files);
+  }
+
+  if(freethis)
+    free(freethis);
+
+  if(sqlite3_finalize(data) || sqlite3_finalize(files))
+    u20_revert("%s", sqlite3_errmsg(u20_sql));
+
+  if(sqlite3_exec(u20_sql, "COMMIT", NULL, NULL, &err))
+    u20_revert("%s", err?err:sqlite3_errmsg(u20_sql));
+
+  gdbm_close(dat);
+
+  puts(" done.");
+}
+
+
+static void u20_final() {
+  printf("-- Finalizing...");
+  fflush(stdout);
+
+  if(sqlite3_close(u20_sql))
+    u20_revert("%s", sqlite3_errmsg(u20_sql));
+
+  // TODO: update version and unlink old files
 
   puts(" done.");
 }
@@ -147,7 +285,14 @@ static void u20_initsqlite() {
 
 static void u20() {
   u20_sql_fn = g_build_filename(db_dir, "db.sqlite3", NULL);
+  u20_hashdat_fn = g_build_filename(db_dir, "hashdata.dat", NULL);
+
   u20_initsqlite();
+  u20_hashdata();
+  u20_final();
+
+  g_free(u20_sql_fn);
+  g_free(u20_hashdat_fn);
 }
 
 
@@ -186,8 +331,8 @@ int main(int argc, char **argv) {
 
   // not finished...
   confirm(
-    "*WARNING*: This utility is not finished yet! You WILL screw up your"
-    "session directory if you run this program now. Don't do this unless"
+    "*WARNING*: This utility is not finished yet! You WILL screw up your\n"
+    "session directory if you run this program now. Don't do this unless\n"
     "you know what you're doing!"
   );
 

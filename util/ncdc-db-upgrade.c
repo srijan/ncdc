@@ -29,6 +29,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <stdarg.h>
 
 #include <locale.h>
 #include <unistd.h>
@@ -36,8 +37,31 @@
 
 #include <glib.h>
 #include <glib/gstdio.h>
+#include <sqlite3.h>
+
 
 static const char *db_dir = NULL;
+static int db_verfd = -1;
+
+
+
+// Handly utility function
+static void confirm(const char *msg, ...) {
+  va_list va;
+  va_start(va, msg);
+  vprintf(msg, va);
+  va_end(va);
+  fputs("\n\nContinue? (y/N): ", stdout);
+
+  char reply[20];
+  char *r = fgets(reply, 20, stdin);
+  if(!r || (strcasecmp(r, "y\n") != 0 && strcasecmp(r, "yes\n") != 0)) {
+    puts("Aborted.");
+    exit(0);
+  }
+}
+
+
 
 
 // Sets db_dir and returns its current version
@@ -56,27 +80,82 @@ static int db_getversion() {
 
   // get database version and check that the dir isn't locked
   char *ver_file = g_build_filename(db_dir, "version", NULL);
-  int ver_fd = g_open(ver_file, O_RDWR, 0600);
+  db_verfd = g_open(ver_file, O_RDWR, 0600);
 
   struct flock lck;
   lck.l_type = F_WRLCK;
   lck.l_whence = SEEK_SET;
   lck.l_start = 0;
   lck.l_len = 0;
-  if(ver_fd < 0 || fcntl(ver_fd, F_SETLK, &lck) == -1) {
+  if(db_verfd < 0 || fcntl(db_verfd, F_SETLK, &lck) == -1) {
     fprintf(stderr, "Unable to open lock file. Please make sure that no other instance of ncdc is running with the same configuration directory.\n");
     exit(1);
   }
 
   // get version
   unsigned char dir_ver[2];
-  if(read(ver_fd, dir_ver, 2) < 2)
+  if(read(db_verfd, dir_ver, 2) < 2)
     g_error("Could not read version information from '%s': %s", ver_file, g_strerror(errno));
   g_free(ver_file);
   return (dir_ver[0] << 8) + dir_ver[1];
 }
 
 
+
+
+
+
+// Upgrades the directory from 1.0 to 2.0
+
+static char *u20_sql_fn;
+static sqlite3 *u20_sql;
+
+static void u20_revert(const char *msg, ...) {
+  puts(" error.");
+  puts("");
+  va_list va;
+  va_start(va, msg);
+  vprintf(msg, va);
+  va_end(va);
+
+  puts("");
+  fputs("Reverting changes...", stdout);
+  fflush(stdout);
+
+  // clean up
+  unlink(u20_sql_fn);
+
+  puts(" done.");
+  exit(1);
+}
+
+
+static void u20_initsqlite() {
+  printf("-- Creating `%s'...", u20_sql_fn);
+  fflush(stdout);
+
+  if(sqlite3_open(u20_sql_fn, &u20_sql))
+    u20_revert("%s", sqlite3_errmsg(u20_sql));
+
+  char *err = NULL;
+  if(sqlite3_exec(u20_sql, "PRAGMA user_version = 1", NULL, NULL, &err))
+    u20_revert("%s", err?err:sqlite3_errmsg(u20_sql));
+
+  puts(" done.");
+}
+
+
+static void u20() {
+  u20_sql_fn = g_build_filename(db_dir, "db.sqlite3", NULL);
+  u20_initsqlite();
+}
+
+
+
+
+
+
+// The main program
 
 static gboolean print_version(const gchar *name, const gchar *val, gpointer dat, GError **err) {
   printf("ncdc-db-upgrade %s\n", VERSION);
@@ -105,9 +184,17 @@ int main(int argc, char **argv) {
   }
   g_option_context_free(optx);
 
+  // not finished...
+  confirm(
+    "*WARNING*: This utility is not finished yet! You WILL screw up your"
+    "session directory if you run this program now. Don't do this unless"
+    "you know what you're doing!"
+  );
+
   // get version
   int ver = db_getversion();
   printf("Detected version: %d.%d (%s)\n", ver>>8, ver&0xFF, (ver>>8)<=1 ? "ncdc 1.5 or earlier" : "ncdc 1.6 or later");
+
   // TODO: There is a nasty situation that occurs when ncdc 1.4 or earlier is
   // run on a version 2 directory - in this case both db.sqlite3 and the old
   // hashdata.dat and dl.dat are present, and 'version' will be 1. This should
@@ -120,6 +207,15 @@ int main(int argc, char **argv) {
     printf("Error: unrecognized database version. You should probably upgrade this utility.\n");
     exit(1);
   }
+
+  // We've now determined that we have a version 1 directory, ask whether we can upgrade this.
+  confirm("\n"
+    "The directory will be upgraded for use with ncdc 1.6 or later. This\n"
+    "action is NOT reversible! You are encouraged to make a backup of the\n"
+    "directory, so that you can revert back to an older version in case\n"
+    "something goes wrong."
+  );
+  u20();
 
   return 0;
 }

@@ -39,6 +39,8 @@
 #include <glib/gstdio.h>
 #include <sqlite3.h>
 #include <gdbm.h>
+#include <bzlib.h>
+#include <libxml/xmlreader.h>
 
 
 static const char *db_dir = NULL;
@@ -46,7 +48,8 @@ static int db_verfd = -1;
 
 
 
-// Handly utility function
+// Handly utility functions
+
 static void confirm(const char *msg, ...) {
   va_list va;
   va_start(va, msg);
@@ -78,6 +81,23 @@ static void base32_encode(const char *from, char *to, int len) {
     to[idx++] = alphabet[(value << (5-bits)) & 0x1F];
 }
 
+
+void base32_decode(const char *from, char *to) {
+  int bits = 0, idx = 0, value = 0;
+  while(*from) {
+    value = (value << 5) | (*from <= '9' ? (26+(*from-'2')) : *from-'A');
+    bits += 5;
+    while(bits > 8) {
+      to[idx++] = (value >> (bits-8)) & 0xFF;
+      bits -= 8;
+    }
+    from++;
+  }
+}
+
+
+#define isbase32(s) (strspn(s, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ234567") == strlen(s))
+#define istth(s) (strlen(s) == 39 && isbase32(s))
 
 
 
@@ -126,6 +146,9 @@ static int db_getversion() {
 
 static char *u20_sql_fn;
 static char *u20_hashdat_fn;
+static char *u20_files_fn;
+static char *u20_config_fn;
+static GKeyFile *u20_conf;
 static sqlite3 *u20_sql;
 
 static void u20_revert(const char *msg, ...) {
@@ -146,6 +169,171 @@ static void u20_revert(const char *msg, ...) {
   puts(" done.");
   exit(1);
 }
+
+
+
+
+// Reads files.xml.bz2 and creates a hash table with TTH as keys and a
+// GPtrArray of strings (absolute paths) as values.
+
+static GHashTable *u20_filenames = NULL;
+
+
+static int u20_loadfiles_input(void *context, char *buf, int len) {
+  static int stream_end = 0;
+  if(stream_end)
+    return 0;
+  int bzerr;
+  int r = BZ2_bzRead(&bzerr, (BZFILE *)context, buf, len);
+  if(bzerr != BZ_OK && bzerr != BZ_STREAM_END)
+    u20_revert("bzip2 decompression error. (%d)", bzerr);
+  stream_end = bzerr == BZ_STREAM_END;
+  return r;
+}
+
+
+static void u20_loadfiles_err(void *arg, const char *msg, xmlParserSeverities severity, xmlTextReaderLocatorPtr locator) {
+  if(severity == XML_PARSER_SEVERITY_VALIDITY_WARNING || severity == XML_PARSER_SEVERITY_WARNING)
+    printf("XML parse warning on line %d: %s", xmlTextReaderLocatorLineNumber(locator), msg);
+  else
+    u20_revert("XML parse error on input line %d: %s", xmlTextReaderLocatorLineNumber(locator), msg);
+}
+
+
+static gint u20_loadfiles_equal(gconstpointer a, gconstpointer b) {
+  return memcmp(a, b, 24) == 0 ? TRUE : FALSE;
+}
+
+
+static void u20_loadfiles_handle(xmlTextReaderPtr reader, char **root, char **path) {
+  char name[50], *tmp, *tmp2;
+
+  tmp = (char *)xmlTextReaderName(reader);
+  strncpy(name, tmp, 50);
+  name[49] = 0;
+  free(tmp);
+
+  switch(xmlTextReaderNodeType(reader)) {
+  case XML_READER_TYPE_ELEMENT:
+    // <Directory ..>
+    if(strcmp(name, "Directory") == 0) {
+      if(!(tmp = (char *)xmlTextReaderGetAttribute(reader, (xmlChar *)"Name")))
+        u20_revert("<Directory> element found without `Name' attribute.");
+      if(!*root) {
+        char **names = g_key_file_get_keys(u20_conf, "share", NULL, NULL);
+        int i, len = names ? g_strv_length(names) : 0;
+        for(i=0; i<len; i++) {
+          if(strcmp(names[i], tmp) == 0)
+            *root = g_key_file_get_string(u20_conf, "share", names[i], NULL);
+        }
+        g_strfreev(names);
+        if(*root)
+          *path = g_strdup("/");
+        else
+          g_warning("%s", tmp);
+      } else {
+        tmp2 = g_build_path("/", *path, tmp, NULL);
+        g_free(*path);
+        *path = tmp2;
+      }
+      free(tmp);
+
+    // <File .. />
+    } else if(strcmp(name, "File") == 0 && *root) {
+
+      if(!(tmp2 = (char *)xmlTextReaderGetAttribute(reader, (xmlChar *)"Name")))
+        u20_revert("<File> element found without `Name' attribute.");
+      tmp = g_build_path("/", *root, *path, tmp2, NULL);
+      free(tmp2);
+      tmp2 = g_filename_from_utf8(tmp, -1, NULL, NULL, NULL);
+      g_free(tmp);
+      tmp = realpath(tmp2, NULL);
+      g_free(tmp2);
+      tmp2 = tmp ? g_filename_to_utf8(tmp, -1, NULL, NULL, NULL) : NULL;
+      if(tmp)
+        free(tmp);
+
+      tmp = (char *)xmlTextReaderGetAttribute(reader, (xmlChar *)"TTH");
+      if(!tmp || !istth(tmp))
+        u20_revert("<File> element found with invalid or missing `TTH' attribute.");
+      char enc[24];
+      base32_decode(tmp, enc);
+      free(tmp);
+
+      // add to hash table
+      if(tmp2) {
+        GPtrArray *a = g_hash_table_lookup(u20_filenames, enc);
+        if(a)
+          g_ptr_array_add(a, tmp2);
+        else {
+          a = g_ptr_array_new_with_free_func(g_free);
+          g_ptr_array_add(a, tmp2);
+          g_hash_table_insert(u20_filenames, g_memdup(enc, 24), a);
+        }
+      }
+    }
+    break;
+
+  case XML_READER_TYPE_END_ELEMENT:
+    // </Directory>
+    if(strcmp(name, "Directory") == 0 && *root) {
+      if(strcmp(*path, "/") == 0) {
+        g_free(*path);
+        g_free(*root);
+        *path = *root = NULL;
+      } else {
+        tmp = strrchr(*path, '/');
+        *(tmp == *path ? tmp+1 : tmp) = 0;
+      }
+    }
+    break;
+  }
+}
+
+
+static void u20_loadfiles() {
+  printf("-- Scanning share...");
+  fflush(stdout);
+
+  // Open file
+  FILE *f = fopen(u20_files_fn, "r");
+  if(!f)
+    u20_revert("Error opening file list: %s", strerror(errno));
+
+  BZFILE *bzf = NULL;
+  int bzerr;
+  bzf = BZ2_bzReadOpen(&bzerr, f, 0, 0, NULL, 0);
+  if(bzerr != BZ_OK)
+    u20_revert("Error opening bz2 stream (%d)", bzerr);
+
+  // create reader
+  xmlTextReaderPtr reader = xmlReaderForIO(u20_loadfiles_input, NULL, bzf, NULL, NULL, XML_PARSE_NOENT);
+  if(!reader)
+    u20_revert("Error opening XML stream.");
+  xmlTextReaderSetErrorHandler(reader, u20_loadfiles_err, NULL);
+
+  // start reading
+  u20_filenames = g_hash_table_new_full(g_int64_hash, u20_loadfiles_equal, g_free, (GDestroyNotify)g_ptr_array_unref);
+  char *root = NULL;
+  char *path = NULL;
+  int ret;
+  while((ret = xmlTextReaderRead(reader)) == 1)
+    u20_loadfiles_handle(reader, &root, &path);
+  g_free(root);
+  g_free(path);
+
+  if(ret < 0)
+    u20_revert("Error reading XML stream.");
+
+  // close
+  xmlFreeTextReader(reader);
+  BZ2_bzReadClose(&bzerr, bzf);
+  fclose(f);
+
+  printf(" %d unique files found.\n", g_hash_table_size(u20_filenames));
+}
+
+
 
 
 static void u20_initsqlite() {
@@ -212,16 +400,26 @@ static void u20_hashdata_item(GDBM_FILE dat, datum key, sqlite3_stmt *data, sqli
     return;
   }
 
+  GPtrArray *a = g_hash_table_lookup(u20_filenames, k+1);
+  if(!a) {
+    printf("WARNING: No file found for `%s' - ignoring.\n", hash);
+    free(res.dptr);
+  }
+
   // let sqlite3 free the data when it's done with it.
   sqlite3_bind_blob(data, 3, res.dptr, res.dsize, free);
-  sqlite3_bind_text(files, 3, "", -1, SQLITE_STATIC);
-
-  if(sqlite3_step(data) != SQLITE_DONE || sqlite3_reset(data) || sqlite3_step(files) != SQLITE_DONE || sqlite3_reset(files))
+  if(sqlite3_step(data) != SQLITE_DONE || sqlite3_reset(data))
     u20_revert("%s", sqlite3_errmsg(u20_sql));
+
+  int i;
+  for(i=0; i<a->len; i++) {
+    sqlite3_bind_text(files, 3, g_ptr_array_index(a, i), -1, SQLITE_STATIC);
+    if(sqlite3_step(files) != SQLITE_DONE || sqlite3_reset(files))
+      u20_revert("%s", sqlite3_errmsg(u20_sql));
+  }
 }
 
 
-// TODO: The `filename' column isn't set yet
 // TODO: The `done' flag in hashdata.dat should also be transferred to somewhere.
 static void u20_hashdata() {
   printf("-- Converting hashdata.dat...");
@@ -284,15 +482,27 @@ static void u20_final() {
 
 
 static void u20() {
-  u20_sql_fn = g_build_filename(db_dir, "db.sqlite3", NULL);
+  u20_sql_fn     = g_build_filename(db_dir, "db.sqlite3", NULL);
   u20_hashdat_fn = g_build_filename(db_dir, "hashdata.dat", NULL);
+  u20_files_fn   = g_build_filename(db_dir, "files.xml.bz2", NULL);
+  u20_config_fn  = g_build_filename(db_dir, "config.ini", NULL);
 
+  u20_conf = g_key_file_new();
+  GError *err = NULL;
+  if(!g_key_file_load_from_file(u20_conf, u20_config_fn, G_KEY_FILE_KEEP_COMMENTS, &err))
+    u20_revert("Could not load `%s': %s", u20_config_fn, err->message);
+
+  u20_loadfiles();
   u20_initsqlite();
   u20_hashdata();
   u20_final();
 
+  g_key_file_free(u20_conf);
+  g_hash_table_unref(u20_filenames);
   g_free(u20_sql_fn);
   g_free(u20_hashdat_fn);
+  g_free(u20_files_fn);
+  g_free(u20_config_fn);
 }
 
 

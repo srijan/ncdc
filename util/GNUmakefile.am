@@ -2,5 +2,5 @@ dist_bin_SCRIPTS=ncdc-gen-cert
 
 bin_PROGRAMS=ncdc-db-upgrade
 ncdc_db_upgrade_SOURCES=ncdc-db-upgrade.c
-ncdc_db_upgrade_CFLAGS=$(SQLITE_CFLAGS) $(GLIB_CFLAGS)
-ncdc_db_upgrade_LDADD=$(SQLITE_LIBS) $(GDBM_LIBS) $(GLIB_LIBS)
+ncdc_db_upgrade_CFLAGS=$(SQLITE_CFLAGS) $(GLIB_CFLAGS) $(LIBXML_CFLAGS)
+ncdc_db_upgrade_LDADD=$(SQLITE_LIBS) $(GDBM_LIBS) $(GLIB_LIBS) $(LIBXML_LIBS) $(BZ2_LIBS)

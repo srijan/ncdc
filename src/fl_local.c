@@ -325,7 +325,7 @@ static gboolean fl_hashindex_load(struct fl_list *fl) {
     fl->hastth = FALSE;
     return TRUE;
   }
-  fl->lastmod = nfo.lastmod;
+  fl_list_getlocal(fl).lastmod = nfo.lastmod;
 
   fl_hashindex_insert(fl);
   return FALSE;
@@ -362,12 +362,12 @@ static void fl_hashindex_sethash(struct fl_list *fl, char *tth, time_t lastmod, 
   // update file
   memcpy(fl->tth, tth, 24);
   fl->hastth = 1;
-  fl->lastmod = lastmod;
+  fl_list_getlocal(fl).lastmod = lastmod;
   fl_hashindex_insert(fl);
 
   // save to hashdata file
   struct fl_hashdat_info nfo;
-  nfo.lastmod = fl->lastmod;
+  nfo.lastmod = lastmod;
   nfo.filesize = fl->size;
   nfo.blocksize = blocksize;
   fl_hashdat_set(fl->tth, &nfo, blocks);
@@ -458,12 +458,12 @@ static void fl_scan_dir(struct fl_list *parent, const char *path, const char *vp
     }
     g_free(cpath);
     // create the node
-    struct fl_list *cur = fl_list_create(confname);
+    struct fl_list *cur = fl_list_create(confname, TRUE);
     g_free(confname);
     if(S_ISREG(dat.st_mode)) {
       cur->isfile = TRUE;
       cur->size = dat.st_size;
-      cur->lastmod = dat.st_mtime;
+      fl_list_getlocal(cur).lastmod = dat.st_mtime;
     }
     g_free(vcpath);
     // and add it
@@ -500,7 +500,7 @@ static void fl_scan_thread(gpointer data, gpointer udata) {
 
   int i, len = g_strv_length(args->path);
   for(i=0; i<len; i++) {
-    struct fl_list *cur = fl_list_create("");
+    struct fl_list *cur = fl_list_create("", FALSE);
     char *tmp = g_filename_from_utf8(args->path[i], -1, NULL, NULL, NULL);
     cur->sub = g_ptr_array_new_with_free_func(fl_list_free);
     fl_scan_dir(cur, tmp, args->path[i], args->inc_hidden, args->excl_regex);
@@ -734,13 +734,13 @@ fl_hash_done_f:
 static struct fl_list *fl_refresh_getroot(const char *name) {
   // no root? create!
   if(!fl_local_list) {
-    fl_local_list = fl_list_create("");
+    fl_local_list = fl_list_create("", FALSE);
     fl_local_list->sub = g_ptr_array_new_with_free_func(fl_list_free);
   }
   struct fl_list *cur = fl_list_file(fl_local_list, name);
   // dir not present yet? create a stub
   if(!cur) {
-    cur = fl_list_create(name);
+    cur = fl_list_create(name, FALSE);
     cur->sub = g_ptr_array_new_with_free_func(fl_list_free);
     fl_list_add(fl_local_list, cur, -1);
     fl_list_sort(fl_local_list);
@@ -798,7 +798,9 @@ static void fl_refresh_compare(struct fl_list *old, struct fl_list *new) {
     // check
     if(check) {
       // If it's a file, it may have been modified or we're missing the TTH
-      if(oldl->isfile && (!oldl->hastth || newl->lastmod > oldl->lastmod || newl->size != oldl->size)) {
+      if(oldl->isfile && (!oldl->hastth
+            || fl_list_getlocal(newl).lastmod > fl_list_getlocal(oldl).lastmod
+            || newl->size != oldl->size)) {
         fl_hashindex_del(oldl);
         oldl->size = newl->size;
         fl_hash_queue_append(oldl);
@@ -1058,7 +1060,7 @@ void fl_init() {
   g_strfreev(shares);
 
   // load our files.xml.bz2
-  fl_local_list = sharing ? fl_load(fl_local_list_file, &err) : NULL;
+  fl_local_list = sharing ? fl_load(fl_local_list_file, &err, TRUE) : NULL;
   if(sharing && !fl_local_list) {
     ui_mf(ui_main, UIP_MED, "Error loading local filelist: %s. Re-building list.", err->message);
     g_error_free(err);

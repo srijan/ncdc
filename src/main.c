@@ -391,6 +391,7 @@ int main(int argc, char **argv) {
 #endif
 
   conf_init();
+  db_init();
   hub_init_global();
   net_init_global();
 
@@ -468,6 +469,7 @@ int main(int argc, char **argv) {
   cc_close_global();
   fl_close();
   dl_close_global();
+  db_close();
   if(!main_noterm)
     printf(" Done!\n");
 

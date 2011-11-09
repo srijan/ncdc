@@ -73,6 +73,7 @@ struct ui_textinput;
 // include the auto-generated header files
 #include "cc.h"
 #include "commands.h"
+#include "db.h"
 #include "dl.h"
 #include "fl_local.h"
 #include "fl_util.h"

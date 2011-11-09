@@ -3,6 +3,7 @@ bin_PROGRAMS = ncdc
 ncdc_SOURCES =\
 	cc.c\
 	commands.c\
+	db.c\
 	dl.c\
 	fl_local.c\
 	fl_util.c\
@@ -18,8 +19,8 @@ ncdc_SOURCES =\
 
 auto_headers = $(ncdc_SOURCES:.c=.h)
 noinst_HEADERS = doc.h ncdc.h ${auto_headers}
-ncdc_CFLAGS = $(GLIB_CFLAGS) $(GIO_CFLAGS) $(LIBXML_CFLAGS)
-ncdc_LDADD = $(NCURSES_LIBS) $(GDBM_LIBS) $(BZ2_LIBS) $(GLIB_LIBS) $(GIO_LIBS) $(LIBXML_LIBS)
+ncdc_CFLAGS = $(GLIB_CFLAGS) $(GIO_CFLAGS) $(LIBXML_CFLAGS) $(SQLITE_CFLAGS)
+ncdc_LDADD = $(NCURSES_LIBS) $(GDBM_LIBS) $(BZ2_LIBS) $(GLIB_LIBS) $(GIO_LIBS) $(LIBXML_LIBS) $(SQLITE_LIBS)
 
 # only clean header files when makeheaders is installed
 if USE_MH

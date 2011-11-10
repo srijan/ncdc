@@ -166,3 +166,39 @@ gint64 db_fl_addhash(const char *path, guint64 size, time_t lastmod, const char 
   return id;
 }
 
+
+// Fetch the tthl data associated with a TTH root. Return value must be
+// g_free()'d. Returns NULL on error or when it's not in the DB.
+char *db_fl_gettthl(const char *root, int *len) {
+  db_lock(NULL);
+
+  char hash[40] = {};
+  base32_encode(root, hash);
+  sqlite3_stmt *s;
+  int r;
+  int l = 0;
+  char *res = NULL;
+
+  if(sqlite3_prepare_v2(db, "SELECT tthl FROM hashfiles WHERE root = ?", -1, &s, NULL))
+    db_err(NULL, NULL);
+  sqlite3_bind_text(s, 1, hash, -1, SQLITE_STATIC);
+  while((r = sqlite3_step(s)) == SQLITE_BUSY)
+    ;
+  if(r == SQLITE_DONE)
+    goto done;
+  else if(r != SQLITE_ROW)
+    db_err(NULL, NULL);
+
+  res = (char *)sqlite3_column_blob(s, 0);
+  if(res) {
+    l = sqlite3_column_bytes(s, 0);
+    res = g_memdup(res, l);
+  }
+  if(len)
+    *len = l;
+
+done:
+  sqlite3_finalize(s);
+  db_unlock();
+  return res;
+}

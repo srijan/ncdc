@@ -678,14 +678,14 @@ static void handle_adcget(struct cc *cc, char *type, char *id, guint64 start, gi
     char root[24];
     base32_decode(id+4, root);
     int len = 0;
-    char *dat = NULL; // TODO!
+    char *dat = db_fl_gettthl(root, &len);
     if(!dat)
       g_set_error_literal(err, 1, 51, "File Not Available");
     else {
       // no need to adc_escape(id) here, since it cannot contain any special characters
       net_sendf(cc->net, cc->adc ? "CSND tthl %s 0 %d" : "$ADCSND tthl %s 0 %d", id, len);
       net_sendraw(cc->net, dat, len);
-      free(dat);
+      g_free(dat);
     }
     return;
   }

@@ -322,11 +322,10 @@ struct fl_hash_args {
   struct fl_list *file; // only accessed from main thread
   char *path;        // owned by main thread, read from hash thread
   guint64 filesize;  // set by main thread
-  guint64 blocksize; // set by hash thread
   char root[24];     // set by hash thread
-  char *blocks;      // allocated by hash thread, ownership passed to main
   GError *err;       // set by hash thread
   time_t lastmod;    // set by hash thread
+  gint64 id;         // set by hash thread
   gdouble time;      // set by hash thread
   int resetnum;      // used by hash thread to validate that *file is still in the queue
 };
@@ -383,21 +382,33 @@ static void fl_hash_thread(gpointer data, gpointer udata) {
   // static, since only one hash thread is allowed and this saves stack space
   static struct tth_ctx tth;
   static char buf[10240];
+  char *blocks = NULL;
+  int f = -1;
+  char *real = NULL;
 
   time(&args->lastmod);
   GTimer *tm = g_timer_new();
 
-  int f = open(args->path, O_RDONLY);
+  char *tmp = realpath(args->path, NULL);
+  if(!tmp) {
+    g_set_error(&args->err, 1, 0, "Error getting file path: %s", g_strerror(errno));
+    goto finish;
+  }
+  real = g_filename_to_utf8(tmp, -1, NULL, NULL, NULL);
+  free(tmp);
+  g_return_if_fail(real); // really shouldn't happen, we fetched this from a UTF-8 string after all.
+
+  f = open(args->path, O_RDONLY);
   if(f < 0) {
     g_set_error(&args->err, 1, 0, "Error reading file: %s", g_strerror(errno));
-    goto fl_hash_finish;
+    goto finish;
   }
 
   // Initialize some stuff
-  args->blocksize = tth_blocksize(args->filesize, 1<<(fl_hash_keep_level-1));
-  args->blocksize = MAX(args->blocksize, fl_hash_max_granularity);
-  int blocks_num = tth_num_blocks(args->filesize, args->blocksize);
-  args->blocks = g_malloc(24*blocks_num);
+  guint64 blocksize = tth_blocksize(args->filesize, 1<<(fl_hash_keep_level-1));
+  blocksize = MAX(blocksize, fl_hash_max_granularity);
+  int blocks_num = tth_num_blocks(args->filesize, blocksize);
+  blocks = g_malloc(24*blocks_num);
   tth_init(&tth);
 
   struct fadv adv;
@@ -413,23 +424,23 @@ static void fl_hash_thread(gpointer data, gpointer udata) {
     fadv_purge(&adv, r);
     // no need to hash any further? quit!
     if(g_atomic_int_get(&fl_hash_reset) != args->resetnum)
-      goto fl_hash_finish;
+      goto finish;
     // file has been modified. time to back out
     if(rd > args->filesize) {
       g_set_error_literal(&args->err, 1, 0, "File has been modified.");
-      goto fl_hash_finish;
+      goto finish;
     }
     ratecalc_add(&fl_hash_rate, r);
     // and hash
     char *b = buf;
     while(r > 0) {
-      int w = MIN(r, args->blocksize-block_len);
+      int w = MIN(r, blocksize-block_len);
       tth_update(&tth, b, w);
       block_len += w;
       b += w;
       r -= w;
-      if(block_len >= args->blocksize) {
-        tth_final(&tth, args->blocks+(block_cur*24));
+      if(block_len >= blocksize) {
+        tth_final(&tth, blocks+(block_cur*24));
         tth_init(&tth);
         block_cur++;
         block_len = 0;
@@ -438,28 +449,33 @@ static void fl_hash_thread(gpointer data, gpointer udata) {
   }
   if(r < 0) {
     g_set_error(&args->err, 1, 0, "Error reading file: %s", g_strerror(errno));
-    goto fl_hash_finish;
+    goto finish;
   }
   if(rd != args->filesize) {
     g_set_error_literal(&args->err, 1, 0, "File has been modified.");
-    goto fl_hash_finish;
+    goto finish;
   }
   // Calculate last block
   if(!args->filesize || block_len) {
-    tth_final(&tth, args->blocks+(block_cur*24));
+    tth_final(&tth, blocks+(block_cur*24));
     block_cur++;
   }
   g_return_if_fail(block_cur == blocks_num);
   // Calculate root hash
-  tth_root(args->blocks, blocks_num, args->root);
+  tth_root(blocks, blocks_num, args->root);
 
-  // TODO: insert data into the hashfiles and hashdata tables, and retreive a rowid for use in the fl_list struct.
+  // Add to database
+  args->id = db_fl_addhash(real, args->filesize, args->lastmod, args->root, blocks, 24*blocks_num);
+  if(!args->id)
+    g_set_error_literal(&args->err, 1, 0, "Error saving hash data to the database.");
 
-fl_hash_finish:
+finish:
   if(f > 0) {
     fadv_close(&adv);
     close(f);
   }
+  g_free(real);
+  g_free(blocks);
   args->time = g_timer_elapsed(tm, NULL);
   g_timer_destroy(tm);
   g_idle_add_full(G_PRIORITY_HIGH_IDLE, fl_hash_done, args, NULL);
@@ -516,11 +532,11 @@ static gboolean fl_hash_done(gpointer dat) {
   memcpy(fl->tth, args->root, 24);
   fl->hastth = 1;
   fl_list_getlocal(fl).lastmod = args->lastmod;
+  fl_list_getlocal(fl).id = args->id;
   fl_hashindex_insert(fl);
   fl_needflush = TRUE;
 
 fl_hash_done_f:
-  g_free(args->blocks);
   g_free(args->path);
   g_free(args);
   // Hash next file in the queue

@@ -55,6 +55,7 @@ struct fl_list {
 
 struct fl_list_local {
   time_t lastmod;
+  gint64 id;
 };
 
 #endif

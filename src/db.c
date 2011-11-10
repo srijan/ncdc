@@ -64,13 +64,50 @@ void db_init() {
 
 
 // Note: db may be NULL after a db_lock(), this happens when ncdc is shutting down.
-#define db_lock()   sqlite3_mutex_enter(sqlite3_db_mutex(db))
+#define db_lock(x) do {\
+    if(!db) {\
+      g_warning("%s:%d: Attempting to use the database after it has been closed.", __FILE__, __LINE__);\
+      return x;\
+    }\
+    sqlite3_mutex_enter(sqlite3_db_mutex(db));\
+  } while(0)
+
 #define db_unlock() sqlite3_mutex_leave(sqlite3_db_mutex(db))
 
+// Rolls a transaction back and unlocks the database. Does not check for errors.
+#define db_rollback(x) do {\
+    char *db_err = NULL;\
+    if(sqlite3_exec(db, "ROLLBACK", NULL, NULL, &db_err) && db_err)\
+      sqlite3_free(db_err);\
+    db_unlock();\
+  } while(0)
+
+// Convenience function. msg, if not NULL, is assumed to come from sqlite3
+// itself, and will be sqlite3_free()'d. A rollback is also automatically
+// issued to attempt to create a clean state again.
 #define db_err(msg, x) do {\
     g_critical("%s:%d: SQLite3 error: %s", __FILE__, __LINE__, (msg)?(msg):sqlite3_errmsg(db));\
-    db_unlock();\
+    if(msg)\
+      sqlite3_free(msg);\
+    db_rollback();\
     return x;\
+  } while(0)
+
+// Locks the database and starts a transaction. Must be followed by either db_commit(), db_err() or db_rollback().
+#define db_begin(x) do {\
+    db_lock(x);\
+    char *db_err = NULL;\
+    if(sqlite3_exec(db, "BEGIN", NULL, NULL, &db_err))\
+      db_err(db_err, x);\
+  } while(0)
+
+// Commits a transaction and unlocks the database.
+// TODO: retry on SQLITE_DONE
+#define db_commit(x) do {\
+    char *db_err = NULL;\
+    if(sqlite3_exec(db, "COMMIT", NULL, NULL, &db_err))\
+      db_err(db_err, x);\
+    db_unlock();\
   } while(0)
 
 
@@ -94,3 +131,38 @@ void db_close() {
 #define db_fl_setdone(v) {}
 
 #endif
+
+
+// Adds a file to hashfiles and, if not present yet, hashdata. Returns the new hashfiles.id.
+gint64 db_fl_addhash(const char *path, guint64 size, time_t lastmod, const char *root, const char *tthl, int tthl_len) {
+  db_begin(0);
+
+  char hash[40] = {};
+  base32_encode(root, hash);
+  sqlite3_stmt *s;
+
+  // hashdata
+  if(sqlite3_prepare_v2(db, "INSERT OR IGNORE INTO hashdata (root, size, tthl) VALUES(?, ?, ?)", -1, &s, NULL))
+    db_err(NULL, 0);
+  sqlite3_bind_text(s, 1, hash, -1, SQLITE_STATIC);
+  sqlite3_bind_int64(s, 2, size);
+  sqlite3_bind_blob(s, 3, tthl, tthl_len, SQLITE_STATIC);
+  if(sqlite3_step(s) != SQLITE_DONE)
+    db_err(NULL, 0);
+  sqlite3_finalize(s);
+
+  // hashfiles
+  if(sqlite3_prepare_v2(db, "INSERT INTO hashfiles (tth, lastmod, filename) VALUES(?, ?, ?)", -1, &s, NULL))
+    db_err(NULL, 0);
+  sqlite3_bind_text(s, 1, hash, -1, SQLITE_STATIC);
+  sqlite3_bind_int64(s, 2, lastmod);
+  sqlite3_bind_text(s, 3, path, -1, SQLITE_STATIC);
+  if(sqlite3_step(s) != SQLITE_DONE)
+    db_err(NULL, 0);
+  sqlite3_finalize(s);
+
+  gint64 id = sqlite3_last_insert_rowid(db);
+  db_commit(0);
+  return id;
+}
+

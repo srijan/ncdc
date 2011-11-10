@@ -354,7 +354,8 @@ static void u20_initsqlite() {
       ");"
 
       "CREATE TABLE hashfiles ("
-      "  filename TEXT NOT NULL,"
+      "  id INTEGER PRIMARY KEY,"
+      "  filename TEXT NOT NULL UNIQUE,"
       "  tth TEXT NOT NULL REFERENCES hashdata(root),"
       "  lastmod INTEGER NOT NULL"
       ");"

@@ -82,3 +82,15 @@ void db_close() {
   sqlite3_close(d);
 }
 
+
+
+
+// hashdata and hashfiles
+
+#if INTERFACE
+
+// TODO!
+#define db_fl_getdone() TRUE
+#define db_fl_setdone(v) {}
+
+#endif

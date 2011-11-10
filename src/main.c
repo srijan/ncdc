@@ -467,7 +467,7 @@ int main(int argc, char **argv) {
   }
   ui_cmdhist_close();
   cc_close_global();
-  fl_close();
+  fl_flush(NULL);
   dl_close_global();
   db_close();
   if(!main_noterm)

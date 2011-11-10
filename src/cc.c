@@ -677,8 +677,8 @@ static void handle_adcget(struct cc *cc, char *type, char *id, guint64 start, gi
     }
     char root[24];
     base32_decode(id+4, root);
-    int len;
-    char *dat = fl_hashdat_get(root, &len);
+    int len = 0;
+    char *dat = NULL; // TODO!
     if(!dat)
       g_set_error_literal(err, 1, 51, "File Not Available");
     else {

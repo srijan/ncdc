@@ -49,9 +49,6 @@ static struct fl_list *fl_hash_cur = NULL;   // most recent file initiated for h
 static int             fl_hash_reset = 0;    // increased when fl_hash_cur is removed from the queue
 struct ratecalc        fl_hash_rate;
 
-static char       *fl_hashdat_file;
-static GDBM_FILE   fl_hashdat;
-
 
 
 // Utility functions
@@ -131,8 +128,6 @@ gboolean fl_flush(gpointer dat) {
       ui_mf(ui_main, UIP_MED, "Error saving file list: %s", err->message);
       g_error_free(err);
     }
-    // sync the hash data
-    gdbm_sync(fl_hashdat);
   }
   fl_needflush = FALSE;
   return TRUE;
@@ -142,165 +137,10 @@ gboolean fl_flush(gpointer dat) {
 
 
 
-// Hash data file interface (these operate on hashdata.dat)
+// Hash index interface. These operate on fl_hash_index and make sure
+// fl_local_list_size stays correct.
 
-#define HASHDAT_INFO 0
-#define HASHDAT_TTHL 1
-#define HASHDAT_DONE 2
-
-struct fl_hashdat_info {
-  time_t lastmod;
-  guint64 filesize;
-  guint64 blocksize;
-};
-
-
-static void fl_hashdat_open(gboolean trash) {
-  fl_hashdat = gdbm_open(fl_hashdat_file, 0, trash ? GDBM_NEWDB : GDBM_WRCREAT, 0600, NULL);
-  // this is a bit extreme, but I have no idea what else to do
-  if(!fl_hashdat)
-    g_error("Unable to open hashdata.dat.");
-}
-
-
-static gboolean fl_hashdat_getdone() {
-  char dat[] = { HASHDAT_DONE };
-  datum key = { dat, 1 };
-  return gdbm_exists(fl_hashdat, key) ? TRUE : FALSE;
-}
-
-
-// Also performs a flush to make sure the value is stored.
-static void fl_hashdat_setdone(gboolean val) {
-  if(!!fl_hashdat_getdone() == !!val)
-    return;
-  char dat[] = { HASHDAT_DONE };
-  datum key = { dat, 1 }; // also used as value
-  if(val)
-    gdbm_store(fl_hashdat, key, key, GDBM_REPLACE);
-  else
-    gdbm_delete(fl_hashdat, key);
-  gdbm_sync(fl_hashdat);
-}
-
-
-static gboolean fl_hashdat_getinfo(const char *tth, struct fl_hashdat_info *nfo) {
-  char key[25];
-  datum keydat = { key, 25 };
-  key[0] = HASHDAT_INFO;
-  memcpy(key+1, tth, 24);
-  datum res = gdbm_fetch(fl_hashdat, keydat);
-  if(res.dsize <= 0)
-    return FALSE;
-  g_return_val_if_fail(res.dsize >= 3*8, FALSE);
-  guint64 *r = (guint64 *)res.dptr;
-  nfo->lastmod = GINT64_FROM_LE(r[0]);
-  nfo->filesize = GINT64_FROM_LE(r[1]);
-  nfo->blocksize = GINT64_FROM_LE(r[2]);
-  free(res.dptr);
-  return TRUE;
-}
-
-
-static void fl_hashdat_set(const char *tth, const struct fl_hashdat_info *nfo, const char *blocks) {
-  char key[25];
-  datum keydat = { key, 25 };
-  memcpy(key+1, tth, 24);
-
-  key[0] = HASHDAT_TTHL;
-  datum val = { (char *)blocks, 24*tth_num_blocks(nfo->filesize, nfo->blocksize) };
-  gdbm_store(fl_hashdat, keydat, val, GDBM_REPLACE);
-
-  key[0] = HASHDAT_INFO;
-  guint64 info[] = { GINT64_TO_LE(nfo->lastmod), GINT64_TO_LE(nfo->filesize), GINT64_TO_LE(nfo->blocksize) };
-  val.dptr = (char *)info;
-  val.dsize = 3*8;
-  gdbm_store(fl_hashdat, keydat, val, GDBM_REPLACE);
-}
-
-
-static void fl_hashdat_del(const char *tth) {
-  char key[25];
-  datum keydat = { key, 25 };
-  key[0] = HASHDAT_INFO;
-  memcpy(key+1, tth, 24);
-  gdbm_delete(fl_hashdat, keydat);
-  key[0] = HASHDAT_TTHL;
-  gdbm_delete(fl_hashdat, keydat);
-}
-
-
-// return value must be freed using free()
-char *fl_hashdat_get(const char *tth, int *len) {
-  char key[25];
-  datum keydat = { key, 25 };
-  key[0] = HASHDAT_TTHL;
-  memcpy(key+1, tth, 24);
-  datum res = gdbm_fetch(fl_hashdat, keydat);
-  if(res.dsize <= 0)
-    return NULL;
-  if(len)
-    *len = res.dsize;
-  return res.dptr;
-}
-
-
-// "garbage collect" - removes unused items from hashdata.dat and performs a
-// gdbm_reorganize() (the only fl_hashdat_ function that uses, but does not
-// modify, fl_hash_index).
-void fl_hashdat_gc() {
-  fl_flush(NULL);
-  GSList *rm = NULL;
-  char tth[40];
-  tth[39] = 0;
-
-  // check for unused keys
-  datum key = gdbm_firstkey(fl_hashdat);
-  char *freethis = NULL;
-  for(; key.dptr; key=gdbm_nextkey(fl_hashdat, key)) {
-    char *str = key.dptr;
-    if(freethis)
-      free(freethis);
-    // We only touch keys that this or earlier versions of ncdc could have
-    // created. Unknown keys are left untouched as a later version could have
-    // made these and there is no way to tell whether these need to be cleaned
-    // up or not.
-    if(key.dsize == 25 && (str[0] == HASHDAT_INFO || str[0] == HASHDAT_TTHL)
-        && !g_hash_table_lookup(fl_hash_index, str+1)) {
-      base32_encode(str+1, tth);
-      g_message("Removing unused key in hashdata.dat: type = %d, hash = %s", str[0], tth);
-      rm = g_slist_prepend(rm, str);
-      freethis = NULL;
-    } else
-      freethis = str;
-  }
-  if(freethis)
-    free(freethis);
-
-  // delete the unused keys
-  GSList *n = rm;
-  key.dsize = 25; // all keys in the list are 25 bytes
-  while(n) {
-    rm = n->next;
-    key.dptr = n->data;
-    gdbm_delete(fl_hashdat, key);
-    free(n->data);
-    g_slist_free_1(n);
-    n = rm;
-  }
-
-  // perform the reorganize
-  gdbm_reorganize(fl_hashdat);
-}
-
-
-
-
-
-// Hash index interface (these operate on both fl_hash_index and the above hashdata.dat)
-// These functions are also responsible for updating fl_local_list_size.
-
-// low-level insert-into-index function
+// Add to the hash index
 static void fl_hashindex_insert(struct fl_list *fl) {
   GSList *cur = g_hash_table_lookup(fl_hash_index, fl->tth);
   if(cur) {
@@ -313,40 +153,16 @@ static void fl_hashindex_insert(struct fl_list *fl) {
 }
 
 
-// Load a file entry that was loaded from our local filelist (files.xml.bz2)
-// Cross-checks with hashdata.dat, sets lastmod field and adds it to the index.
-// Returns true if hash data was not found.
-static gboolean fl_hashindex_load(struct fl_list *fl) {
-  if(!fl->hastth)
-    return TRUE;
-
-  struct fl_hashdat_info nfo = {};
-  if(!fl_hashdat_getinfo(fl->tth, &nfo)) {
-    fl->hastth = FALSE;
-    return TRUE;
-  }
-  fl_list_getlocal(fl).lastmod = nfo.lastmod;
-
-  fl_hashindex_insert(fl);
-  return FALSE;
-}
-
-
-// Should be called when a file is removed from our list. Removes the item from
-// the index and removes, when necessary, the associated hash data.
+// ...and remove a file. This is done when a file is actually removed from the
+// share, or when its TTH information has been invalidated.
 static void fl_hashindex_del(struct fl_list *fl) {
   if(!fl->hastth)
     return;
   GSList *cur = g_hash_table_lookup(fl_hash_index, fl->tth);
-  if(!cur) {
-    fl_hashdat_del(fl->tth);
-    return;
-  }
   fl->hastth = FALSE;
 
   cur = g_slist_remove(cur, fl);
   if(!cur) {
-    fl_hashdat_del(fl->tth);
     g_hash_table_remove(fl_hash_index, fl->tth);
     fl_local_list_size -= fl->size;
   // there's another file with the same TTH.
@@ -355,29 +171,11 @@ static void fl_hashindex_del(struct fl_list *fl) {
 }
 
 
-// update hash info for a file.
-static void fl_hashindex_sethash(struct fl_list *fl, char *tth, time_t lastmod, guint64 blocksize, char *blocks) {
-  fl_hashindex_del(fl);
-
-  // update file
-  memcpy(fl->tth, tth, 24);
-  fl->hastth = 1;
-  fl_list_getlocal(fl).lastmod = lastmod;
-  fl_hashindex_insert(fl);
-
-  // save to hashdata file
-  struct fl_hashdat_info nfo;
-  nfo.lastmod = lastmod;
-  nfo.filesize = fl->size;
-  nfo.blocksize = blocksize;
-  fl_hashdat_set(fl->tth, &nfo, blocks);
-}
-
-
 
 
 
 // Scanning directories
+// TODO: rewrite this with the new SQLite backend idea
 
 struct fl_scan_args {
   struct fl_list **file, **res;
@@ -556,7 +354,9 @@ struct fl_hash_args {
 
 
 // adding/removing items from the files-to-be-hashed queue
+// _append() assumes that fl->hastth is false.
 #define fl_hash_queue_append(fl) do {\
+    g_warn_if_fail(!fl->hastth);\
     gboolean start = !g_hash_table_size(fl_hash_queue);\
     if(start || !g_hash_table_lookup(fl_hash_queue, fl))\
       fl_hash_queue_size += fl->size;\
@@ -653,6 +453,8 @@ static void fl_hash_thread(gpointer data, gpointer udata) {
   // Calculate root hash
   tth_root(args->blocks, blocks_num, args->root);
 
+  // TODO: insert data into the hashfiles and hashdata tables, and retreive a rowid for use in the fl_list struct.
+
 fl_hash_finish:
   if(f > 0) {
     fadv_close(&adv);
@@ -668,10 +470,10 @@ static void fl_hash_process() {
   if(!g_hash_table_size(fl_hash_queue)) {
     ratecalc_unregister(&fl_hash_rate);
     ratecalc_reset(&fl_hash_rate);
-    fl_hashdat_setdone(TRUE);
+    db_fl_setdone(TRUE);
     return;
   }
-  fl_hashdat_setdone(FALSE);
+  db_fl_setdone(FALSE);
   ratecalc_register(&fl_hash_rate);
 
   // get one item from fl_hash_queue
@@ -711,7 +513,10 @@ static gboolean fl_hash_done(gpointer dat) {
   }
 
   // update file and hash info
-  fl_hashindex_sethash(fl, args->root, args->lastmod, args->blocksize, args->blocks);
+  memcpy(fl->tth, args->root, 24);
+  fl->hastth = 1;
+  fl_list_getlocal(fl).lastmod = args->lastmod;
+  fl_hashindex_insert(fl);
   fl_needflush = TRUE;
 
 fl_hash_done_f:
@@ -915,7 +720,7 @@ static gboolean fl_refresh_scanned(gpointer dat) {
   // If the hash queue is empty after calling fl_refresh_compare() then it
   // means the file list is completely hashed.
   if(!g_hash_table_size(fl_hash_queue))
-    fl_hashdat_setdone(TRUE);
+    db_fl_setdone(TRUE);
 
   fl_needflush = TRUE;
   g_strfreev(args->path);
@@ -997,19 +802,16 @@ void fl_unshare(const char *dir) {
 // Initialize local filelist
 
 
-// fetches the last modification times from the hashdata file and checks
-// whether we have any incomplete directories.
-static gboolean fl_init_list(struct fl_list *fl) {
-  gboolean incomplete = FALSE;
+// Walks through the file list and inserts everything into the fl_hashindex.
+static void fl_init_list(struct fl_list *fl) {
   int i;
   for(i=0; i<fl->sub->len; i++) {
     struct fl_list *c = g_ptr_array_index(fl->sub, i);
-    if(c->isfile && fl_hashindex_load(c))
-      incomplete = TRUE;
-    if(!c->isfile && fl_init_list(c))
-      incomplete = TRUE;
+    if(c->isfile && c->hastth)
+      fl_hashindex_insert(c);
+    else if(!c->isfile)
+      fl_init_list(c);
   }
-  return incomplete;
 }
 
 
@@ -1030,7 +832,6 @@ void fl_init() {
   fl_local_list = NULL;
   fl_local_list_file = g_build_filename(conf_dir, "files.xml.bz2", NULL);
   fl_refresh_queue = g_queue_new();
-  fl_hashdat_file = g_build_filename(conf_dir, "hashdata.dat", NULL);
   fl_scan_pool = g_thread_pool_new(fl_scan_thread, NULL, 1, FALSE, NULL);
   fl_hash_pool = g_thread_pool_new(fl_hash_thread, NULL, 1, FALSE, NULL);
   fl_hash_queue = g_hash_table_new(g_direct_hash, g_direct_equal);
@@ -1065,28 +866,21 @@ void fl_init() {
     ui_mf(ui_main, UIP_MED, "Error loading local filelist: %s. Re-building list.", err->message);
     g_error_free(err);
     dorefresh = TRUE;
-    fl_hashdat_open(TRUE);
-  } else if(sharing)
-    fl_hashdat_open(FALSE);
-  else {
-    fl_hashdat_open(TRUE);
+  } else if(!sharing)
     // Force a refresh when we're not sharing anything. This makes sure that we
     // at least have a files.xml.bz2
     dorefresh = TRUE;
-  }
 
   // If ncdc was previously closed while hashing, make sure to force a refresh
   // this time to continue the hash progress.
-  if(!fl_hashdat_getdone())
+  if(sharing && !db_fl_getdone()) {
     dorefresh = TRUE;
-
-  // Get last modification times and check that all hashdata is present.
-  if(fl_local_list) {
-    if(fl_init_list(fl_local_list))
-      dorefresh = TRUE;
-    if(dorefresh)
-      ui_m(ui_main, UIM_NOTIFY, "File list incomplete, refreshing...");
+    ui_m(ui_main, UIM_NOTIFY, "File list incomplete, refreshing...");
   }
+
+  // Initialize the fl_hash_index
+  if(fl_local_list)
+    fl_init_list(fl_local_list);
 
   // reset loading indicator
   if(!fl_local_list || !dorefresh)
@@ -1095,14 +889,3 @@ void fl_init() {
   if(dorefresh || conf_autorefresh())
     fl_refresh(NULL);
 }
-
-
-
-// flush and close
-void fl_close() {
-  // tell the hasher to stop
-  g_atomic_int_inc(&fl_hash_reset);
-  fl_flush(NULL);
-  gdbm_close(fl_hashdat);
-}
-

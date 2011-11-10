@@ -697,7 +697,7 @@ static void c_gc(char *args) {
   else {
     ui_m(NULL, UIM_NOLOG, "Collecting garbage...");
     ui_draw();
-    fl_hashdat_gc();
+    // TODO: purge unused hash data
     dl_gc();
     ui_m(NULL, UIM_NOLOG, NULL);
     ui_m(NULL, 0, "Garbage-collection done.");

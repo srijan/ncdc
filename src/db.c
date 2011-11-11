@@ -63,7 +63,7 @@ void db_init() {
 }
 
 
-// Note: db may be NULL after a db_lock(), this happens when ncdc is shutting down.
+// Note: db may be NULL when db_lock() is called, this happens when ncdc is shutting down.
 #define db_lock(x) do {\
     if(!db) {\
       g_warning("%s:%d: Attempting to use the database after it has been closed.", __FILE__, __LINE__);\
@@ -101,12 +101,29 @@ void db_init() {
       db_err(db_err, x);\
   } while(0)
 
+// Performs a step() and handles BUSY and error result codes. If this
+// completes, r is set to either SQLITE_ROW or SQLITE_DONE. Otherwise the
+// statement is finalized and x is returned.
+// Don't use this function within a transaction! A BUSY result code is an error
+// in that case, with the single exception of the COMMIT.
+#define db_step(s, r, x) do {\
+    while((r = sqlite3_step(s)) == SQLITE_BUSY) \
+      ;\
+    if(r != SQLITE_ROW && r != SQLITE_DONE) {\
+      sqlite3_finalize(s);\
+      db_err(NULL, x);\
+    }\
+  } while(0)
+
 // Commits a transaction and unlocks the database.
-// TODO: retry on SQLITE_DONE
 #define db_commit(x) do {\
-    char *db_err = NULL;\
-    if(sqlite3_exec(db, "COMMIT", NULL, NULL, &db_err))\
-      db_err(db_err, x);\
+    sqlite3_stmt *db_st;\
+    int db_r;\
+    if(sqlite3_prepare_v2(db, "COMMIT", -1, &db_st, NULL))\
+      db_err(NULL, x);\
+    db_step(db_st, db_r, x);\
+    g_warn_if_fail(db_r == SQLITE_DONE);\
+    sqlite3_finalize(db_st);\
     db_unlock();\
   } while(0)
 
@@ -182,22 +199,18 @@ char *db_fl_gettthl(const char *root, int *len) {
   if(sqlite3_prepare_v2(db, "SELECT tthl FROM hashfiles WHERE root = ?", -1, &s, NULL))
     db_err(NULL, NULL);
   sqlite3_bind_text(s, 1, hash, -1, SQLITE_STATIC);
-  while((r = sqlite3_step(s)) == SQLITE_BUSY)
-    ;
-  if(r == SQLITE_DONE)
-    goto done;
-  else if(r != SQLITE_ROW)
-    db_err(NULL, NULL);
 
-  res = (char *)sqlite3_column_blob(s, 0);
-  if(res) {
-    l = sqlite3_column_bytes(s, 0);
-    res = g_memdup(res, l);
+  db_step(s, r, NULL);
+  if(r == SQLITE_ROW) {
+    res = (char *)sqlite3_column_blob(s, 0);
+    if(res) {
+      l = sqlite3_column_bytes(s, 0);
+      res = g_memdup(res, l);
+    }
+    if(len)
+      *len = l;
   }
-  if(len)
-    *len = l;
 
-done:
   sqlite3_finalize(s);
   db_unlock();
   return res;

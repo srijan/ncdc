@@ -177,6 +177,10 @@ static void fl_hashindex_del(struct fl_list *fl) {
 // Scanning directories
 // TODO: rewrite this with the new SQLite backend idea
 
+// Note: The `file' structure points to a (sub-)item in fl_local_list, and will
+// be accessed from both the scan thread and the main thread. It is therefore
+// important that no changes are made to the local file list while the scan
+// thread is active.
 struct fl_scan_args {
   struct fl_list **file, **res;
   char **path;
@@ -202,12 +206,43 @@ static void fl_scan_rmdupes(struct fl_list *fl, const char *vpath) {
 }
 
 
+// Fetches TTH information either from the database or from *oldpar, and
+// invalidates this data if the file has changed.
+static void fl_scan_check(struct fl_list *oldpar, struct fl_list *new, const char *real) {
+  time_t oldlastmod;
+  guint64 oldsize;
+  char oldhash[24];
+  gint64 oldid = 0;
+
+  struct fl_list *old = oldpar && oldpar->sub ? fl_list_file_strict(oldpar, new) : NULL;
+  // Get from the previous in-memory structure
+  if(old && fl_list_getlocal(old).id) {
+    oldid = fl_list_getlocal(old).id;
+    oldlastmod = fl_list_getlocal(old).lastmod;
+    oldsize = old->size;
+    memcpy(oldhash, old->tth, 24);
+  // Otherwise, do a database lookup on the file path
+  } else
+    oldid = db_fl_getfile(real, &oldlastmod, &oldsize, oldhash);
+
+  if(oldid && (oldlastmod < fl_list_getlocal(new).lastmod || oldsize != new->size)) {
+    // TODO: file has changed, invalidate hash associated with oldid
+  } else if(oldid) {
+    new->hastth = TRUE;
+    memcpy(new->tth, oldhash, 24);
+    fl_list_getlocal(new).lastmod = oldlastmod;
+    fl_list_getlocal(new).id = oldid;
+  }
+}
+
+
 // *name is in filesystem encoding. For *path and *vpath see fl_scan_dir().
-static struct fl_list *fl_scan_item(const char *path, const char *vpath, const char *name, GRegex *excl) {
+static struct fl_list *fl_scan_item(struct fl_list *old, const char *path, const char *vpath, const char *name, GRegex *excl) {
   char *uname = NULL;  // name-to-UTF8
   char *vcpath = NULL; // vpath + uname
-  char *ename = NULL;  // ename-to-filesystem
+  char *ename = NULL;  // uname-to-filesystem
   char *cpath = NULL;  // path + ename
+  char *real = NULL;   // realpath(cpath)-to-UTF8
   struct fl_list *node = NULL;
 
   // Try to get a UTF-8 filename
@@ -245,21 +280,40 @@ static struct fl_list *fl_scan_item(const char *path, const char *vpath, const c
     goto done;
   }
 
+  // Get the realpath() (for lookup in the database)
+  // TODO: this path is only used if fl_scan_check() can't find the item in the
+  // old fl_list structure. It may be more efficient to only try to execute
+  // this code when this is the case.
+  char *tmp = realpath(cpath, NULL);
+  if(!tmp) {
+    ui_mf(ui_main, UIP_MED, "Error getting file path for \"%s\": %s", vcpath, g_strerror(errno));
+    goto done;
+  }
+  real = g_filename_to_utf8(tmp, -1, NULL, NULL, NULL);
+  free(tmp);
+  if(!real) {
+    ui_mf(ui_main, UIP_MED, "Error getting file path for \"%s\": %s", vcpath, "Encoding error.");
+    goto done;
+  }
+
   // create the node
-  node = fl_list_create(uname, TRUE);
+  node = fl_list_create(uname, S_ISREG(dat.st_mode) ? TRUE : FALSE);
   if(S_ISREG(dat.st_mode)) {
     node->isfile = TRUE;
     node->size = dat.st_size;
     fl_list_getlocal(node).lastmod = dat.st_mtime;
   }
 
-  // TODO: fetch id, tth, and hashtth fields.
+  // Fetch id, tth, and hashtth fields.
+  if(node->isfile)
+    fl_scan_check(old, node, real);
 
 done:
   g_free(uname);
   g_free(vcpath);
   g_free(cpath);
   g_free(ename);
+  g_free(real);
   return node;
 }
 
@@ -267,7 +321,7 @@ done:
 // recursive
 // Doesn't handle paths longer than PATH_MAX, but I don't think it matters all that much.
 // *path is the filesystem path in filename encoding, vpath is the virtual path in UTF-8.
-static void fl_scan_dir(struct fl_list *parent, const char *path, const char *vpath, gboolean inc_hidden, GRegex *excl) {
+static void fl_scan_dir(struct fl_list *parent, struct fl_list *old, const char *path, const char *vpath, gboolean inc_hidden, GRegex *excl) {
   GError *err = NULL;
   GDir *dir = g_dir_open(path, 0, &err);
   if(!dir) {
@@ -282,7 +336,7 @@ static void fl_scan_dir(struct fl_list *parent, const char *path, const char *vp
     if(!inc_hidden && name[0] == '.')
       continue;
     // check with *excl, stat and create
-    struct fl_list *item = fl_scan_item(path, vpath, name, excl);
+    struct fl_list *item = fl_scan_item(old, path, vpath, name, excl);
     // and add it
     if(item)
       fl_list_add(parent, item, -1);
@@ -303,7 +357,7 @@ static void fl_scan_dir(struct fl_list *parent, const char *path, const char *vp
       char *cpath = g_build_filename(path, enc, NULL);
       char *virtpath = g_build_filename(vpath, cur->name, NULL);
       cur->sub = g_ptr_array_new_with_free_func(fl_list_free);
-      fl_scan_dir(cur, cpath, virtpath, inc_hidden, excl);
+      fl_scan_dir(cur, old && old->sub ? fl_list_file_strict(old, cur) : NULL, cpath, virtpath, inc_hidden, excl);
       g_free(virtpath);
       g_free(cpath);
       g_free(enc);
@@ -321,7 +375,7 @@ static void fl_scan_thread(gpointer data, gpointer udata) {
     struct fl_list *cur = fl_list_create("", FALSE);
     char *tmp = g_filename_from_utf8(args->path[i], -1, NULL, NULL, NULL);
     cur->sub = g_ptr_array_new_with_free_func(fl_list_free);
-    fl_scan_dir(cur, tmp, args->path[i], args->inc_hidden, args->excl_regex);
+    fl_scan_dir(cur, args->file[i], tmp, args->path[i], args->inc_hidden, args->excl_regex);
     g_free(tmp);
     args->res[i] = cur;
   }

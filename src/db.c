@@ -168,8 +168,12 @@ gint64 db_fl_addhash(const char *path, guint64 size, time_t lastmod, const char 
     db_err(NULL, 0);
   sqlite3_finalize(s);
 
-  // hashfiles
-  if(sqlite3_prepare_v2(db, "INSERT INTO hashfiles (tth, lastmod, filename) VALUES(?, ?, ?)", -1, &s, NULL))
+  // hashfiles.
+  // Note that it in certain situations it may happen that a row with the same
+  // filename is already present. This happens when two files in the share have
+  // the same realpath() (e.g. one is a symlink). In such a case it it safe to
+  // just do a REPLACE.
+  if(sqlite3_prepare_v2(db, "INSERT OR REPLACE INTO hashfiles (tth, lastmod, filename) VALUES(?, ?, ?)", -1, &s, NULL))
     db_err(NULL, 0);
   sqlite3_bind_text(s, 1, hash, -1, SQLITE_STATIC);
   sqlite3_bind_int64(s, 2, lastmod);
@@ -215,3 +219,37 @@ char *db_fl_gettthl(const char *root, int *len) {
   db_unlock();
   return res;
 }
+
+
+// Get information for a file. Returns 0 if not found or error.
+gint64 db_fl_getfile(const char *path, time_t *lastmod, guint64 *size, char *tth) {
+  db_lock(0);
+
+  sqlite3_stmt *s;
+  int r;
+  gint64 id = 0;
+
+  if(sqlite3_prepare_v2(db,
+       "SELECT f.id, f.lastmod, f.tth, d.size FROM hashfiles f JOIN hashdata d ON d.root = f.tth WHERE f.filename = ?",
+       -1, &s, NULL))
+    db_err(NULL, 0);
+  sqlite3_bind_text(s, 1, path, -1, SQLITE_STATIC);
+
+  db_step(s, r, 0);
+  if(r == SQLITE_ROW) {
+    id = sqlite3_column_int64(s, 0);
+    if(lastmod)
+      *lastmod = sqlite3_column_int64(s, 1);
+    if(tth) {
+      const char *hash = (const char *)sqlite3_column_text(s, 2);
+      base32_decode(hash, tth);
+    }
+    if(size)
+      *size = sqlite3_column_int64(s, 3);
+  }
+
+  sqlite3_finalize(s);
+  db_unlock();
+  return id;
+}
+

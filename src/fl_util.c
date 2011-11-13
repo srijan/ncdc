@@ -232,11 +232,18 @@ gboolean fl_list_isempty(struct fl_list *fl) {
 }
 
 
-// get a file by name in a directory
+// Get a file by name in a directory. This search is case-insensitive.
 struct fl_list *fl_list_file(const struct fl_list *dir, const char *name) {
   struct fl_list *cmp = fl_list_create(name, FALSE);
   int i = ptr_array_search(dir->sub, cmp, fl_list_cmp);
   fl_list_free(cmp);
+  return i < 0 ? NULL : g_ptr_array_index(dir->sub, i);
+}
+
+
+// Get a file name in a directory with the same name as *fl. This search is case-sensitive.
+struct fl_list *fl_list_file_strict(const struct fl_list *dir, const struct fl_list *fl) {
+  int i = ptr_array_search(dir->sub, fl, fl_list_cmp_strict);
   return i < 0 ? NULL : g_ptr_array_index(dir->sub, i);
 }
 

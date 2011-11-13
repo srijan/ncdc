@@ -715,7 +715,7 @@ void str_arg2_split(char *str, char **first, char **second) {
 // Perform a binary search on a GPtrArray, returning the index of the found
 // item. The result is undefined if the array is not sorted according to `cmp'.
 // Returns -1 when nothing is found.
-int ptr_array_search(GPtrArray *a, gpointer v, GCompareFunc cmp) {
+int ptr_array_search(GPtrArray *a, gconstpointer v, GCompareFunc cmp) {
   if(!a->len)
     return -1;
   int b = 0;

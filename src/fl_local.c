@@ -34,7 +34,7 @@
 char           *fl_local_list_file;
 struct fl_list *fl_local_list  = NULL;
 GQueue         *fl_refresh_queue = NULL;
-time_t          fl_refresh_last = 0;
+time_t          fl_refresh_last = 0; // time when the last full file list refresh has been queued
 static gboolean fl_needflush = FALSE;
 // index of the files in fl_local_list. Key = TTH root, value = GSList of files
 static GHashTable *fl_hash_index;
@@ -1019,4 +1019,74 @@ void fl_init() {
 
   if(dorefresh || conf_autorefresh())
     fl_refresh(NULL);
+}
+
+
+
+
+// Garbage-collect. This will remove unused entries from the hashfiles table.
+// The algorithm works as follows:
+// - Create array of `active' ids.
+//   (`active' = there is an fl_list entry in memory with that id)
+// - Sort the array.
+// - Walk through all ids from the hashfiles table in ascending order
+//   - If an id is present in the hashfiles table but not in the sorted array
+//     created earlier, add the id to a delete-these-ids array.
+// - Delete all rows indicated with the delete-these-ids array
+// This algorithm is intended to have low memory requirements, while still
+// being quite fast and efficient.
+
+static GArray *fl_gc_active = NULL;
+static int fl_gc_last = 0;
+static GArray *fl_gc_remove = NULL;
+
+
+static gint fl_gc_idcmp(gconstpointer a, gconstpointer b) {
+  const gint64 *na = a;
+  const gint64 *nb = b;
+  return *na > *nb ? 1 : *na == *nb ? 0 : -1;
+}
+
+
+// Called from db_fl_getids() with a new id. It is assumed that this id is
+// larger than or equal to the given id in any previous calls.
+static void fl_gc_id(gint64 id) {
+  while(fl_gc_last < fl_gc_active->len && g_array_index(fl_gc_active, gint64, fl_gc_last) < id)
+    fl_gc_last++;
+  if(fl_gc_last >= fl_gc_active->len || g_array_index(fl_gc_active, gint64, fl_gc_last) > id)
+    g_array_append_val(fl_gc_remove, id);
+}
+
+
+// Returns TRUE when it has done garbage collection, FALSE if it's not possible
+// to create a list of `active' ids because no full file refresh has been
+// performed yet.
+gboolean fl_gc() {
+  if(!fl_refresh_last || fl_refresh_queue->head)
+    return FALSE;
+
+  // Init data
+  fl_gc_active = g_array_sized_new(FALSE, FALSE, 8, g_hash_table_size(fl_hash_index));
+  fl_gc_remove = g_array_new(FALSE, FALSE, 8);
+  fl_gc_last = 0;
+
+  // Fill fl_active array.  It is possible that two identical ids are added to
+  // the array, but this isn't a problem.
+  GSList *l;
+  GHashTableIter iter;
+  g_hash_table_iter_init(&iter, fl_hash_index);
+  while(g_hash_table_iter_next(&iter, NULL, (gpointer *)&l))
+    for(; l; l=l->next)
+      g_array_append_val(fl_gc_active, fl_list_getlocal((struct fl_list *)l->data).id);
+  g_array_sort(fl_gc_active, fl_gc_idcmp);
+
+  // walk through hashfiles table and fill fl_gc_remove
+  db_fl_getids(fl_gc_id);
+
+  // Delete rows and clean up
+  g_debug("fl-gc: Removing %d entries from hashrows.", fl_gc_remove->len);
+  db_fl_rmfiles((gint64 *)fl_gc_remove->data, fl_gc_remove->len);
+  g_array_unref(fl_gc_active);
+  g_array_unref(fl_gc_remove);
+  return TRUE;
 }

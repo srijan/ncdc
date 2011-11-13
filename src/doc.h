@@ -74,8 +74,8 @@ static const struct doc_cmd {
 },
 { "gc", NULL, "Perform some garbage collection.",
   "Cleans up unused data and reorganizes existing data to allow more efficient"
-  " storage and usage. Currently, this commands cleans up hashdata.dat and"
-  " dl.dat, removes unused files in inc/ and old files in fl/.\n\n"
+  " storage and usage. Currently, this commands removes unused hash data,"
+  " cleans up dl.dat, removes unused files in inc/ and old files in fl/.\n\n"
   "This command may take some time to complete, and will fully block ncdc while"
   " it is running. You won't have to perform this command very often."
 },

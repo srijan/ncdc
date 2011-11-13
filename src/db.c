@@ -171,7 +171,7 @@ gint64 db_fl_addhash(const char *path, guint64 size, time_t lastmod, const char 
   // hashfiles.
   // Note that it in certain situations it may happen that a row with the same
   // filename is already present. This happens when two files in the share have
-  // the same realpath() (e.g. one is a symlink). In such a case it it safe to
+  // the same realpath() (e.g. one is a symlink). In such a case it is safe to
   // just do a REPLACE.
   if(sqlite3_prepare_v2(db, "INSERT OR REPLACE INTO hashfiles (tth, lastmod, filename) VALUES(?, ?, ?)", -1, &s, NULL))
     db_err(NULL, 0);
@@ -274,4 +274,27 @@ void db_fl_rmfiles(gint64 *ids, int num) {
   sqlite3_finalize(s);
 
   db_commit();
+}
+
+
+// Gets the full list of all ids in the hashfiles table, in ascending order.
+// *callback is called for every row.
+void db_fl_getids(void (*callback)(gint64)) {
+  db_lock();
+  sqlite3_stmt *s;
+  int r;
+
+  // This query is fast: `id' is the SQLite rowid, and has an index that is
+  // already ordered.
+  if(sqlite3_prepare_v2(db, "SELECT id FROM hashfiles ORDER BY id ASC", -1, &s, NULL))
+    db_err(NULL,);
+
+  db_step(s, r,);
+  while(r == SQLITE_ROW) {
+    callback(sqlite3_column_int64(s, 0));
+    db_step(s, r,);
+  }
+
+  sqlite3_finalize(s);
+  db_unlock();
 }

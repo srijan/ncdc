@@ -74,10 +74,12 @@ static const struct doc_cmd {
 },
 { "gc", NULL, "Perform some garbage collection.",
   "Cleans up unused data and reorganizes existing data to allow more efficient"
-  " storage and usage. Currently, this commands removes unused hash data,"
-  " cleans up dl.dat, removes unused files in inc/ and old files in fl/.\n\n"
+  " storage and usage. Currently, this commands removes unused hash data, does"
+  " a VACUUM on db.sqlite3, cleans up dl.dat, removes unused files in inc/ and"
+  " old files in fl/.\n\n"
   "This command may take some time to complete, and will fully block ncdc while"
-  " it is running. You won't have to perform this command very often."
+  " it is running. It is recommended to run this command every once in a while."
+  " Every month is a good interval."
 },
 { "grant", "[-list|<user>]", "Grant someone a slot.",
   "Grant someone a slot. This allows the user to download from you even if you"

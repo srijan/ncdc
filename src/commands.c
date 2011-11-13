@@ -699,7 +699,9 @@ static void c_gc(char *args) {
     ui_draw();
     if(!fl_gc())
       ui_m(NULL, 0, "Not checking for unused hash data: File list refresh in progress or not performed yet.");
+    db_fl_purgedata();
     dl_gc();
+    db_vacuum();
     ui_m(NULL, UIM_NOLOG, NULL);
     ui_m(NULL, 0, "Garbage-collection done.");
   }

@@ -255,7 +255,9 @@ gint64 db_fl_getfile(const char *path, time_t *lastmod, guint64 *size, char *tth
 
 
 // Batch-remove rows from hashfiles.
-// TODO: how/when to remove rows from hashdata for which no entry in hashfiles exist?
+// TODO: how/when to remove rows from hashdata for which no entry in hashfiles
+// exist? A /gc will do this by calling db_fl_purgedata(), but ideally this
+// would be done as soon as the hashdata row has become obsolete.
 void db_fl_rmfiles(gint64 *ids, int num) {
   db_begin();
 
@@ -296,5 +298,34 @@ void db_fl_getids(void (*callback)(gint64)) {
   }
 
   sqlite3_finalize(s);
+  db_unlock();
+}
+
+
+// Remove rows from the hashdata table that are not referenced from the
+// hashfiles table.
+void db_fl_purgedata() {
+  db_lock();
+  // Since there is no index on hashfiles(tth), one might expect this query to
+  // be extremely slow. Luckily sqlite is clever enough to create a temporary
+  // index for this query.
+  char *err;
+  if(sqlite3_exec(db,
+      "DELETE FROM hashdata WHERE NOT EXISTS(SELECT 1 FROM hashfiles WHERE tth = root)",
+      NULL, NULL, &err))
+    db_err(err,);
+  db_unlock();
+}
+
+
+
+
+
+// Executes a VACUUM
+void db_vacuum() {
+  db_lock();
+  char *err;
+  if(sqlite3_exec(db, "VACUUM", NULL, NULL, &err))
+    db_err(err,);
   db_unlock();
 }

@@ -202,8 +202,71 @@ static void fl_scan_rmdupes(struct fl_list *fl, const char *vpath) {
 }
 
 
+// *name is in filesystem encoding. For *path and *vpath see fl_scan_dir().
+static struct fl_list *fl_scan_item(const char *path, const char *vpath, const char *name, GRegex *excl) {
+  char *uname = NULL;  // name-to-UTF8
+  char *vcpath = NULL; // vpath + uname
+  char *ename = NULL;  // ename-to-filesystem
+  char *cpath = NULL;  // path + ename
+  struct fl_list *node = NULL;
+
+  // Try to get a UTF-8 filename
+  uname = g_filename_to_utf8(name, -1, NULL, NULL, NULL);
+  if(!uname)
+    uname = g_filename_display_name(name);
+
+  // Check for share_exclude as soon as we have the confname
+  if(excl && g_regex_match(excl, uname, 0, NULL))
+    goto done;
+
+  // Get the virtual path (for reporting purposes)
+  vcpath = g_build_filename(vpath, uname, NULL);
+
+  // Check that the UTF-8 filename can be converted back to something we can
+  // access on the filesystem. If it can't be converted back, we won't share
+  // the file at all. Keeping track of a raw-to-UTF-8 filename lookup table
+  // isn't worth the effort.
+  ename = g_filename_from_utf8(uname, -1, NULL, NULL, NULL);
+  if(!ename) {
+    ui_mf(ui_main, UIP_MED, "Error reading directory entry in \"%s\": Invalid encoding.", vcpath);
+    goto done;
+  }
+
+  // Get cpath and try to stat() the file
+  // we're currently following symlinks, but I'm not sure whether that's a good idea yet
+  cpath = g_build_filename(path, ename, NULL);
+  struct stat dat;
+  int r = stat(cpath, &dat);
+  if(r < 0 || !(S_ISREG(dat.st_mode) || S_ISDIR(dat.st_mode))) {
+    if(r < 0)
+      ui_mf(ui_main, UIP_MED, "Error stat'ing \"%s\": %s", vcpath, g_strerror(errno));
+    else
+      ui_mf(ui_main, UIP_MED, "Not sharing \"%s\": Neither file nor directory.", vcpath);
+    goto done;
+  }
+
+  // create the node
+  node = fl_list_create(uname, TRUE);
+  if(S_ISREG(dat.st_mode)) {
+    node->isfile = TRUE;
+    node->size = dat.st_size;
+    fl_list_getlocal(node).lastmod = dat.st_mtime;
+  }
+
+  // TODO: fetch id, tth, and hashtth fields.
+
+done:
+  g_free(uname);
+  g_free(vcpath);
+  g_free(cpath);
+  g_free(ename);
+  return node;
+}
+
+
 // recursive
 // Doesn't handle paths longer than PATH_MAX, but I don't think it matters all that much.
+// *path is the filesystem path in filename encoding, vpath is the virtual path in UTF-8.
 static void fl_scan_dir(struct fl_list *parent, const char *path, const char *vpath, gboolean inc_hidden, GRegex *excl) {
   GError *err = NULL;
   GDir *dir = g_dir_open(path, 0, &err);
@@ -218,54 +281,11 @@ static void fl_scan_dir(struct fl_list *parent, const char *path, const char *vp
       continue;
     if(!inc_hidden && name[0] == '.')
       continue;
-    // Try to get a UTF-8 filename
-    char *confname = g_filename_to_utf8(name, -1, NULL, NULL, NULL);
-    if(!confname)
-      confname = g_filename_display_name(name);
-    // Check for share_exclude as soon as we have the confname
-    if(excl && g_regex_match(excl, confname, 0, NULL)) {
-      g_free(confname);
-      continue;
-    }
-    // Check that the UTF-8 filename can be converted back to something we can
-    // access on the filesystem. If it can't be converted back, we won't share
-    // the file at all. Keeping track of a raw-to-UTF-8 filename lookup table
-    // isn't worth the effort.
-    char *vcpath = g_build_filename(vpath, confname, NULL);
-    char *encname = g_filename_from_utf8(confname, -1, NULL, NULL, NULL);
-    if(!encname) {
-      ui_mf(ui_main, UIP_MED, "Error reading directory entry in \"%s\": Invalid encoding.", vcpath);
-      g_free(vcpath);
-      g_free(confname);
-      continue;
-    }
-    char *cpath = g_build_filename(path, encname, NULL);
-    struct stat dat;
-    // we're currently following symlinks, but I'm not sure whether that's a good idea yet
-    int r = stat(cpath, &dat);
-    g_free(encname);
-    if(r < 0 || !(S_ISREG(dat.st_mode) || S_ISDIR(dat.st_mode))) {
-      if(r < 0)
-        ui_mf(ui_main, UIP_MED, "Error stat'ing \"%s\": %s", vcpath, g_strerror(errno));
-      else
-        ui_mf(ui_main, UIP_MED, "Not sharing \"%s\": Neither file nor directory.", vcpath);
-      g_free(confname);
-      g_free(cpath);
-      g_free(vcpath);
-      continue;
-    }
-    g_free(cpath);
-    // create the node
-    struct fl_list *cur = fl_list_create(confname, TRUE);
-    g_free(confname);
-    if(S_ISREG(dat.st_mode)) {
-      cur->isfile = TRUE;
-      cur->size = dat.st_size;
-      fl_list_getlocal(cur).lastmod = dat.st_mtime;
-    }
-    g_free(vcpath);
+    // check with *excl, stat and create
+    struct fl_list *item = fl_scan_item(path, vpath, name, excl);
     // and add it
-    fl_list_add(parent, cur, -1);
+    if(item)
+      fl_list_add(parent, item, -1);
   }
   g_dir_close(dir);
 
@@ -373,6 +393,19 @@ struct fl_hash_args {
         g_atomic_int_inc(&fl_hash_reset);\
     }\
   } while(0)
+
+
+
+// Recursively deletes a fl_list structure from the hash queue
+static void fl_hash_queue_delrec(struct fl_list *f) {
+  if(f->isfile)
+    fl_hash_queue_del(f);
+  else {
+    int i;
+    for(i=0; i<f->sub->len; i++)
+      fl_hash_queue_delrec(g_ptr_array_index(f->sub, i));
+  }
+}
 
 
 static gboolean fl_hash_done(gpointer dat);
@@ -688,6 +721,11 @@ static void fl_refresh_process() {
   if(excl)
     args->excl_regex = g_regex_new(excl, G_REGEX_OPTIMIZE, 0, NULL);
   g_free(excl);
+
+  // Don't allow files in the scanned directory to be hashed while refreshing.
+  // Since the refresh thread will create a completely new fl_list structure,
+  // any changes to the old one will be lost.
+  fl_hash_queue_delrec(dir);
 
   // one dir, the simple case
   if(dir != fl_local_list) {

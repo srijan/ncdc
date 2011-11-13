@@ -267,7 +267,7 @@ void db_fl_rmfiles(gint64 *ids, int num) {
 
   for(i=0; i<num; i++) {
     sqlite3_bind_int64(s, 1, ids[i]);
-    if(sqlite3_step(s) != SQLITE_DONE)
+    if(sqlite3_step(s) != SQLITE_DONE || sqlite3_reset(s))
       db_err(NULL,);
   }
 

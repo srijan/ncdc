@@ -680,20 +680,25 @@ static struct fl_list *fl_refresh_getroot(const char *name) {
 }
 
 
+// Recursively adds the files to either the hash index or the hash queue.
 static void fl_refresh_addhash(struct fl_list *cur) {
-  int i;
-  for(i=0; i<cur->sub->len; i++) {
-    struct fl_list *l = g_ptr_array_index(cur->sub, i);
-    if(l->isfile)
-      fl_hash_queue_append(l);
+  if(cur->isfile) {
+    if(cur->hastth)
+      fl_hashindex_insert(cur);
     else
-      fl_refresh_addhash(l);
+      fl_hash_queue_append(cur);
+  } else {
+    int i;
+    for(i=0; i<cur->sub->len; i++)
+      fl_refresh_addhash(g_ptr_array_index(cur->sub, i));
   }
 }
 
 
+// Recursively removes the files from the hash index. Unlike _addhash(), this
+// doesn't touch the hash queue. The files should have been removed from the
+// hash queue before doing the refresh.
 static void fl_refresh_delhash(struct fl_list *cur) {
-  fl_hash_queue_del(cur);
   if(cur->isfile && cur->hastth)
     fl_hashindex_del(cur);
   else if(!cur->isfile) {
@@ -716,7 +721,7 @@ static void fl_refresh_compare(struct fl_list *old, struct fl_list *new) {
 
     // special case #1: old == new, but one is a directory and the other is a file
     // special case #2: old == new, but the file names have different case
-    // In both situations we just delete our information and overwrite/rehash it with new.
+    // In both situations we just delete our information and overwrite it with new.
     if(cmp == 0 && (!!oldl->isfile != !!newl->isfile || strcmp(oldl->name, newl->name) != 0))
       remove = insert = TRUE;
     else if(cmp == 0) // old == new, just check
@@ -728,16 +733,21 @@ static void fl_refresh_compare(struct fl_list *old, struct fl_list *new) {
 
     // check
     if(check) {
-      // If it's a file, it may have been modified or we're missing the TTH
-      if(oldl->isfile && (!oldl->hastth
-            || fl_list_getlocal(newl).lastmod > fl_list_getlocal(oldl).lastmod
-            || newl->size != oldl->size)) {
-        fl_hashindex_del(oldl);
-        oldl->size = newl->size;
-        fl_hash_queue_append(oldl);
-      }
-      // If it's a dir, recurse into it
-      if(!oldl->isfile)
+      // File, update information
+      if(oldl->isfile) {
+        // Remove old file from the hash index if it was in there
+        if(oldl->hastth)
+          fl_hashindex_del(oldl);
+        // Update old with info from new
+        oldl->hastth = newl->hastth;
+        oldl->size = newl->size; // TODO: Size of parent dir isn't updated
+        memcpy(oldl->tth, newl->tth, 24);
+        fl_list_getlocal(oldl).id = fl_list_getlocal(newl).id;
+        fl_list_getlocal(oldl).lastmod = fl_list_getlocal(newl).lastmod;
+        // Add updated file to either the hash queue or index
+        fl_refresh_addhash(oldl);
+      // Directory, recurse into it
+      } else
         fl_refresh_compare(oldl, newl);
       oldi++;
       newi++;
@@ -754,10 +764,7 @@ static void fl_refresh_compare(struct fl_list *old, struct fl_list *new) {
     if(insert) {
       struct fl_list *tmp = fl_list_copy(newl);
       fl_list_add(old, tmp, oldi);
-      if(tmp->isfile)
-        fl_hash_queue_append(tmp);
-      else
-        fl_refresh_addhash(tmp);
+      fl_refresh_addhash(tmp);
       oldi++; // after fl_list_add(), oldi points to the new item. But we don't have to check that one again, so increase.
       newi++;
     }
@@ -834,13 +841,6 @@ static void fl_refresh_process() {
 
 static gboolean fl_refresh_scanned(gpointer dat) {
   struct fl_scan_args *args = dat;
-
-  // TODO: I'm assuming here that the scanned directory has not been /unshare'd
-  // in the meanwhile. In the case that did happen, we're going to crash. :-(
-  // (Note that besides /unshare it is not possible for a dir to get removed
-  // from the share while refreshing. Only one refresh is allowed to be
-  // processed at a time, so no directories could have been removed in some
-  // concurrent refresh.)
 
   int i, len = g_strv_length(args->path);
   for(i=0; i<len; i++) {

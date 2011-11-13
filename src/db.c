@@ -253,3 +253,25 @@ gint64 db_fl_getfile(const char *path, time_t *lastmod, guint64 *size, char *tth
   return id;
 }
 
+
+// Batch-remove rows from hashfiles.
+// TODO: how/when to remove rows from hashdata for which no entry in hashfiles exist?
+void db_fl_rmfiles(gint64 *ids, int num) {
+  db_begin();
+
+  sqlite3_stmt *s;
+  int i;
+
+  if(sqlite3_prepare_v2(db, "DELETE FROM hashfiles WHERE id = ?", -1, &s, NULL))
+    db_err(NULL,);
+
+  for(i=0; i<num; i++) {
+    sqlite3_bind_int64(s, 1, ids[i]);
+    if(sqlite3_step(s) != SQLITE_DONE)
+      db_err(NULL,);
+  }
+
+  sqlite3_finalize(s);
+
+  db_commit();
+}

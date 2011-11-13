@@ -190,6 +190,8 @@ struct fl_scan_args {
 };
 
 
+// Removes duplicate files (that is, files with the same name in a
+// case-insensitive context) from a dirtectory.
 static void fl_scan_rmdupes(struct fl_list *fl, const char *vpath) {
   int i = 1;
   while(i<fl->sub->len) {
@@ -202,6 +204,23 @@ static void fl_scan_rmdupes(struct fl_list *fl, const char *vpath) {
       g_free(tmp);
     } else
       i++;
+  }
+}
+
+
+// Queue an id to be removed from the hash files. Files are removed in a batch
+// of DELETE FROM queries in a single transaction. This is significantly faster
+// than using a separate transaction for each DELETE.
+static void fl_scan_invalidate(gint64 id, gboolean force_flush) {
+  static gint64 rmids[50];
+  static int i = 0;
+
+  if(id)
+    rmids[i++] = id;
+
+  if(i >= 50 || (force_flush && i > 0)) {
+    db_fl_rmfiles(rmids, i);
+    i = 0;
   }
 }
 
@@ -225,8 +244,11 @@ static void fl_scan_check(struct fl_list *oldpar, struct fl_list *new, const cha
   } else
     oldid = db_fl_getfile(real, &oldlastmod, &oldsize, oldhash);
 
+  // Check for file change
   if(oldid && (oldlastmod < fl_list_getlocal(new).lastmod || oldsize != new->size)) {
-    // TODO: file has changed, invalidate hash associated with oldid
+    g_debug("fl: Dropping hash information for `%s': file has changed.", real);
+    fl_scan_invalidate(oldid, FALSE);
+  // Otherwise, update *new
   } else if(oldid) {
     new->hastth = TRUE;
     memcpy(new->tth, oldhash, 24);
@@ -380,6 +402,7 @@ static void fl_scan_thread(gpointer data, gpointer udata) {
     args->res[i] = cur;
   }
 
+  fl_scan_invalidate(0, TRUE);
   g_idle_add_full(G_PRIORITY_HIGH_IDLE, args->donefun, args, NULL);
 }
 

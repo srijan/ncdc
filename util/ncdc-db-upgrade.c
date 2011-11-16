@@ -146,6 +146,7 @@ static int db_getversion() {
 
 static char *u20_sql_fn;
 static char *u20_hashdat_fn;
+static char *u20_dl_fn;
 static char *u20_files_fn;
 static char *u20_config_fn;
 static GKeyFile *u20_conf;
@@ -360,6 +361,24 @@ static void u20_initsqlite() {
       "  lastmod INTEGER NOT NULL"
       ");"
 
+      "CREATE TABLE dl ("
+      "  tth TEXT NOT NULL PRIMARY KEY,"
+      "  size INTEGER NOT NULL,"
+      "  dest TEXT NOT NULL,"
+      "  priority INTEGER NOT NULL DEFAULT 0,"
+      "  error INTEGER NOT NULL DEFAULT 0,"
+      "  error_msg TEXT,"
+      "  tthl BLOB"
+      ");"
+
+      "CREATE TABLE dl_users ("
+      "  tth TEXT NOT NULL REFERENCES dl (tth),"
+      "  uid INTEGER NOT NULL,"
+      "  error INTEGER NOT NULL DEFAULT 0,"
+      "  error_msg TEXT,"
+      "  PRIMARY KEY(tth, uid)"
+      ");"
+
     , NULL, NULL, &err))
     u20_revert("%s", err?err:sqlite3_errmsg(u20_sql));
 
@@ -405,6 +424,7 @@ static void u20_hashdata_item(GDBM_FILE dat, datum key, sqlite3_stmt *data, sqli
   if(!a) {
     printf("WARNING: No file found for `%s' - ignoring.\n", hash);
     free(res.dptr);
+    return;
   }
 
   // let sqlite3 free the data when it's done with it.
@@ -429,10 +449,6 @@ static void u20_hashdata() {
   GDBM_FILE dat = gdbm_open(u20_hashdat_fn, 0, GDBM_READER, 0600, NULL);
   if(!dat)
     u20_revert("%s", gdbm_strerror(gdbm_errno));
-
-  char *err = NULL;
-  if(sqlite3_exec(u20_sql, "BEGIN EXCLUSIVE TRANSACTION", NULL, NULL, &err))
-    u20_revert("%s", err?err:sqlite3_errmsg(u20_sql));
 
   sqlite3_stmt *data, *files;
   if(sqlite3_prepare_v2(u20_sql, "INSERT INTO hashdata (root, size, tthl) VALUES(?, ?, ?)", -1, &data, NULL))
@@ -460,18 +476,178 @@ static void u20_hashdata() {
   if(sqlite3_finalize(data) || sqlite3_finalize(files))
     u20_revert("%s", sqlite3_errmsg(u20_sql));
 
-  if(sqlite3_exec(u20_sql, "COMMIT", NULL, NULL, &err))
-    u20_revert("%s", err?err:sqlite3_errmsg(u20_sql));
-
   gdbm_close(dat);
 
   puts(" done.");
 }
 
 
+#define DLDAT_INFO  0 // <8 bytes: size><1 byte: prio><1 byte: error><2 bytes: error_sub>
+                      // <4 bytes: reserved><zero-terminated-string: destination>
+#define DLDAT_USERS 1 // <8 bytes: amount>
+                      // <8 bytes: uid><1 byte: reserved><1 byte: error><2 bytes: error_sub><4 bytes: reserved>
+                      // Repeat previous line $amount times
+                      // For ncdc <= 1.2: amount=1 and only the 8-byte uid was present
+#define DLDAT_TTHL  2 // <24 bytes: hash1>..
+
+
+#define DLE_NONE    0 // No error
+#define DLE_INVTTHL 1 // TTHL data does not match the file root
+#define DLE_NOFILE  2 // User does not have the file at all
+#define DLE_IO_INC  3 // I/O error with incoming file, error_sub = errno
+#define DLE_IO_DEST 4 // I/O error when moving to destination file/dir
+#define DLE_HASH    5 // Hash check failed, error_sub = block index of failed hash
+
+
+static char *u20_dl_strerror(char err, unsigned short sub) {
+  static char buf[200];
+  switch(err) {
+    case DLE_NONE:    strcpy(buf, "No error."); break;
+    case DLE_INVTTHL: strcpy(buf, "TTHL data does not match TTH root."); break;
+    case DLE_NOFILE:  strcpy(buf, "File not available from this user."); break;
+    case DLE_IO_INC:  g_snprintf(buf, 200, "Error writing to temporary file: %s", g_strerror(sub)); break;
+    case DLE_IO_DEST:
+      if(!sub)
+        strcpy(buf, "Error moving file to destination.");
+      else
+        g_snprintf(buf, 200, "Error moving file to destination: %s", g_strerror(sub));
+      break;
+    case DLE_HASH:    g_snprintf(buf, 200, "Hash chunk %d does not match downloaded data.", sub); break;
+    default:          strcpy(buf, "Unknown error.");
+  }
+  return buf;
+}
+
+
+static void u20_dl_item(GDBM_FILE dat, datum key, sqlite3_stmt *dl, sqlite3_stmt *dlu) {
+  char *k = key.dptr;
+
+  char hash[40] = {};
+  base32_encode(k+1, hash, 24);
+  sqlite3_bind_text(dl, 1, hash, -1, SQLITE_STATIC);
+  sqlite3_bind_text(dlu, 1, hash, -1, SQLITE_STATIC);
+
+  // fetch info
+  datum res = gdbm_fetch(dat, key);
+  if(res.dsize < 17) {
+    printf("WARNING: Invalid DL data for `%s' - ignoring.\n", hash);
+    if(res.dsize > 0)
+      free(res.dptr);
+    return;
+  }
+  // size
+  sqlite3_bind_int64(dl, 2, GINT64_FROM_LE(*((guint64 *)res.dptr)));
+  // dest
+  sqlite3_bind_text(dl, 3, ((char *)res.dptr)+16, -1, SQLITE_TRANSIENT);
+  // priority
+  sqlite3_bind_int(dl, 4, *(((char *)res.dptr)+8));
+  // error
+  char err = *(((char *)res.dptr)+9);
+  sqlite3_bind_int(dl, 5, err);
+  // error_msg
+  if(!err)
+    sqlite3_bind_null(dl, 6);
+  else
+    sqlite3_bind_text(dl, 6, u20_dl_strerror(err, GINT16_FROM_LE(*(((guint16 *)res.dptr)+5))), -1, SQLITE_STATIC);
+  free(res.dptr);
+
+  // fetch tthl
+  k[0] = DLDAT_TTHL;
+  res = gdbm_fetch(dat, key);
+  if(res.dsize > 0)
+    sqlite3_bind_blob(dl, 7, res.dptr, res.dsize, free);
+  else
+    sqlite3_bind_null(dl, 7);
+
+  // insert dl item
+  if(sqlite3_step(dl) != SQLITE_DONE || sqlite3_reset(dl))
+    u20_revert("%s", sqlite3_errmsg(u20_sql));
+
+  // now fetch the users
+  k[0] = DLDAT_USERS;
+  res = gdbm_fetch(dat, key);
+  k[0] = DLDAT_INFO;
+  if(res.dsize < 16) {
+    if(res.dsize > 0)
+      free(res.dptr);
+    return;
+  }
+  guint64 num = *((guint64 *)res.dptr);
+  int i;
+  for(i=0; i<num; i++) {
+    char *ptr = res.dptr+8+16*i;
+    // uid
+    sqlite3_bind_int64(dlu, 2, GINT64_FROM_LE(*((guint64 *)ptr)));
+    // error, error_msg
+    if(res.dsize > 16) { // post-multisource
+      char err = ptr[9];
+      sqlite3_bind_int(dlu, 3, err);
+      if(!err)
+        sqlite3_bind_null(dlu, 4);
+      else
+        sqlite3_bind_text(dlu, 4, u20_dl_strerror(err, GINT16_FROM_LE(*(((guint16 *)ptr)+5))), -1, SQLITE_STATIC);
+    } else { // pre-multisource
+      sqlite3_bind_int(dlu, 3, 0);
+      sqlite3_bind_null(dlu, 4);
+    }
+    // insert dlu item
+    if(sqlite3_step(dlu) != SQLITE_DONE || sqlite3_reset(dlu))
+      u20_revert("%s", sqlite3_errmsg(u20_sql));
+  }
+  free(res.dptr);
+}
+
+
+static void u20_dl() {
+  printf("-- Converting dl.dat...");
+  fflush(stdout);
+
+  GDBM_FILE dat = gdbm_open(u20_dl_fn, 0, GDBM_READER, 0600, NULL);
+  if(!dat)
+    u20_revert("%s", gdbm_strerror(gdbm_errno));
+
+  sqlite3_stmt *dl, *dlu;
+  if(sqlite3_prepare_v2(u20_sql,
+      "INSERT INTO dl (tth, size, dest, priority, error, error_msg, tthl)"
+      " VALUES(?, ?, ?, ?, ?, ?, ?)", -1, &dl, NULL))
+    u20_revert("%s", sqlite3_errmsg(u20_sql));
+  if(sqlite3_prepare_v2(u20_sql,
+      "INSERT INTO dl_users (tth, uid, error, error_msg) VALUES(?, ?, ?, ?)", -1, &dlu, NULL))
+    u20_revert("%s", sqlite3_errmsg(u20_sql));
+
+  // walk through the keys
+  datum key = gdbm_firstkey(dat);
+  char *freethis = NULL;
+  for(; key.dptr; key=gdbm_nextkey(dat, key)) {
+    if(freethis)
+      free(freethis);
+    freethis = key.dptr;
+
+    // Only check for INFO keys
+    if(key.dsize != 25 || *((char *)key.dptr) != DLDAT_INFO)
+      continue;
+    u20_dl_item(dat, key, dl, dlu);
+  }
+
+  if(freethis)
+    free(freethis);
+
+  if(sqlite3_finalize(dl) || sqlite3_finalize(dlu))
+    u20_revert("%s", sqlite3_errmsg(u20_sql));
+
+  gdbm_close(dat);
+
+  puts(" done.");
+};
+
+
 static void u20_final() {
   printf("-- Finalizing...");
   fflush(stdout);
+
+  char *er;
+  if(sqlite3_exec(u20_sql, "COMMIT", NULL, NULL, &er))
+    u20_revert("%s", er?er:sqlite3_errmsg(u20_sql));
 
   if(sqlite3_close(u20_sql))
     u20_revert("%s", sqlite3_errmsg(u20_sql));
@@ -485,6 +661,7 @@ static void u20_final() {
 static void u20() {
   u20_sql_fn     = g_build_filename(db_dir, "db.sqlite3", NULL);
   u20_hashdat_fn = g_build_filename(db_dir, "hashdata.dat", NULL);
+  u20_dl_fn      = g_build_filename(db_dir, "dl.dat", NULL);
   u20_files_fn   = g_build_filename(db_dir, "files.xml.bz2", NULL);
   u20_config_fn  = g_build_filename(db_dir, "config.ini", NULL);
 
@@ -495,13 +672,21 @@ static void u20() {
 
   u20_loadfiles();
   u20_initsqlite();
+
+  // Start a transaction (committed in _final())
+  char *er = NULL;
+  if(sqlite3_exec(u20_sql, "BEGIN EXCLUSIVE TRANSACTION", NULL, NULL, &er))
+    u20_revert("%s", er?er:sqlite3_errmsg(u20_sql));
+
   u20_hashdata();
+  u20_dl();
   u20_final();
 
   g_key_file_free(u20_conf);
   g_hash_table_unref(u20_filenames);
   g_free(u20_sql_fn);
   g_free(u20_hashdat_fn);
+  g_free(u20_dl_fn);
   g_free(u20_files_fn);
   g_free(u20_config_fn);
 }

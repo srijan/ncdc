@@ -37,7 +37,7 @@ struct dl_user_dl {
   struct dl *dl;
   struct dl_user *u;
   char error;               // DLE_*
-  unsigned short error_sub; // errno or block number (it is assumed that 0 <= errno <= USHRT_MAX)
+  char *error_msg;
 };
 
 
@@ -95,9 +95,9 @@ struct dl_user {
 #define DLE_NONE    0 // No error
 #define DLE_INVTTHL 1 // TTHL data does not match the file root
 #define DLE_NOFILE  2 // User does not have the file at all
-#define DLE_IO_INC  3 // I/O error with incoming file, error_sub = errno
+#define DLE_IO_INC  3 // I/O error with incoming file
 #define DLE_IO_DEST 4 // I/O error when moving to destination file/dir
-#define DLE_HASH    5 // Hash check failed, error_sub = block index of failed hash
+#define DLE_HASH    5 // Hash check failed
 
 
 struct dl {
@@ -108,8 +108,8 @@ struct dl {
   gboolean flmatch : 1;     // For lists: Whether to match queue after completed download
   char prio;                // DLP_*
   char error;               // DLE_*
-  unsigned short error_sub; // errno or block number (it is assumed that 0 <= errno <= USHRT_MAX)
   int incfd;                // file descriptor for this file in <incoming_dir>
+  char *error_msg;          // if error != DLE_NONE
   char *flsel;              // path to file/dir to select for filelists
   struct ui_tab *flpar;     // parent of the file list browser tab for filelists (might be a dangling pointer!)
   char hash[24];            // TTH for files, tiger(uid) for filelists
@@ -141,22 +141,19 @@ static GHashTable *queue_users = NULL;
 
 
 // Utility function that returns an error string for DLE_* errors.
-char *dl_strerror(char err, unsigned short sub) {
+char *dl_strerror(char err, const char *sub) {
   static char buf[200];
-  switch(err) {
-    case DLE_NONE:    strcpy(buf, "No error."); break;
-    case DLE_INVTTHL: strcpy(buf, "TTHL data does not match TTH root."); break;
-    case DLE_NOFILE:  strcpy(buf, "File not available from this user."); break;
-    case DLE_IO_INC:  g_snprintf(buf, 200, "Error writing to temporary file: %s", g_strerror(sub)); break;
-    case DLE_IO_DEST:
-      if(!sub)
-        strcpy(buf, "Error moving file to destination.");
-      else
-        g_snprintf(buf, 200, "Error moving file to destination: %s", g_strerror(sub));
-      break;
-    case DLE_HASH:    g_snprintf(buf, 200, "Hash chunk %d does not match downloaded data.", sub); break;
-    default:          strcpy(buf, "Unknown error.");
-  }
+  char *par =
+    err == DLE_NONE    ? "No error" :
+    err == DLE_INVTTHL ? "TTHL data does not match TTH root" :
+    err == DLE_NOFILE  ? "File not available from this user" :
+    err == DLE_IO_INC  ? "Error writing to temporary file" :
+    err == DLE_IO_DEST ? "Error moving file to destination" :
+    err == DLE_HASH    ? "Hash error" : "Unknown error";
+  if(sub)
+    g_snprintf(buf, 200, "%s: %s", par, sub);
+  else
+    g_snprintf(buf, 200, "%s.", par);
   return buf;
 }
 
@@ -202,6 +199,7 @@ static gint dl_user_dl_sort(gconstpointer a, gconstpointer b, gpointer dat) {
 
 // Frees a dl_user_dl struct
 static void dl_user_dl_free(gpointer x) {
+  g_free(((struct dl_user_dl *)x)->error_msg);
   g_slice_free(struct dl_user_dl, x);
 }
 
@@ -300,7 +298,7 @@ void dl_user_join(guint64 uid) {
 // Adds a user to a dl item, making sure to create the user if it's not in the
 // queue yet. For internal use only, does not call dl_dat_saveusers() and
 // dl_queue_start().
-static void dl_user_add(struct dl *dl, guint64 uid, char error, unsigned short error_sub) {
+static void dl_user_add(struct dl *dl, guint64 uid, char error, const char *error_msg) {
   g_return_if_fail(!dl->islist || dl->u->len == 0);
 
   // get or create dl_user struct
@@ -318,7 +316,7 @@ static void dl_user_add(struct dl *dl, guint64 uid, char error, unsigned short e
   dud->dl = dl;
   dud->u = du;
   dud->error = error;
-  dud->error_sub = error_sub;
+  dud->error_msg = error_msg ? g_strdup(error_msg) : NULL;
 
   // Add to du->queue and dl->u
   g_ptr_array_add(dl->u, g_sequence_insert_sorted(du->queue, dud, dl_user_dl_sort, NULL));
@@ -723,6 +721,7 @@ void dl_queue_rm(struct dl *dl) {
   g_ptr_array_unref(dl->u);
   g_free(dl->flsel);
   g_free(dl->dest);
+  g_free(dl->error_msg);
   g_slice_free(struct dl, dl);
 }
 
@@ -766,7 +765,7 @@ static void dl_queue_checkrm(struct dl *dl, gboolean justfin) {
 void dl_queue_setprio(struct dl *dl, char prio) {
   gboolean enabled = dl->prio <= DLP_OFF && prio > DLP_OFF;
   dl->prio = prio;
-  // TODO: update database (also make sure to set error/error_sub)
+  // TODO: update database (also make sure to set error/error_msg)
   // Make sure the dl_user.queue lists are still in the correct order
   int i;
   for(i=0; i<dl->u->len; i++)
@@ -779,7 +778,8 @@ void dl_queue_setprio(struct dl *dl, char prio) {
 
 #define dl_queue_seterr(dl, e, sub) do {\
     (dl)->error = e;\
-    (dl)->error_sub = sub;\
+    g_free((dl)->error_msg);\
+    (dl)->error_msg = (sub) ? g_strdup(sub) : NULL;\
     dl_queue_setprio(dl, DLP_ERR);\
     ui_mf(ui_main, 0, "Download of `%s' failed: %s", (dl)->dest, dl_strerror(e, sub));\
   } while(0)
@@ -787,7 +787,7 @@ void dl_queue_setprio(struct dl *dl, char prio) {
 
 // Set a user-specific error. If tth = NULL, the error will be set for all
 // files in the queue.
-void dl_queue_setuerr(guint64 uid, char *tth, char e, unsigned short sub) {
+void dl_queue_setuerr(guint64 uid, char *tth, char e, const char *emsg) {
   struct dl *dl = tth ? g_hash_table_lookup(dl_queue, tth) : NULL;
   struct dl_user *du = g_hash_table_lookup(queue_users, &uid);
   if(!dl || (tth && !du))
@@ -803,7 +803,8 @@ void dl_queue_setuerr(guint64 uid, char *tth, char e, unsigned short sub) {
       struct dl_user_dl *dud = g_sequence_get(iter);
       if(dud->u == du) {
         dud->error = e;
-        dud->error_sub = sub;
+        g_free(dud->error_msg);
+        dud->error_msg = emsg ? g_strdup(emsg) : NULL;
         g_sequence_sort_changed(iter, dl_user_dl_sort, NULL);
         break;
       }
@@ -815,7 +816,8 @@ void dl_queue_setuerr(guint64 uid, char *tth, char e, unsigned short sub) {
     for(; !g_sequence_iter_is_end(i); i=g_sequence_iter_next(i)) {
       struct dl_user_dl *dud = g_sequence_get(i);
       dud->error = e;
-      dud->error_sub = sub;
+      g_free(dud->error_msg);
+      dud->error_msg = emsg ? g_strdup(emsg) : NULL;
     }
     // Do the sort after looping through all items - looping through the list
     // while changing the ordering may cause problems.
@@ -890,7 +892,7 @@ static void dl_finished(struct dl *dl) {
   // Create destination directory, if it does not exist yet.
   char *parent = g_path_get_dirname(dl->dest);
   if(g_mkdir_with_parents(parent, 0755) < 0)
-    dl_queue_seterr(dl, DLE_IO_DEST, errno);
+    dl_queue_seterr(dl, DLE_IO_DEST, g_strerror(errno));
   g_free(parent);
 
   // Prevent overwiting other files by appending a prefix to the destination if
@@ -916,7 +918,7 @@ static void dl_finished(struct dl *dl) {
     g_object_unref(dst);
     if(err) {
       g_warning("Error moving `%s' to `%s': %s", dl->inc, dest, err->message);
-      dl_queue_seterr(dl, DLE_IO_DEST, 0); // g_file_move does not give the value of errno :(
+      dl_queue_seterr(dl, DLE_IO_DEST, err->message);
       g_error_free(err);
     }
   }
@@ -1009,7 +1011,7 @@ gboolean dl_received(guint64 uid, char *tth, char *buf, int length) {
     dl->incfd = open(dl->inc, O_WRONLY|O_CREAT, 0666);
     if(dl->incfd < 0 || lseek(dl->incfd, dl->have, SEEK_SET) == (off_t)-1) {
       g_warning("Error opening %s: %s", dl->inc, g_strerror(errno));
-      dl_queue_seterr(dl, DLE_IO_INC, errno);
+      dl_queue_seterr(dl, DLE_IO_INC, g_strerror(errno));
       return FALSE;
     }
   }
@@ -1020,7 +1022,7 @@ gboolean dl_received(guint64 uid, char *tth, char *buf, int length) {
     int r = write(dl->incfd, buf, length);
     if(r < 0) {
       g_warning("Error writing to %s: %s", dl->inc, g_strerror(errno));
-      dl_queue_seterr(dl, DLE_IO_INC, errno);
+      dl_queue_seterr(dl, DLE_IO_INC, g_strerror(errno));
       return FALSE;
     }
 
@@ -1028,7 +1030,9 @@ gboolean dl_received(guint64 uid, char *tth, char *buf, int length) {
     int fail = dl->islist ? -1 : dl_hash_update(dl, r, buf);
     if(fail >= 0) {
       g_warning("Hash failed for %s (block %d)", dl->inc, fail);
-      dl_queue_setuerr(uid, tth, DLE_HASH, fail);
+      char msg[200];
+      g_snprintf(msg, 200, "Hash for block %d does not match.", fail);
+      dl_queue_setuerr(uid, tth, DLE_HASH, msg);
       // Delete the failed block and everything after it, so that a resume is possible.
       dl->have = fail*dl->hash_block;
       // I have no idea what to do when these functions fail. Resuming the
@@ -1077,7 +1081,7 @@ void dl_settthl(guint64 uid, char *tth, char *tthl, int len) {
   tth_root(tthl, len/24, root);
   if(memcmp(root, dl->hash, 24) != 0) {
     g_warning("dl:%016"G_GINT64_MODIFIER"x: Incorrect TTHL for %s.", uid, dl->dest);
-    dl_queue_setuerr(uid, tth, DLE_INVTTHL, 0);
+    dl_queue_setuerr(uid, tth, DLE_INVTTHL, NULL);
     return;
   }
 

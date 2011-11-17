@@ -1765,7 +1765,7 @@ static void ui_dl_dud_draw_row(struct ui_listing *list, GSequenceIter *iter, int
     mvprintw(row, 2, "ID:%016"G_GINT64_MODIFIER"x (offline)", dud->u->uid);
 
   if(dud->error)
-    mvprintw(row, 36, "Error: %s", dl_strerror(dud->error, dud->error_sub));
+    mvprintw(row, 36, "Error: %s", dl_strerror(dud->error, dud->error_msg));
   else if(dud->u->active == dud)
     mvaddstr(row, 36, "Downloading.");
   else if(dud->u->state == DLU_ACT)
@@ -1808,7 +1808,7 @@ static void ui_dl_draw() {
 
   // error info
   if(sel && sel->prio == DLP_ERR)
-    mvprintw(++bottom, 0, "Error: %s", dl_strerror(sel->error, sel->error_sub));
+    mvprintw(++bottom, 0, "Error: %s", dl_strerror(sel->error, sel->error_msg));
 
   // user list
   if(sel && ui_dl->details) {

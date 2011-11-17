@@ -1037,7 +1037,7 @@ static void adc_handle(struct cc *cc, char *msg) {
         g_message("CC:%s: Received message in wrong state: %s", net_remoteaddr(cc->net), msg);
         cc_disconnect(cc);
       } else {
-        dl_queue_setuerr(cc->uid, cc->last_hash, DLE_NOFILE, 0);
+        dl_queue_setuerr(cc->uid, cc->last_hash, DLE_NOFILE, NULL);
         if(cmd.argv[0][0] == '2')
           cc_disconnect(cc);
         else {
@@ -1290,7 +1290,7 @@ static void nmdc_handle(struct cc *cc, char *cmd) {
       g_set_error(&cc->err, 1, 0, msg);
       // Handle "File Not Available" and ".. no more exists"
       if(str_casestr(msg, "file not available") || str_casestr(msg, "no more exists"))
-        dl_queue_setuerr(cc->uid, cc->last_hash, DLE_NOFILE, 0);
+        dl_queue_setuerr(cc->uid, cc->last_hash, DLE_NOFILE, NULL);
       g_free(msg);
       cc->state = CCS_IDLE;
       dl_user_cc(cc->uid, cc);

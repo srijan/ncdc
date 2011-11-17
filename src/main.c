@@ -32,8 +32,8 @@
 #include <errno.h>
 #include <stdio.h>
 #include <unistd.h>
-#include <gdbm.h>
 #include <libxml/xmlversion.h>
+#include <sqlite3.h>
 
 
 
@@ -206,11 +206,11 @@ char *ncdc_version() {
 #endif
     "Libraries:\n"
     "  GLib %d.%d.%d (%d.%d.%d)\n"
-    "  Libxml2 %s\n"
+    "  SQLite %s (%s)\n"
 #ifdef NCURSES_VERSION
     "  ncurses %s\n"
 #endif
-    "  %s"; // GDBM
+    "  Libxml2 %s";
   if(ver)
     return ver->str;
   ver = g_string_new("");
@@ -222,11 +222,11 @@ char *ncdc_version() {
     "BSD",
 #endif
     GLIB_MAJOR_VERSION, GLIB_MINOR_VERSION, GLIB_MICRO_VERSION, glib_major_version, glib_minor_version, glib_micro_version,
-    LIBXML_DOTTED_VERSION,
+    SQLITE_VERSION, sqlite3_libversion(),
 #ifdef NCURSES_VERSION
     NCURSES_VERSION,
 #endif
-    gdbm_version);
+    LIBXML_DOTTED_VERSION);
   return ver->str;
 }
 

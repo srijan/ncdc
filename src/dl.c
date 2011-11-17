@@ -28,9 +28,7 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <unistd.h>
-
 #include <fcntl.h>
-#include <gdbm.h>
 
 
 #if INTERFACE
@@ -132,22 +130,6 @@ struct dl {
 // this, the TTHL data would simply add more overhead than it is worth.
 #define DL_MINTTHLSIZE (512*1024)
 
-// GDBM data file.
-static GDBM_FILE dl_dat;
-
-// The 'have' field is currently not saved in the data file, stat() is used on
-// startup on the incomplete file to get this information. We'd still need some
-// progress indication in the data file in the future, to indicate which parts
-// have been TTH-checked, etc.
-#define DLDAT_INFO  0 // <8 bytes: size><1 byte: prio><1 byte: error><2 bytes: error_sub>
-                      // <4 bytes: reserved><zero-terminated-string: destination>
-#define DLDAT_USERS 1 // <8 bytes: amount>
-                      // <8 bytes: uid><1 byte: reserved><1 byte: error><2 bytes: error_sub><4 bytes: reserved>
-                      // Repeat previous line $amount times
-                      // For ncdc <= 1.2: amount=1 and only the 8-byte uid was present
-#define DLDAT_TTHL  2 // <24 bytes: hash1>..
-
-
 // Download queue.
 // Key = dl->hash, Value = struct dl
 GHashTable *dl_queue = NULL;
@@ -155,26 +137,6 @@ GHashTable *dl_queue = NULL;
 
 // uid -> dl_user lookup table.
 static GHashTable *queue_users = NULL;
-
-
-
-static gboolean dl_dat_needsync = FALSE;
-
-// Performs a gdbm_sync() in an upcoming iteration of the main loop. This
-// delayed write allows doing bulk operations on the data file while avoiding a
-// gdbm_sync() on every change.
-#define dl_dat_sync()\
-  if(!dl_dat_needsync) {\
-    dl_dat_needsync = TRUE;\
-    g_idle_add(dl_dat_sync_do, NULL);\
-  }
-
-static gboolean dl_dat_sync_do(gpointer dat) {
-  gdbm_sync(dl_dat);
-  dl_dat_needsync = FALSE;
-  return FALSE;
-}
-
 
 
 
@@ -557,82 +519,6 @@ void dl_queue_start() {
 
 
 
-// Adding/removing stuff from dl.dat
-
-static void dl_dat_saveinfo(struct dl *dl) {
-  char key[25];
-  key[0] = DLDAT_INFO;
-  memcpy(key+1, dl->hash, 24);
-  datum keydat = { key, 25 };
-
-  guint64 size = GINT64_TO_LE(dl->size);
-  int len = 16 + strlen(dl->dest) + 1;
-  char nfo[len];
-  memset(nfo, 0, len);
-  memcpy(nfo, &size, 8);
-  nfo[8] = dl->prio;
-  nfo[9] = dl->error;
-  guint16 err_sub = GINT16_TO_LE(dl->error_sub);
-  memcpy(nfo+10, &err_sub, 2);
-  // bytes 12-15 are reserved, and initialized to zero
-  strcpy(nfo+16, dl->dest);
-  datum val = { nfo, len };
-
-  gdbm_store(dl_dat, keydat, val, GDBM_REPLACE);
-  dl_dat_sync();
-}
-
-
-static void dl_dat_saveusers(struct dl *dl) {
-  if(dl->islist)
-    return;
-
-  char key[25];
-  key[0] = DLDAT_USERS;
-  memcpy(key+1, dl->hash, 24);
-
-  int len = 8+16*dl->u->len;
-  char nfo[len];
-  memset(nfo, 0, len);
-  guint64 tmp = dl->u->len;
-  tmp = GINT64_TO_LE(tmp);
-  memcpy(nfo, &tmp, 8);
-
-  int i;
-  for(i=0; i<dl->u->len; i++) {
-    char *ptr = nfo+8+i*16;
-    struct dl_user_dl *dud = g_sequence_get(g_ptr_array_index(dl->u, i));
-    tmp = GINT64_TO_LE(dud->u->uid);
-    memcpy(ptr, &tmp, 8);
-    ptr[9] = dud->error;
-    guint16 sub = GINT16_TO_LE(dud->error_sub);
-    memcpy(ptr+10, &sub, 2);
-  }
-
-  datum keydat = { key, 25 };
-  datum val = { nfo, len };
-  gdbm_store(dl_dat, keydat, val, GDBM_REPLACE);
-  dl_dat_sync();
-}
-
-
-void dl_dat_rmdl(struct dl *dl) {
-  char key[25];
-  datum keydat = { key, 25 };
-  memcpy(key+1, dl->hash, 24);
-  key[0] = DLDAT_INFO;
-  gdbm_delete(dl_dat, keydat);
-  key[0] = DLDAT_USERS;
-  gdbm_delete(dl_dat, keydat);
-  key[0] = DLDAT_TTHL;
-  gdbm_delete(dl_dat, keydat);
-  dl_dat_sync();
-}
-
-
-
-
-
 // Adding stuff to the download queue
 
 // Adds a dl item to the queue. dl->inc will be determined and opened here.
@@ -657,9 +543,9 @@ static void dl_queue_insert(struct dl *dl, gboolean init) {
   if(ui_dl)
     ui_dl_listchange(dl, UIDL_ADD);
 
-  // insert in the data file
+  // insert in the database
   if(!dl->islist && !init)
-    dl_dat_saveinfo(dl);
+    ; // TODO!
 
   // start download, if possible
   if(!init)
@@ -700,7 +586,7 @@ void dl_queue_addlist(struct hub_user *u, const char *sel, struct ui_tab *parent
   g_debug("dl:%016"G_GINT64_MODIFIER"x: queueing files.xml.bz2", u->uid);
   dl_queue_insert(dl, FALSE);
   dl_user_add(dl, u->uid, 0, 0);
-  dl_dat_saveusers(dl);
+  // TODO: add user to database?
 }
 
 
@@ -722,7 +608,7 @@ static gboolean dl_queue_addfile(guint64 uid, char *hash, guint64 size, char *fn
   g_debug("dl:%016"G_GINT64_MODIFIER"x: queueing %s", uid, fn);
   dl_queue_insert(dl, FALSE);
   dl_user_add(dl, uid, 0, 0);
-  dl_dat_saveusers(dl);
+  // TODO: add user to database?
   return TRUE;
 }
 
@@ -780,7 +666,7 @@ int dl_queue_matchfile(guint64 uid, char *tth) {
     if(((struct dl_user_dl *)g_sequence_get(g_ptr_array_index(dl->u, i)))->u->uid == uid)
       return 0;
   dl_user_add(dl, uid, 0, 0);
-  dl_dat_saveusers(dl);
+  // TODO: add user to database?
   dl_queue_start();
   return 1;
 }
@@ -825,9 +711,9 @@ void dl_queue_rm(struct dl *dl) {
   // remove from the user info
   while(dl->u->len > 0)
     dl_user_rm(dl, 0);
-  // remove from the data file
+  // remove from the database
   if(!dl->islist)
-    dl_dat_rmdl(dl);
+    ; // TODO!
   // free and remove dl struct
   if(ui_dl)
     ui_dl_listchange(dl, UIDL_DEL);
@@ -854,7 +740,8 @@ static void dl_queue_checkrm(struct dl *dl, gboolean justfin) {
   if(justfin) {
     // If the download just finished, we might as well remove it from dl.dat
     // immediately. Makes sure we won't load it on the next startup.
-    dl_dat_rmdl(dl);
+    // TODO!
+
     // Since the dl item is now considered as "disabled" by the download
     // management code, make sure it is also last in every user's download
     // queue. For performance reasons, we can also already remove the users who
@@ -879,7 +766,7 @@ static void dl_queue_checkrm(struct dl *dl, gboolean justfin) {
 void dl_queue_setprio(struct dl *dl, char prio) {
   gboolean enabled = dl->prio <= DLP_OFF && prio > DLP_OFF;
   dl->prio = prio;
-  dl_dat_saveinfo(dl);
+  // TODO: update database (also make sure to set error/error_sub)
   // Make sure the dl_user.queue lists are still in the correct order
   int i;
   for(i=0; i<dl->u->len; i++)
@@ -906,6 +793,8 @@ void dl_queue_setuerr(guint64 uid, char *tth, char e, unsigned short sub) {
   if(!dl || (tth && !du))
     return;
 
+  // TODO: update database
+
   // from a single dl item
   if(dl) {
     int i;
@@ -919,7 +808,6 @@ void dl_queue_setuerr(guint64 uid, char *tth, char e, unsigned short sub) {
         break;
       }
     }
-    dl_dat_saveusers(dl);
 
   // for all dl items
   } else {
@@ -928,7 +816,6 @@ void dl_queue_setuerr(guint64 uid, char *tth, char e, unsigned short sub) {
       struct dl_user_dl *dud = g_sequence_get(i);
       dud->error = e;
       dud->error_sub = sub;
-      dl_dat_saveusers(dud->dl);
     }
     // Do the sort after looping through all items - looping through the list
     // while changing the ordering may cause problems.
@@ -947,6 +834,8 @@ void dl_queue_rmuser(guint64 uid, char *tth) {
   if(!du || (tth && !dl))
     return;
 
+  // TODO: remove users from database
+
   // from a single dl item
   if(dl) {
     int i;
@@ -958,8 +847,6 @@ void dl_queue_rmuser(guint64 uid, char *tth) {
     }
     if(dl->islist && !dl->u->len)
       dl_queue_rm(dl);
-    else
-      dl_dat_saveusers(dl);
 
   // from all dl items (may be fairly slow)
   } else {
@@ -982,8 +869,6 @@ void dl_queue_rmuser(guint64 uid, char *tth) {
       }
       if(dl->islist && !dl->u->len)
         dl_queue_rm(dl);
-      else
-        dl_dat_saveusers(dl);
       i = n;
     }
   }
@@ -1061,14 +946,10 @@ static gboolean dl_hash_check(struct dl *dl, int num, char *tth) {
   // It is probably faster to keep the TTHL data in memory, but since this data
   // may be around 200KiB and we can have a large number of dl structs, let's
   // just hope GDBM has a sensible caching mechanism.
-  char key[25] = { DLDAT_TTHL };
-  memcpy(key+1, dl->hash, 24);
-  datum keydat = { key, 25 };
-  datum val = gdbm_fetch(dl_dat, keydat);
-  g_return_val_if_fail(val.dsize >= (num+1)*24, FALSE);
-  gboolean r = memcmp(tth, val.dptr+(num*24), 24) == 0 ? TRUE : FALSE;
-  free(val.dptr);
-  return r;
+
+  // TODO: check with sqlite database.
+  // return memcmp(tth, tthl+(num*24), 24) == 0 ? TRUE : FALSE;
+  return TRUE;
 }
 
 
@@ -1203,14 +1084,7 @@ void dl_settthl(guint64 uid, char *tth, char *tthl, int len) {
   dl->hastthl = TRUE;
   dl->hash_block = tth_blocksize(dl->size, len/24);
 
-  // save to dl.dat
-  char key[25];
-  key[0] = DLDAT_TTHL;
-  memcpy(key+1, dl->hash, 24);
-  datum keydat = { key, 25 };
-  datum val = { tthl, len };
-  gdbm_store(dl_dat, keydat, val, GDBM_REPLACE);
-  dl_dat_sync();
+  // TODO: save to the database
 }
 
 
@@ -1219,38 +1093,8 @@ void dl_settthl(guint64 uid, char *tth, char *tthl, int len) {
 
 // Loading/initializing the download queue on startup
 
-// Calculates dl->hash_block, dl->have and if necessary updates dl->hash_tth
-// for the last block that we have.
-static void dl_queue_loadpartial(struct dl *dl) {
-  // get size of the incomplete file
-  char tth[40] = {};
-  base32_encode(dl->hash, tth);
-  char *tmp = conf_incoming_dir();
-  char *fn = g_build_filename(tmp, tth, NULL);
-  g_free(tmp);
-  struct stat st;
-  if(stat(fn, &st) >= 0)
-    dl->have = st.st_size;
 
-  // get TTHL info
-  if(dl->size < DL_MINTTHLSIZE) {
-    dl->hastthl = TRUE;
-    dl->hash_block = DL_MINTTHLSIZE;
-  } else {
-    char key[25] = { DLDAT_TTHL };
-    memcpy(key+1, dl->hash, 24);
-    datum keydat = { key, 25 };
-    datum val = gdbm_fetch(dl_dat, keydat);
-    if(!val.dptr) {
-      // No TTHL data found? Make sure to redownload the entire file
-      dl->have = 0;
-      unlink(fn);
-    } else {
-      dl->hastthl = TRUE;
-      dl->hash_block = tth_blocksize(dl->size, val.dsize/24);
-      free(val.dptr);
-    }
-  }
+/* TODO: Load download queue from the database.
 
   // If we have already downloaded some data, hash the last block and update
   // dl->hash_tth.
@@ -1279,100 +1123,18 @@ static void dl_queue_loadpartial(struct dl *dl) {
     if(fd >= 0)
       close(fd);
   }
-
-  g_free(fn);
-}
-
-
-// loads a single item from the data file
-static void dl_queue_loaditem(char *hash) {
-  char key[25];
-  memcpy(key+1, hash, 24);
-  datum keydat = { key, 25 };
-
-  key[0] = DLDAT_INFO;
-  datum nfo = gdbm_fetch(dl_dat, keydat);
-  g_return_if_fail(nfo.dsize > 17);
-  key[0] = DLDAT_USERS;
-  datum users = gdbm_fetch(dl_dat, keydat);
-  g_return_if_fail(users.dsize >= 8);
-
-  guint64 numusers;
-  memcpy(&numusers, users.dptr, 8);
-  numusers = GINT64_FROM_LE(numusers);
-  g_return_if_fail(users.dsize == 16 || users.dsize == 8+16*numusers);
-
-  // Fix dl struct
-  struct dl *dl = g_slice_new0(struct dl);
-  memcpy(dl->hash, hash, 24);
-  memcpy(&dl->size, nfo.dptr, 8);
-  dl->size = GINT64_FROM_LE(dl->size);
-  dl->prio = nfo.dptr[8];
-  dl->error = nfo.dptr[9];
-  memcpy(&dl->error_sub, nfo.dptr+10, 2);
-  dl->error_sub = GINT16_FROM_LE(dl->error_sub);
-  dl->dest = g_strdup(nfo.dptr+16);
-  dl_queue_insert(dl, TRUE);
-
-  // Fix users
-  int i;
-  for(i=0; i<numusers; i++) {
-    char *ptr = users.dptr+8+16*i;
-    guint64 uid;
-    memcpy(&uid, ptr, 8);
-    uid = GINT64_FROM_LE(uid);
-    guint16 errsub = 0;
-    char err = 0;
-    // Pre-multisource versions only stored one user, and only its uid. (=16 bytes in total)
-    if(users.dsize > 16) {
-      memcpy(&errsub, ptr+10, 2);
-      errsub = GINT16_FROM_LE(errsub);
-    }
-    dl_user_add(dl, uid, err, errsub);
-  }
-
-  // check what we already have
-  dl_queue_loadpartial(dl);
-
-  // and insert in the hash tables
-  g_debug("dl: load `%s' from data file (sources = %d, size = %"G_GUINT64_FORMAT", have = %"G_GUINT64_FORMAT", bs = %"G_GUINT64_FORMAT")",
-    dl->dest, dl->u->len, dl->size, dl->have, dl->hash_block);
-
-  free(nfo.dptr);
-  free(users.dptr);
-}
-
-
-// loads the queued items from the data file
-static void dl_queue_loaddat() {
-  datum key = gdbm_firstkey(dl_dat);
-  while(key.dptr) {
-    char *str = key.dptr;
-    if(key.dsize == 25 && str[0] == DLDAT_INFO)
-      dl_queue_loaditem(str+1);
-    key = gdbm_nextkey(dl_dat, key);
-    free(str);
-  }
-}
+*/
 
 
 void dl_init_global() {
   queue_users = g_hash_table_new(g_int64_hash, g_int64_equal);
   dl_queue = g_hash_table_new(g_int_hash, tiger_hash_equal);
-  // open data file
-  char *fn = g_build_filename(conf_dir, "dl.dat", NULL);
-  dl_dat = gdbm_open(fn, 0, GDBM_WRCREAT, 0600, NULL);
-  g_free(fn);
-  if(!dl_dat)
-    g_error("Unable to open dl.dat.");
-  dl_queue_loaddat();
   // Delete old filelists
   dl_fl_clean(NULL);
 }
 
 
 void dl_close_global() {
-  gdbm_close(dl_dat);
   // Delete incomplete file lists. They won't be completed anyway.
   GHashTableIter iter;
   struct dl *dl;
@@ -1418,7 +1180,7 @@ gboolean dl_fl_clean(gpointer dat) {
 
 
 // Removes unused files in <incoming_dir>.
-static void dl_inc_clean() {
+void dl_inc_clean() {
   char *dir = conf_incoming_dir();
   GDir *d = g_dir_open(dir, 0, NULL);
   if(!d) {
@@ -1443,59 +1205,5 @@ static void dl_inc_clean() {
   }
   g_dir_close(d);
   g_free(dir);
-}
-
-
-// Removes unused items from dl.dat, performs a gdbm_reorganize(), removes
-// unused files in /inc/ and calls dl_fl_clean().
-// The dl.dat cleaning code is based on based on fl_hashdat_gc().
-void dl_gc() {
-  GSList *rm = NULL;
-  char hash[40];
-  hash[39] = 0;
-
-  // check for unused keys
-  datum key = gdbm_firstkey(dl_dat);
-  char *freethis = NULL;
-  for(; key.dptr; key=gdbm_nextkey(dl_dat, key)) {
-    char *str = key.dptr;
-    if(freethis)
-      free(freethis);
-    // We only touch keys that this or earlier versions of ncdc could have
-    // created. Unknown keys are left untouched as a later version could have
-    // made these and there is no way to tell whether these need to be cleaned
-    // up or not.
-    if(key.dsize == 25 && (str[0] == DLDAT_INFO || str[0] == DLDAT_USERS || str[0] == DLDAT_TTHL)
-        && !g_hash_table_lookup(dl_queue, str+1)) {
-      base32_encode(str+1, hash);
-      g_message("Removing unused key in dl.dat: type = %d, hash = %s", str[0], hash);
-      rm = g_slist_prepend(rm, str);
-      freethis = NULL;
-    } else
-      freethis = str;
-  }
-  if(freethis)
-    free(freethis);
-
-  // delete the unused keys
-  GSList *n = rm;
-  key.dsize = 25;
-  while(n) {
-    rm = n->next;
-    key.dptr = n->data;
-    gdbm_delete(dl_dat, key);
-    free(n->data);
-    g_slist_free_1(n);
-    n = rm;
-  }
-
-  // perform the reorganize
-  gdbm_reorganize(dl_dat);
-
-  // remove unused files in /inc/
-  dl_inc_clean();
-
-  // remove old files in /fl/
-  dl_fl_clean(NULL);
 }
 

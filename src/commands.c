@@ -700,7 +700,8 @@ static void c_gc(char *args) {
     if(!fl_gc())
       ui_m(NULL, 0, "Not checking for unused hash data: File list refresh in progress or not performed yet.");
     db_fl_purgedata();
-    dl_gc();
+    dl_fl_clean(NULL);
+    dl_inc_clean();
     db_vacuum();
     ui_m(NULL, UIM_NOLOG, NULL);
     ui_m(NULL, 0, "Garbage-collection done.");

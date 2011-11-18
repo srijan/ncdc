@@ -81,7 +81,11 @@ L=Unknown
 ST=Unknown
 C=UN
 " >$TMP
-  openssl req -x509 -config $TMP -new -newkey rsa:1024 -nodes -days $DAYS -keyout "$KEYFILE" -out "$CRTFILE"
+  # Note: The second run of openssl is to convert the key to something all
+  # glib-networking version can read. Check
+  # https://bugzilla.gnome.org/show_bug.cgi?id=664321
+  openssl req -x509 -config $TMP -new -newkey rsa:1024 -nodes -days $DAYS -keyout "$KEYFILE" -out "$CRTFILE" &&
+    openssl rsa -in "$KEYFILE" -out "$KEYFILE"
   ret=$?
 
 

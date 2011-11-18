@@ -385,6 +385,33 @@ void db_dl_getdlus(void (*callback)(const char *tth, guint64 uid, char error, co
 }
 
 
+// Delete a row from dl and any rows from dl_users that reference the row.
+void db_dl_rm(const char *tth) {
+  db_begin();
+  char hash[40] = {};
+  base32_encode(tth, hash);
+  sqlite3_stmt *s;
+
+  // dl_users
+  if(sqlite3_prepare_v2(db, "DELETE FROM dl_users WHERE tth = ?", -1, &s, NULL))
+    db_err(NULL,);
+  sqlite3_bind_text(s, 1, hash, -1, SQLITE_STATIC);
+  if(sqlite3_step(s) != SQLITE_DONE)
+    db_err(NULL,);
+  sqlite3_finalize(s);
+
+  // dl
+  if(sqlite3_prepare_v2(db, "DELETE FROM dl WHERE tth = ?", -1, &s, NULL))
+    db_err(NULL,);
+  sqlite3_bind_text(s, 1, hash, -1, SQLITE_STATIC);
+  if(sqlite3_step(s) != SQLITE_DONE)
+    db_err(NULL,);
+  sqlite3_finalize(s);
+
+  db_commit();
+}
+
+
 
 
 

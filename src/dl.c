@@ -296,8 +296,8 @@ void dl_user_join(guint64 uid) {
 
 
 // Adds a user to a dl item, making sure to create the user if it's not in the
-// queue yet. For internal use only, does not call dl_dat_saveusers() and
-// dl_queue_start().
+// queue yet. For internal use only, does not save the changes to the database
+// and does not call dl_queue_start().
 static void dl_user_add(struct dl *dl, guint64 uid, char error, const char *error_msg) {
   g_return_if_fail(!dl->islist || dl->u->len == 0);
 
@@ -327,7 +327,7 @@ static void dl_user_add(struct dl *dl, guint64 uid, char error, const char *erro
 
 // Remove a user (dl->u[i]) from a dl item, making sure to also remove it from
 // du->queue and possibly free the dl_user item if it's no longer useful. As
-// above, for internal use only. Does not call dl_dat_saveusers().
+// above, for internal use only. Does not save the changes to the database.
 static void dl_user_rm(struct dl *dl, int i) {
   GSequenceIter *dudi = g_ptr_array_index(dl->u, i);
   struct dl_user_dl *dud = g_sequence_get(dudi);
@@ -711,7 +711,7 @@ void dl_queue_rm(struct dl *dl) {
     dl_user_rm(dl, 0);
   // remove from the database
   if(!dl->islist)
-    ; // TODO!
+    db_dl_rm(dl->hash);
   // free and remove dl struct
   if(ui_dl)
     ui_dl_listchange(dl, UIDL_DEL);
@@ -739,7 +739,8 @@ static void dl_queue_checkrm(struct dl *dl, gboolean justfin) {
   if(justfin) {
     // If the download just finished, we might as well remove it from dl.dat
     // immediately. Makes sure we won't load it on the next startup.
-    // TODO!
+    if(!dl->islist)
+      db_dl_rm(dl->hash);
 
     // Since the dl item is now considered as "disabled" by the download
     // management code, make sure it is also last in every user's download

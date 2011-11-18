@@ -321,6 +321,73 @@ void db_fl_purgedata() {
 
 
 
+// dl and dl_users
+
+
+// Fetches everything (except the raw TTHL data) from the dl table in no
+// particular order, calls the callback for each row.
+void db_dl_getdls(
+  void (*callback)(const char *tth, guint64 size, const char *dest, char prio, char error, const char *error_msg, int tthllen)
+) {
+  db_lock();
+  sqlite3_stmt *s;
+  char hash[24];
+  int r;
+
+  if(sqlite3_prepare_v2(db, "SELECT tth, size, dest, priority, error, error_msg, length(tthl) FROM dl", -1, &s, NULL))
+    db_err(NULL,);
+
+  db_step(s, r,);
+  while(r == SQLITE_ROW) {
+    base32_decode((const char *)sqlite3_column_text(s, 0), hash);
+    callback(
+      hash,
+      (guint64)sqlite3_column_int64(s, 1),
+      (const char *)sqlite3_column_text(s, 2),
+      sqlite3_column_int(s, 3),
+      sqlite3_column_int(s, 4),
+      (const char *)sqlite3_column_text(s, 5),
+      sqlite3_column_int(s, 6)
+    );
+    db_step(s, r,);
+  }
+
+  sqlite3_finalize(s);
+  db_unlock();
+}
+
+
+// Fetches everything from the dl_users table in no particular order, calls the
+// callback for each row.
+void db_dl_getdlus(void (*callback)(const char *tth, guint64 uid, char error, const char *error_msg)) {
+  db_lock();
+  sqlite3_stmt *s;
+  char hash[24];
+  int r;
+
+  if(sqlite3_prepare_v2(db, "SELECT tth, uid, error, error_msg FROM dl_users", -1, &s, NULL))
+    db_err(NULL,);
+
+  db_step(s, r,);
+  while(r == SQLITE_ROW) {
+    base32_decode((const char *)sqlite3_column_text(s, 0), hash);
+    callback(
+      hash,
+      (guint64)sqlite3_column_int64(s, 1),
+      sqlite3_column_int(s, 2),
+      (const char *)sqlite3_column_text(s, 3)
+    );
+    db_step(s, r,);
+  }
+
+  sqlite3_finalize(s);
+  db_unlock();
+}
+
+
+
+
+
 // Executes a VACUUM
 void db_vacuum() {
   db_lock();

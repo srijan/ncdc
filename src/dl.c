@@ -583,7 +583,7 @@ void dl_queue_addlist(struct hub_user *u, const char *sel, struct ui_tab *parent
   // insert & start
   g_debug("dl:%016"G_GINT64_MODIFIER"x: queueing files.xml.bz2", u->uid);
   dl_queue_insert(dl, FALSE);
-  dl_user_add(dl, u->uid, 0, 0);
+  dl_user_add(dl, u->uid, 0, NULL);
   // TODO: add user to database?
 }
 
@@ -605,7 +605,7 @@ static gboolean dl_queue_addfile(guint64 uid, char *hash, guint64 size, char *fn
   // and add to the queue
   g_debug("dl:%016"G_GINT64_MODIFIER"x: queueing %s", uid, fn);
   dl_queue_insert(dl, FALSE);
-  dl_user_add(dl, uid, 0, 0);
+  dl_user_add(dl, uid, 0, NULL);
   // TODO: add user to database?
   return TRUE;
 }
@@ -663,7 +663,7 @@ int dl_queue_matchfile(guint64 uid, char *tth) {
   for(i=0; i<dl->u->len; i++)
     if(((struct dl_user_dl *)g_sequence_get(g_ptr_array_index(dl->u, i)))->u->uid == uid)
       return 0;
-  dl_user_add(dl, uid, 0, 0);
+  dl_user_add(dl, uid, 0, NULL);
   // TODO: add user to database?
   dl_queue_start();
   return 1;
@@ -1098,7 +1098,21 @@ void dl_settthl(guint64 uid, char *tth, char *tthl, int len) {
 // Loading/initializing the download queue on startup
 
 
-/* TODO: Load download queue from the database.
+// Checks the incoming file for what we already have and modifies dl->have and
+// dl->hash_tth accordingly.
+void dl_load_partial(struct dl *dl) {
+  // get size of the incomplete file, but only if we have tthl info
+  char *fn = NULL;
+  if(dl->hastthl) {
+    char tth[40] = {};
+    base32_encode(dl->hash, tth);
+    char *tmp = conf_incoming_dir();
+    fn = g_build_filename(tmp, tth, NULL);
+    g_free(tmp);
+    struct stat st;
+    if(stat(fn, &st) >= 0)
+      dl->have = st.st_size;
+  }
 
   // If we have already downloaded some data, hash the last block and update
   // dl->hash_tth.
@@ -1113,8 +1127,8 @@ void dl_settthl(guint64 uid, char *tth, char *tthl, int len) {
         close(fd);
     }
     while(left > 0) {
-      char buf[1024];
-      int r = read(fd, buf, MIN(left, 1024));
+      char buf[10240];
+      int r = read(fd, buf, MIN(left, 10240));
       if(r < 0) {
         g_warning("Error reading from %s: %s. Throwing away unreadable data.", fn, g_strerror(errno));
         left = 0;
@@ -1127,12 +1141,55 @@ void dl_settthl(guint64 uid, char *tth, char *tthl, int len) {
     if(fd >= 0)
       close(fd);
   }
-*/
+
+  g_free(fn);
+}
+
+
+// Creates and inserts a struct dl item from the database in the queue
+void dl_load_dl(const char *tth, guint64 size, const char *dest, char prio, char error, const char *error_msg, int tthllen) {
+  g_return_if_fail(dest);
+
+  struct dl *dl = g_slice_new0(struct dl);
+  memcpy(dl->hash, tth, 24);
+  dl->size = size;
+  dl->prio = prio;
+  dl->error = error;
+  dl->error_msg = error_msg ? g_strdup(error_msg) : NULL;
+  dl->dest = g_strdup(dest);
+
+  if(dl->size < DL_MINTTHLSIZE) {
+    dl->hastthl = TRUE;
+    dl->hash_block = DL_MINTTHLSIZE;
+  } else if(tthllen) {
+    dl->hastthl = TRUE;
+    dl->hash_block = tth_blocksize(dl->size, tthllen/24);
+  }
+
+  dl_queue_insert(dl, TRUE);
+}
+
+
+// Creates and adds a struct dl_user/dl_user_dl from the database in the queue
+void dl_load_dlu(const char *tth, guint64 uid, char error, const char *error_msg) {
+  struct dl *dl = g_hash_table_lookup(dl_queue, tth);
+  g_return_if_fail(dl);
+  dl_user_add(dl, uid, error, error_msg);
+}
 
 
 void dl_init_global() {
   queue_users = g_hash_table_new(g_int64_hash, g_int64_equal);
   dl_queue = g_hash_table_new(g_int_hash, tiger_hash_equal);
+  // load stuff from the database
+  db_dl_getdls(dl_load_dl);
+  db_dl_getdlus(dl_load_dlu);
+  // load/check the data we've already downloaded
+  struct dl *dl;
+  GHashTableIter iter;
+  g_hash_table_iter_init(&iter, dl_queue);
+  while(g_hash_table_iter_next(&iter, NULL, (gpointer *)&dl))
+    dl_load_partial(dl);
   // Delete old filelists
   dl_fl_clean(NULL);
 }

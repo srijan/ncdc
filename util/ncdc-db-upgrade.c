@@ -357,7 +357,7 @@ static void u20_initsqlite() {
       "CREATE TABLE hashfiles ("
       "  id INTEGER PRIMARY KEY,"
       "  filename TEXT NOT NULL UNIQUE,"
-      "  tth TEXT NOT NULL REFERENCES hashdata(root),"
+      "  tth TEXT NOT NULL,"
       "  lastmod INTEGER NOT NULL"
       ");"
 
@@ -372,7 +372,7 @@ static void u20_initsqlite() {
       ");"
 
       "CREATE TABLE dl_users ("
-      "  tth TEXT NOT NULL REFERENCES dl (tth),"
+      "  tth TEXT NOT NULL,"
       "  uid INTEGER NOT NULL,"
       "  error INTEGER NOT NULL DEFAULT 0,"
       "  error_msg TEXT,"

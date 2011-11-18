@@ -1321,7 +1321,7 @@ static void ui_fl_loaddone(struct fl_list *fl, GError *err, void *dat) {
       ui_fl_dosel(tab, fl, tab->fl_sel);
     g_free(tab->fl_sel);
     tab->fl_sel = NULL;
-  } else
+  } else if(fl)
     ui_fl_setdir(tab, fl, NULL);
 }
 

@@ -584,7 +584,6 @@ void dl_queue_addlist(struct hub_user *u, const char *sel, struct ui_tab *parent
   g_debug("dl:%016"G_GINT64_MODIFIER"x: queueing files.xml.bz2", u->uid);
   dl_queue_insert(dl, FALSE);
   dl_user_add(dl, u->uid, 0, NULL);
-  // TODO: add user to database?
 }
 
 
@@ -606,7 +605,7 @@ static gboolean dl_queue_addfile(guint64 uid, char *hash, guint64 size, char *fn
   g_debug("dl:%016"G_GINT64_MODIFIER"x: queueing %s", uid, fn);
   dl_queue_insert(dl, FALSE);
   dl_user_add(dl, uid, 0, NULL);
-  // TODO: add user to database?
+  db_dl_adduser(dl->hash, uid, 0, NULL);
   return TRUE;
 }
 
@@ -664,7 +663,7 @@ int dl_queue_matchfile(guint64 uid, char *tth) {
     if(((struct dl_user_dl *)g_sequence_get(g_ptr_array_index(dl->u, i)))->u->uid == uid)
       return 0;
   dl_user_add(dl, uid, 0, NULL);
-  // TODO: add user to database?
+  db_dl_adduser(dl->hash, uid, 0, NULL);
   dl_queue_start();
   return 1;
 }

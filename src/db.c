@@ -157,9 +157,13 @@ void db_close() {
 // queued.
 
 GAsyncQueue *db_queue = NULL;
-GThreadPool *db_queue_pool = NULL;
-int db_queue_needflush = 0;
+GThread *db_thread = NULL;
 
+
+// Query flags
+#define DBF_NEXT    1 // Current query must be in the same transaction as next query in the queue.
+#define DBF_SINGLE  2 // Query must not be executed in a transaction (e.g. SELECT, VACUUM)
+#define DBF_END   128 // Signal the database thread to close
 
 // Column types
 #define DBQ_END    0
@@ -170,100 +174,248 @@ int db_queue_needflush = 0;
 #define DBQ_BLOB   5 // first argument: GINT_TO_POINER(length), second: g_malloc()'d blob
 
 
-// Processes the queue in a background thread.
-static void db_queue_process(gpointer dat, gpointer udat) {
-  db_begin();
-  sqlite3_stmt *s;
-  void **q, **a;
-  int i, t;
+// TODO: Improve error handling. In the current implementation, if an error
+// occurs, the transaction is aborted and none of the queries scheduled for the
+// transaction is executed. Which isn't very nice.
 
-  while((q = (void **)g_async_queue_try_pop(db_queue)) != NULL) {
-    if(sqlite3_prepare_v2(db, *q, -1, &s, NULL))
-      db_err(NULL,);
-    a = q+1;
-    i = 1;
-    while((t = GPOINTER_TO_INT(*(a++))) != DBQ_END) {
-      switch(t) {
-      case DBQ_NULL:
-        sqlite3_bind_null(s, i);
-        break;
-      case DBQ_INT:
-        sqlite3_bind_int(s, i, GPOINTER_TO_INT(*(a++)));
-        break;
-      case DBQ_INT64:
-        sqlite3_bind_int64(s, i, *((gint64 *)*a));
-        g_slice_free(gint64, *(a++));
-        break;
-      case DBQ_TEXT:
-        if(*a)
-          sqlite3_bind_text(s, i, (char *)*a, -1, g_free);
-        else
-          sqlite3_bind_null(s, i);
-        a++;
-        break;
-      case DBQ_BLOB:
-        if(*(a+1))
-          sqlite3_bind_blob(s, i, (char *)*(a+1), GPOINTER_TO_INT(*a), g_free);
-        else
-          sqlite3_bind_null(s, i);
-        a += 2;
-        break;
-      }
-      i++;
+
+// Free a queue item.
+static void db_queue_item_free(void *dat) {
+  void **q = dat;
+  int t;
+  void **a = q+2;
+
+  while((t = GPOINTER_TO_INT(*(a++))) != DBQ_END) {
+    switch(t) {
+    case DBQ_INT:   a++; break;
+    case DBQ_INT64: g_slice_free(gint64, *(a++)); break;
+    case DBQ_TEXT:  g_free(*(a++)); break;
+    case DBQ_BLOB:  g_free(*(a+1)); a += 2; break;
     }
-    if(sqlite3_step(s) != SQLITE_DONE)
-      db_err(NULL,);
-    sqlite3_finalize(s);
-
-    g_free(q);
   }
-
-  db_commit();
+  g_free(q);
 }
 
 
+// Executes a single query.
+// TODO: support for fetching and passing query results
+static gboolean db_queue_process_one(void **q, gboolean transaction) {
+  char *query = (char *)q[1];
+
+  // Would be nice to have the parameters logged
+  g_debug("db: Executing \"%s\" (%s transaction)", query, transaction ? "inside" : "outside");
+
+  // TODO: use cached prepared statements
+  sqlite3_stmt *s;
+  if(sqlite3_prepare_v2(db, query, -1, &s, NULL)) {
+    g_critical("SQLite3 error preparing `%s': %s", query, sqlite3_errmsg(db));
+    return FALSE;
+  }
+  void **a = q+2;
+  int i = 1;
+
+  int t;
+  while((t = GPOINTER_TO_INT(*(a++))) != DBQ_END) {
+    switch(t) {
+    case DBQ_NULL:
+      sqlite3_bind_null(s, i);
+      break;
+    case DBQ_INT:
+      sqlite3_bind_int(s, i, GPOINTER_TO_INT(*(a++)));
+      break;
+    case DBQ_INT64:
+      sqlite3_bind_int64(s, i, *((gint64 *)*(a++)));
+      break;
+    case DBQ_TEXT:
+      if(*a)
+        sqlite3_bind_text(s, i, (char *)*a, -1, SQLITE_STATIC);
+      else
+        sqlite3_bind_null(s, i);
+      a++;
+      break;
+    case DBQ_BLOB:
+      if(*(a+1))
+        sqlite3_bind_blob(s, i, (char *)*(a+1), GPOINTER_TO_INT(*a), SQLITE_STATIC);
+      else
+        sqlite3_bind_null(s, i);
+      a += 2;
+      break;
+    }
+    i++;
+  }
+
+  // TODO: handle BUSY if !transaction
+  if(sqlite3_step(s) != SQLITE_DONE) {
+    g_critical("SQLite3 error on step() of `%s': %s", query, sqlite3_errmsg(db));
+    return FALSE;
+  }
+
+  sqlite3_finalize(s);
+  return TRUE;
+}
+
+
+static void db_queue_process_flush(GPtrArray *q) {
+  // start transaction
+  char *err = NULL;
+  if(sqlite3_exec(db, "BEGIN", NULL, NULL, &err)) {
+    g_critical("SQLite3 error starting transaction: %s", err?err:sqlite3_errmsg(db));
+    g_ptr_array_set_size(q, 0);
+    if(err)
+      sqlite3_free(err);
+    return;
+  }
+
+  // execute queries
+  int i;
+  for(i=0; i<q->len; i++)
+    if(!db_queue_process_one(g_ptr_array_index(q, i), TRUE))
+      break;
+  gboolean error = i < q->len ? TRUE : FALSE;
+  g_ptr_array_set_size(q, 0);
+
+  // rollback on error
+  if(error) {
+    err = NULL;
+    if(sqlite3_exec(db, "ROLLBACK", NULL, NULL, &err) && err)
+      sqlite3_free(err);
+    return;
+  }
+
+  // otherwise, commit transaction
+  sqlite3_stmt *s;
+  int r;
+  if(sqlite3_prepare_v2(db, "COMMIT", -1, &s, NULL)) {
+    g_critical("SQLite3 error committing transaction: %s", sqlite3_errmsg(db));
+    return;
+  }
+  while((r = sqlite3_step(s)) == SQLITE_BUSY)
+    ;
+  if(r != SQLITE_DONE) {
+    sqlite3_finalize(s);
+    g_critical("SQLite3 error committing transaction: %s", sqlite3_errmsg(db));
+  }
+  sqlite3_finalize(s);
+}
+
+
+static void db_queue_process() {
+  GTimeVal queue_end = {}; // tv_sec = 0 if nothing is queued
+  GTimeVal cur_time;
+  GPtrArray *queue = g_ptr_array_new_with_free_func(db_queue_item_free);
+  gboolean next = FALSE;
+
+  while(1) {
+    void **q = (void **)(
+                  next ? g_async_queue_try_pop(db_queue) :
+      queue_end.tv_sec ? g_async_queue_timed_pop(db_queue, &queue_end) :
+                         g_async_queue_pop(db_queue));
+
+    // Shouldn't happen if items are correctly added to the queue.
+    if(next && !q) {
+      g_warn_if_reached();
+      next = FALSE;
+      continue;
+    }
+    next = FALSE;
+
+    // We had something queued and the timeout has elapsed
+    if(queue_end.tv_sec && !q) {
+      g_debug("db: Flushing after timeout");
+      db_queue_process_flush(queue);
+      queue_end.tv_sec = 0;
+      continue;
+    }
+
+    // "handle" the item
+    int flags = *((int *)*q);
+
+    // signal that the database should be closed
+    if(flags == DBF_END) {
+      g_debug("db: Flushing and closing");
+      db_queue_process_flush(queue);
+      g_free(q);
+      goto cleanup;
+    }
+
+    // query must be done outside of a transaction (e.g. SELECT, VACUUM)
+    if(flags & DBF_SINGLE) {
+      if(queue->len) {
+        g_debug("db: Flushing to process SINGLE query.");
+        db_queue_process_flush(queue);
+        queue_end.tv_sec = 0;
+      }
+      db_queue_process_one(q, FALSE);
+      continue;
+    }
+
+    // Add item to the queue
+    g_ptr_array_add(queue, q);
+
+    // If the item has to be performed in the same transaction as the next one, fetch next
+    if(flags & DBF_NEXT) {
+      next = TRUE;
+      continue;
+    }
+
+    // - If the queue has somehow grown beyond 50 items, flush it.
+    // - If the time for receiving the queue has elapsed, flush it.
+    g_get_current_time(&cur_time);
+    if(queue->len > 50 || (cur_time.tv_sec > queue_end.tv_sec
+        || (cur_time.tv_sec == queue_end.tv_sec && cur_time.tv_usec > queue_end.tv_usec))){
+      g_debug("db: Flushing after timeout or long queue");
+      db_queue_process_flush(queue);
+      queue_end.tv_sec = 0;
+    }
+
+    // If we're here and no queue has started yet, start one
+    if(!queue_end.tv_sec) {
+      queue_end = cur_time;
+      g_time_val_add(&queue_end, 1000000); // queue queries for 1 second
+    }
+  }
+
+cleanup:
+  g_ptr_array_unref(queue);
+}
+
+
+gpointer db_thread_func(gpointer dat) {
+  // TODO: open/create the database here
+  db_queue_process();
+  // TODO: and close the database here as well
+  return NULL;
+}
+
+
+// TODO: merge db_init() into this, or this into db_init()
 static void db_queue_init() {
   db_queue = g_async_queue_new();
-  // Only allow a single processing thread - it requires a lock on the database
-  // anyway.
-  db_queue_pool = g_thread_pool_new(db_queue_process, NULL, 1, FALSE, NULL);
-}
-
-
-// Start a processing thread to flush the queue in the background. Must be
-// called from the main thread. (Idle function / timer preferred)
-static gboolean db_queue_doflush(gpointer dat) {
-  // g_thread_pool_push() may not be called with data = NULL, for some odd reason.
-  if(g_async_queue_length(db_queue) && !g_thread_pool_unprocessed(db_queue_pool)) {
-    g_thread_pool_push(db_queue_pool, (void *)1, NULL);
-    g_atomic_int_set(&db_queue_needflush, 0);
-  }
-  return FALSE;
+  db_thread = g_thread_create(db_thread_func, NULL, TRUE, NULL);
 }
 
 
 // Flushes the queue, blocks until all queries are processed and then performs
 // a little cleanup.
 static void db_queue_close() {
-  db_queue_doflush(NULL);
-  g_thread_pool_free(db_queue_pool, FALSE, TRUE);
+  // Send a END message to the database thread
+  void **q = g_new0(void *, 1);
+  q[0] = GINT_TO_POINTER(DBF_END);
+  g_async_queue_push(db_queue, q);
+  // And wait for it to quit
+  g_thread_join(db_thread);
   g_async_queue_unref(db_queue);
   db_queue = NULL;
 }
 
 
-// Queue a flush after a short delay.
-#define db_queue_flush() do {\
-    if(g_atomic_int_compare_and_exchange(&db_queue_needflush, 0, 1))\
-      g_timeout_add(1000, db_queue_doflush, NULL);\
-  } while(0)
-
-
 // The query is assumed to be a static string that is not freed or modified.
 // Any BLOB or TEXT arguments will be passed directly to the processing thread
 // and will be g_free()'d there.
+// TODO: allow setting of flags
 static void *db_queue_create(const char *q, ...) {
   GPtrArray *a = g_ptr_array_new();
+  g_ptr_array_add(a, GINT_TO_POINTER(0)); // flags
   g_ptr_array_add(a, (void *)q);
 
   int t;
@@ -301,19 +453,9 @@ static void *db_queue_create(const char *q, ...) {
 
 
 #define db_queue_lock() g_async_queue_lock(db_queue)
-
-#define db_queue_unlock() do {\
-    g_async_queue_unlock(db_queue);\
-    db_queue_flush();\
-  } while(0)
-
-#define db_queue_push(...) do {\
-    g_async_queue_push(db_queue, db_queue_create(__VA_ARGS__));\
-    db_queue_flush();\
-  } while(0)
-
-#define db_queue_push_unlocked(...) \
-  g_async_queue_push_unlocked(db_queue, db_queue_create(__VA_ARGS__))
+#define db_queue_unlock() g_async_queue_unlock(db_queue)
+#define db_queue_push(...) g_async_queue_push(db_queue, db_queue_create(__VA_ARGS__))
+#define db_queue_push_unlocked(...) g_async_queue_push_unlocked(db_queue, db_queue_create(__VA_ARGS__))
 
 
 

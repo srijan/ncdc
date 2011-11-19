@@ -579,7 +579,7 @@ void db_dl_rm(const char *tth) {
 
 
 // (queued) Set the priority, error and error_msg columns of a dl row
-void db_dl_setstatus(const char *tth, char priority, char error, char *error_msg) {
+void db_dl_setstatus(const char *tth, char priority, char error, const char *error_msg) {
   char hash[40] = {};
   base32_encode(tth, hash);
   db_queue_push("UPDATE dl SET priority = ?, error = ?, error_msg = ? WHERE tth = ?",
@@ -589,6 +589,34 @@ void db_dl_setstatus(const char *tth, char priority, char error, char *error_msg
     DBQ_END
   );
 }
+
+
+// (queued) Set the error information for a dl_user row (if tth != NULL), or
+// all rows for a single user if tth = NULL.
+// TODO: tth = NULL is currently not very fast - no index on dl_user(uid).
+void db_dl_setuerr(guint64 uid, const char *tth, char error, const char *error_msg) {
+  // for a single dl item
+  if(tth) {
+    char hash[40] = {};
+    base32_encode(tth, hash);
+    db_queue_push("UPDATE dl_users SET error = ?, error_msg = ? WHERE uid = ? AND tth = ?",
+      DBQ_INT, (int)error,
+      DBQ_TEXT, error_msg ? g_strdup(error_msg) : NULL,
+      DBQ_INT64, (gint64)uid,
+      DBQ_TEXT, g_strdup(hash),
+      DBQ_END
+    );
+  // for all dl items
+  } else {
+    db_queue_push("UPDATE dl_users SET error = ?, error_msg = ? WHERE uid = ?",
+      DBQ_INT, (int)error,
+      DBQ_TEXT, error_msg ? g_strdup(error_msg) : NULL,
+      DBQ_INT64, (gint64)uid,
+      DBQ_END
+    );
+  }
+}
+
 
 
 

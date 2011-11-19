@@ -794,8 +794,6 @@ void dl_queue_setuerr(guint64 uid, char *tth, char e, const char *emsg) {
   if(!dl || (tth && !du))
     return;
 
-  // TODO: update database
-
   // from a single dl item
   if(dl) {
     int i;
@@ -824,6 +822,9 @@ void dl_queue_setuerr(guint64 uid, char *tth, char e, const char *emsg) {
     // while changing the ordering may cause problems.
     g_sequence_sort(du->queue, dl_user_dl_sort, NULL);
   }
+
+  // update DB
+  db_dl_setuerr(uid, tth, e, emsg);
 
   dl_queue_start();
 }

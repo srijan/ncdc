@@ -47,12 +47,11 @@
 // the UI.
 
 
-static sqlite3 *db = NULL;
-GAsyncQueue *db_queue = NULL;
-GThread *db_thread = NULL;
+static GAsyncQueue *db_queue = NULL;
+static GThread *db_thread = NULL;
 
 
-static void db_queue_init();
+static gpointer db_thread_func(gpointer dat);
 
 
 void db_init() {
@@ -66,6 +65,7 @@ void db_init() {
   if(newdb)
     g_error("No db.sqlite3 file present yet. Please run ncdc-db-upgrade.");
 
+  sqlite3 *db;
   if(sqlite3_open(dbfn, &db))
     g_error("Couldn't open `%s': %s", dbfn, sqlite3_errmsg(db));
   g_free(dbfn);
@@ -76,7 +76,9 @@ void db_init() {
 
   // TODO: create SQL schema, if it doesn't exist yet
 
-  db_queue_init();
+  // start database thread
+  db_queue = g_async_queue_new();
+  db_thread = g_thread_create(db_thread_func, db, TRUE, NULL);
 }
 
 
@@ -121,7 +123,7 @@ static void db_queue_item_free(void *dat) {
 
 // Executes a single query.
 // TODO: support for fetching and passing query results
-static gboolean db_queue_process_one(void **q, gboolean transaction) {
+static gboolean db_queue_process_one(sqlite3 *db, void **q, gboolean transaction) {
   char *query = (char *)q[1];
 
   // Would be nice to have the parameters logged
@@ -166,8 +168,13 @@ static gboolean db_queue_process_one(void **q, gboolean transaction) {
     i++;
   }
 
-  // TODO: handle BUSY if !transaction
-  if(sqlite3_step(s) != SQLITE_DONE) {
+  int r;
+  if(transaction)
+    r = sqlite3_step(s);
+  else
+    while((r = sqlite3_step(s)) == SQLITE_BUSY)
+      ;
+  if(r != SQLITE_DONE) {
     g_critical("SQLite3 error on step() of `%s': %s", query, sqlite3_errmsg(db));
     return FALSE;
   }
@@ -177,7 +184,7 @@ static gboolean db_queue_process_one(void **q, gboolean transaction) {
 }
 
 
-static void db_queue_process_flush(GPtrArray *q) {
+static void db_queue_process_flush(sqlite3 *db, GPtrArray *q) {
   // start transaction
   char *err = NULL;
   if(sqlite3_exec(db, "BEGIN", NULL, NULL, &err)) {
@@ -191,7 +198,7 @@ static void db_queue_process_flush(GPtrArray *q) {
   // execute queries
   int i;
   for(i=0; i<q->len; i++)
-    if(!db_queue_process_one(g_ptr_array_index(q, i), TRUE))
+    if(!db_queue_process_one(db, g_ptr_array_index(q, i), TRUE))
       break;
   gboolean error = i < q->len ? TRUE : FALSE;
   g_ptr_array_set_size(q, 0);
@@ -221,7 +228,7 @@ static void db_queue_process_flush(GPtrArray *q) {
 }
 
 
-static void db_queue_process() {
+static void db_queue_process(sqlite3 *db) {
   GTimeVal queue_end = {}; // tv_sec = 0 if nothing is queued
   GTimeVal cur_time;
   GPtrArray *queue = g_ptr_array_new_with_free_func(db_queue_item_free);
@@ -244,7 +251,7 @@ static void db_queue_process() {
     // We had something queued and the timeout has elapsed
     if(queue_end.tv_sec && !q) {
       g_debug("db: Flushing after timeout");
-      db_queue_process_flush(queue);
+      db_queue_process_flush(db, queue);
       queue_end.tv_sec = 0;
       continue;
     }
@@ -255,7 +262,7 @@ static void db_queue_process() {
     // signal that the database should be closed
     if(flags == DBF_END) {
       g_debug("db: Flushing and closing");
-      db_queue_process_flush(queue);
+      db_queue_process_flush(db, queue);
       g_free(q);
       break;
     }
@@ -264,10 +271,10 @@ static void db_queue_process() {
     if(flags & DBF_SINGLE) {
       if(queue->len) {
         g_debug("db: Flushing to process SINGLE query.");
-        db_queue_process_flush(queue);
+        db_queue_process_flush(db, queue);
         queue_end.tv_sec = 0;
       }
-      db_queue_process_one(q, FALSE);
+      db_queue_process_one(db, q, FALSE);
       continue;
     }
 
@@ -286,7 +293,7 @@ static void db_queue_process() {
     if(queue->len > 50 || (cur_time.tv_sec > queue_end.tv_sec
         || (cur_time.tv_sec == queue_end.tv_sec && cur_time.tv_usec > queue_end.tv_usec))){
       g_debug("db: Flushing after timeout or long queue");
-      db_queue_process_flush(queue);
+      db_queue_process_flush(db, queue);
       queue_end.tv_sec = 0;
     }
 
@@ -301,18 +308,11 @@ static void db_queue_process() {
 }
 
 
-gpointer db_thread_func(gpointer dat) {
-  // TODO: open/create the database here
-  db_queue_process();
+static gpointer db_thread_func(gpointer dat) {
+  sqlite3 *db = dat;
+  db_queue_process(db);
   sqlite3_close(db);
   return NULL;
-}
-
-
-// TODO: merge db_init() into this, or this into db_init()
-static void db_queue_init() {
-  db_queue = g_async_queue_new();
-  db_thread = g_thread_create(db_thread_func, NULL, TRUE, NULL);
 }
 
 
@@ -388,6 +388,7 @@ static void *db_queue_create(const char *q, ...) {
 #define db_begin(x) return x
 #define db_step(s, r, x) return x
 #define db_commit(x) return x
+static sqlite3 *db;
 
 
 

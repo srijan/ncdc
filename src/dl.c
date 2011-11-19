@@ -838,8 +838,6 @@ void dl_queue_rmuser(guint64 uid, char *tth) {
   if(!du || (tth && !dl))
     return;
 
-  // TODO: remove users from database
-
   // from a single dl item
   if(dl) {
     int i;
@@ -876,6 +874,9 @@ void dl_queue_rmuser(guint64 uid, char *tth) {
       i = n;
     }
   }
+
+  // Remove from the database
+  db_dl_rmuser(uid, tth);
 }
 
 

@@ -618,6 +618,29 @@ void db_dl_setuerr(guint64 uid, const char *tth, char error, const char *error_m
 }
 
 
+// (queued) Remove a dl_user row from the database (if tth != NULL), or all
+// rows from a single user if tth = NULL. (Same note as for db_dl_setuerr()
+// applies here).
+void db_dl_rmuser(guint64 uid, const char *tth) {
+  // for a single dl item
+  if(tth) {
+    char hash[40] = {};
+    base32_encode(tth, hash);
+    db_queue_push("DELETE FROM dl_users WHERE uid = ? AND tth = ?",
+      DBQ_INT64, (gint64)uid,
+      DBQ_TEXT, g_strdup(hash),
+      DBQ_END
+    );
+  // for all dl items
+  } else {
+    db_queue_push("DELETE FROM dl_users WHERE uid = ?",
+      DBQ_INT64, (gint64)uid,
+      DBQ_END
+    );
+  }
+}
+
+
 
 
 

@@ -653,6 +653,22 @@ void db_dl_settthl(const char *tth, const char *tthl, int len) {
 }
 
 
+// (queued) Adds a new row to the dl table.
+void db_dl_insert(const char *tth, guint64 size, const char *dest, char priority, char error, const char *error_msg) {
+  char hash[40] = {};
+  base32_encode(tth, hash);
+  db_queue_push("INSERT INTO dl (tth, size, dest, priority, error, error_msg) VALUES (?, ?, ?, ?, ?, ?)",
+    DBQ_TEXT, g_strdup(hash),
+    DBQ_INT64, (gint64)size,
+    DBQ_TEXT, g_strdup(dest),
+    DBQ_INT, (int)priority,
+    DBQ_INT, (int)error,
+    DBQ_TEXT, error_msg ? g_strdup(error_msg) : NULL,
+    DBQ_END
+  );
+}
+
+
 
 
 // Executes a VACUUM

@@ -543,7 +543,7 @@ static void dl_queue_insert(struct dl *dl, gboolean init) {
 
   // insert in the database
   if(!dl->islist && !init)
-    ; // TODO!
+    db_dl_insert(dl->hash, dl->size, dl->dest, dl->prio, dl->error, dl->error_msg);
 
   // start download, if possible
   if(!init)

@@ -26,6 +26,7 @@
 
 #include "ncdc.h"
 #include <sqlite3.h>
+#include <stdarg.h>
 
 // TODO: The conf_* stuff in util.c should eventually be merged into this file as well.
 
@@ -38,6 +39,9 @@
 // multithreaded environment.
 
 static sqlite3 *db = NULL;
+
+static void db_queue_init();
+static void db_queue_close();
 
 
 void db_init() {
@@ -60,6 +64,7 @@ void db_init() {
   sqlite3_exec(db, "PRAGMA foreign_keys = FALSE", NULL, NULL, NULL);
 
   // TODO: create SQL schema, if it doesn't exist yet
+  db_queue_init();
 }
 
 
@@ -129,12 +134,181 @@ void db_init() {
 
 
 void db_close() {
+  db_queue_close();
   sqlite3 *d = db;
   db_lock();
   db = NULL;
   sqlite3_mutex_leave(sqlite3_db_mutex(d));
   sqlite3_close(d);
 }
+
+
+
+
+
+// Asynchronous queue for background processing of queries.
+// This facility allows for queueing multiple UPDATE/INSERT/DELETE statements
+// and batch-executing them in a single transaction in a background thread.
+// WARNING: This facility should *ONLY* be used when no SELECT queries are
+// performed afterward that rely on the previously queued queries being
+// processed. No guarantees are made about when the queries are executed, only
+// that they are. Under the assumption that ncdc does not crash and there is no
+// power failure. Queries are always processed in the same order as they are
+// queued.
+
+GAsyncQueue *db_queue = NULL;
+GThreadPool *db_queue_pool = NULL;
+int db_queue_needflush = 0;
+
+
+// Column types
+#define DBQ_END    0
+#define DBQ_NULL   1 // No arguments
+#define DBQ_INT    2 // GINT_TO_POINTER() argument
+#define DBQ_INT64  3 // pointer to a slice-allocated gint64 as argument
+#define DBQ_TEXT   4 // pointer to a g_malloc()'ed UTF-8 string
+#define DBQ_BLOB   5 // first argument: GINT_TO_POINER(length), second: g_malloc()'d blob
+
+
+// Processes the queue in a background thread.
+static void db_queue_process(gpointer dat, gpointer udat) {
+  db_begin();
+  sqlite3_stmt *s;
+  void **q, **a;
+  int i, t;
+
+  while((q = (void **)g_async_queue_try_pop(db_queue)) != NULL) {
+    if(sqlite3_prepare_v2(db, *q, -1, &s, NULL))
+      db_err(NULL,);
+    a = q+1;
+    i = 1;
+    while((t = GPOINTER_TO_INT(*(a++))) != DBQ_END) {
+      switch(t) {
+      case DBQ_NULL:
+        sqlite3_bind_null(s, i);
+        break;
+      case DBQ_INT:
+        sqlite3_bind_int(s, i, GPOINTER_TO_INT(*(a++)));
+        break;
+      case DBQ_INT64:
+        sqlite3_bind_int64(s, i, *((gint64 *)*a));
+        g_slice_free(gint64, *(a++));
+        break;
+      case DBQ_TEXT:
+        sqlite3_bind_text(s, i, (char *)*(a++), -1, g_free);
+        break;
+      case DBQ_BLOB:
+        sqlite3_bind_blob(s, i, (char *)*(a+1), GPOINTER_TO_INT(*a), g_free);
+        a += 2;
+        break;
+      }
+      i++;
+    }
+    if(sqlite3_step(s) != SQLITE_DONE)
+      db_err(NULL,);
+    sqlite3_finalize(s);
+
+    g_free(q);
+  }
+
+  db_commit();
+}
+
+
+static void db_queue_init() {
+  db_queue = g_async_queue_new();
+  // Only allow a single processing thread - it requires a lock on the database
+  // anyway.
+  db_queue_pool = g_thread_pool_new(db_queue_process, NULL, 1, FALSE, NULL);
+}
+
+
+// Start a processing thread to flush the queue in the background. Must be
+// called from the main thread. (Idle function / timer preferred)
+static gboolean db_queue_doflush(gpointer dat) {
+  // g_thread_pool_push() may not be called with data = NULL, for some odd reason.
+  if(g_async_queue_length(db_queue) && !g_thread_pool_unprocessed(db_queue_pool)) {
+    g_thread_pool_push(db_queue_pool, (void *)1, NULL);
+    g_atomic_int_set(&db_queue_needflush, 0);
+  }
+  return FALSE;
+}
+
+
+// Flushes the queue, blocks until all queries are processed and then performs
+// a little cleanup.
+static void db_queue_close() {
+  db_queue_doflush(NULL);
+  g_thread_pool_free(db_queue_pool, FALSE, TRUE);
+  g_async_queue_unref(db_queue);
+  db_queue = NULL;
+}
+
+
+// Queue a flush after a short delay.
+#define db_queue_flush() do {\
+    if(g_atomic_int_compare_and_exchange(&db_queue_needflush, 0, 1))\
+      g_timeout_add(1000, db_queue_doflush, NULL);\
+  } while(0)
+
+
+// The query is assumed to be a static string that is not freed or modified.
+// Any BLOB or TEXT arguments will be passed directly to the processing thread
+// and will be g_free()'d there.
+static void *db_queue_create(const char *q, ...) {
+  GPtrArray *a = g_ptr_array_new();
+  g_ptr_array_add(a, (void *)q);
+
+  int t;
+  gint64 *n;
+  va_list va;
+  va_start(va, q);
+  while((t = va_arg(va, int)) != DBQ_END) {
+    g_ptr_array_add(a, GINT_TO_POINTER(t));
+    switch(t) {
+    case DBQ_NULL: break;
+    case DBQ_INT:
+      g_ptr_array_add(a, GINT_TO_POINTER(va_arg(va, int)));
+      break;
+    case DBQ_INT64:
+      n = g_slice_new(gint64);
+      *n = va_arg(va, gint64);
+      g_ptr_array_add(a, n);
+      break;
+    case DBQ_TEXT:
+      g_ptr_array_add(a, va_arg(va, char *));
+      break;
+    case DBQ_BLOB:
+      g_ptr_array_add(a, GINT_TO_POINTER(va_arg(va, int)));
+      g_ptr_array_add(a, va_arg(va, char *));
+      break;
+    default:
+      g_return_val_if_reached(NULL);
+    }
+  }
+  va_end(va);
+  g_ptr_array_add(a, GINT_TO_POINTER(DBQ_END));
+
+  return g_ptr_array_free(a, FALSE);
+}
+
+
+#define db_queue_lock() g_async_queue_lock(db_queue)
+
+#define db_queue_unlock() do {\
+    g_async_queue_unlock(db_queue);\
+    db_queue_flush();\
+  } while(0)
+
+#define db_queue_push(...) do {\
+    g_async_queue_push(db_queue, db_queue_create(__VA_ARGS__));\
+    db_queue_flush();\
+  } while(0)
+
+#define db_queue_push_unlocked(...) \
+  g_async_queue_push_unlocked(db_queue, db_queue_create(__VA_ARGS__))
+
+
 
 
 
@@ -385,30 +559,15 @@ void db_dl_getdlus(void (*callback)(const char *tth, guint64 uid, char error, co
 }
 
 
-// Delete a row from dl and any rows from dl_users that reference the row.
+// (queued) Delete a row from dl and any rows from dl_users that reference the row.
 void db_dl_rm(const char *tth) {
-  db_begin();
   char hash[40] = {};
   base32_encode(tth, hash);
-  sqlite3_stmt *s;
 
-  // dl_users
-  if(sqlite3_prepare_v2(db, "DELETE FROM dl_users WHERE tth = ?", -1, &s, NULL))
-    db_err(NULL,);
-  sqlite3_bind_text(s, 1, hash, -1, SQLITE_STATIC);
-  if(sqlite3_step(s) != SQLITE_DONE)
-    db_err(NULL,);
-  sqlite3_finalize(s);
-
-  // dl
-  if(sqlite3_prepare_v2(db, "DELETE FROM dl WHERE tth = ?", -1, &s, NULL))
-    db_err(NULL,);
-  sqlite3_bind_text(s, 1, hash, -1, SQLITE_STATIC);
-  if(sqlite3_step(s) != SQLITE_DONE)
-    db_err(NULL,);
-  sqlite3_finalize(s);
-
-  db_commit();
+  db_queue_lock();
+  db_queue_push_unlocked("DELETE FROM dl_users WHERE tth = ?", DBQ_TEXT, g_strdup(hash), DBQ_END);
+  db_queue_push_unlocked("DELETE FROM dl WHERE tth = ?", DBQ_TEXT, g_strdup(hash), DBQ_END);
+  db_queue_unlock();
 }
 
 

@@ -30,18 +30,29 @@
 
 // TODO: The conf_* stuff in util.c should eventually be merged into this file as well.
 
-// All of the db_* functions can be used from multiple threads, the database is
-// protected by one master lock. The only exception to this is db_init().
-// Note that, even though sqlite may do locking internally in SERIALIZED mode,
-// ncdc still performs manual locks around all database calls, in order to get
-// reliable values from sqlite3_errmsg(). Prepared statements are not visible
-// outside of a single transaction, since I don't know how well those work in a
-// multithreaded environment.
+// All of the db_* functions can be used from multiple threads. The database is
+// only accessed from within the database thread (db_thread_func()). All access
+// to the database from other threads is performed via message passing.
+//
+// Some properties of this implementation:
+// - Multiple UPDATE/DELETE/INSERT statements in a short interval are grouped
+//   together in a single transaction.
+// - All queries are executed in the same order as they are queued.
+
+
+// TODO: Improve error handling. In the current implementation, if an error
+// occurs, the transaction is aborted and none of the queries scheduled for the
+// transaction is executed. The only way the user can know that his has
+// happened is by looking at stderr.log, it'd be better to provide a notify to
+// the UI.
+
 
 static sqlite3 *db = NULL;
+GAsyncQueue *db_queue = NULL;
+GThread *db_thread = NULL;
+
 
 static void db_queue_init();
-static void db_queue_close();
 
 
 void db_init() {
@@ -64,100 +75,16 @@ void db_init() {
   sqlite3_exec(db, "PRAGMA foreign_keys = FALSE", NULL, NULL, NULL);
 
   // TODO: create SQL schema, if it doesn't exist yet
+
   db_queue_init();
 }
 
 
-// Note: db may be NULL when db_lock() is called, this happens when ncdc is shutting down.
-#define db_lock(x) do {\
-    if(!db) {\
-      g_warning("%s:%d: Attempting to use the database after it has been closed.", __FILE__, __LINE__);\
-      return x;\
-    }\
-    sqlite3_mutex_enter(sqlite3_db_mutex(db));\
-  } while(0)
-
-#define db_unlock() sqlite3_mutex_leave(sqlite3_db_mutex(db))
-
-// Rolls a transaction back and unlocks the database. Does not check for errors.
-#define db_rollback(x) do {\
-    char *db_err = NULL;\
-    if(sqlite3_exec(db, "ROLLBACK", NULL, NULL, &db_err) && db_err)\
-      sqlite3_free(db_err);\
-    db_unlock();\
-  } while(0)
-
-// Convenience function. msg, if not NULL, is assumed to come from sqlite3
-// itself, and will be sqlite3_free()'d. A rollback is also automatically
-// issued to attempt to create a clean state again.
-#define db_err(msg, x) do {\
-    g_critical("%s:%d: SQLite3 error: %s", __FILE__, __LINE__, (msg)?(msg):sqlite3_errmsg(db));\
-    if(msg)\
-      sqlite3_free(msg);\
-    db_rollback();\
-    return x;\
-  } while(0)
-
-// Locks the database and starts a transaction. Must be followed by either db_commit(), db_err() or db_rollback().
-#define db_begin(x) do {\
-    db_lock(x);\
-    char *db_err = NULL;\
-    if(sqlite3_exec(db, "BEGIN", NULL, NULL, &db_err))\
-      db_err(db_err, x);\
-  } while(0)
-
-// Performs a step() and handles BUSY and error result codes. If this
-// completes, r is set to either SQLITE_ROW or SQLITE_DONE. Otherwise the
-// statement is finalized and x is returned.
-// Don't use this function within a transaction! A BUSY result code is an error
-// in that case, with the single exception of the COMMIT.
-#define db_step(s, r, x) do {\
-    while((r = sqlite3_step(s)) == SQLITE_BUSY) \
-      ;\
-    if(r != SQLITE_ROW && r != SQLITE_DONE) {\
-      sqlite3_finalize(s);\
-      db_err(NULL, x);\
-    }\
-  } while(0)
-
-// Commits a transaction and unlocks the database.
-#define db_commit(x) do {\
-    sqlite3_stmt *db_st;\
-    int db_r;\
-    if(sqlite3_prepare_v2(db, "COMMIT", -1, &db_st, NULL))\
-      db_err(NULL, x);\
-    db_step(db_st, db_r, x);\
-    g_warn_if_fail(db_r == SQLITE_DONE);\
-    sqlite3_finalize(db_st);\
-    db_unlock();\
-  } while(0)
-
-
-void db_close() {
-  db_queue_close();
-  sqlite3 *d = db;
-  db_lock();
-  db = NULL;
-  sqlite3_mutex_leave(sqlite3_db_mutex(d));
-  sqlite3_close(d);
-}
-
-
-
-
-
-// Asynchronous queue for background processing of queries.
-// This facility allows for queueing multiple UPDATE/INSERT/DELETE statements
-// and batch-executing them in a single transaction in a background thread.
-// WARNING: This facility should *ONLY* be used when no SELECT queries are
-// performed afterward that rely on the previously queued queries being
-// processed. No guarantees are made about when the queries are executed, only
-// that they are. Under the assumption that ncdc does not crash and there is no
-// power failure. Queries are always processed in the same order as they are
-// queued.
-
-GAsyncQueue *db_queue = NULL;
-GThread *db_thread = NULL;
+// A "queue item" is an array of pointers representing an SQL query.
+//   q[0] = GINT_TO_POINTER(flags)
+//   q[1] = (char *)sql_query. This must be a static string in global memory.
+//   q[2..n-1] = bind values (see DBQ_* macros)
+//   q[n] = DBQ_END
 
 
 // Query flags
@@ -172,11 +99,6 @@ GThread *db_thread = NULL;
 #define DBQ_INT64  3 // pointer to a slice-allocated gint64 as argument
 #define DBQ_TEXT   4 // pointer to a g_malloc()'ed UTF-8 string. NULL is allowed as input
 #define DBQ_BLOB   5 // first argument: GINT_TO_POINER(length), second: g_malloc()'d blob
-
-
-// TODO: Improve error handling. In the current implementation, if an error
-// occurs, the transaction is aborted and none of the queries scheduled for the
-// transaction is executed. Which isn't very nice.
 
 
 // Free a queue item.
@@ -335,7 +257,7 @@ static void db_queue_process() {
       g_debug("db: Flushing and closing");
       db_queue_process_flush(queue);
       g_free(q);
-      goto cleanup;
+      break;
     }
 
     // query must be done outside of a transaction (e.g. SELECT, VACUUM)
@@ -375,7 +297,6 @@ static void db_queue_process() {
     }
   }
 
-cleanup:
   g_ptr_array_unref(queue);
 }
 
@@ -383,7 +304,7 @@ cleanup:
 gpointer db_thread_func(gpointer dat) {
   // TODO: open/create the database here
   db_queue_process();
-  // TODO: and close the database here as well
+  sqlite3_close(db);
   return NULL;
 }
 
@@ -397,7 +318,7 @@ static void db_queue_init() {
 
 // Flushes the queue, blocks until all queries are processed and then performs
 // a little cleanup.
-static void db_queue_close() {
+void db_close() {
   // Send a END message to the database thread
   void **q = g_new0(void *, 1);
   q[0] = GINT_TO_POINTER(DBF_END);
@@ -458,6 +379,15 @@ static void *db_queue_create(const char *q, ...) {
 #define db_queue_push_unlocked(...) g_async_queue_push_unlocked(db_queue, db_queue_create(__VA_ARGS__))
 
 
+
+// OLD MACROS! Functions that use these should be rewritten to communicate with
+// the database thread instead.
+#define db_lock(x) return x
+#define db_unlock() {}
+#define db_err(msg, x) return x
+#define db_begin(x) return x
+#define db_step(s, r, x) return x
+#define db_commit(x) return x
 
 
 

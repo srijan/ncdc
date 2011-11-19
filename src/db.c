@@ -641,6 +641,17 @@ void db_dl_rmuser(guint64 uid, const char *tth) {
 }
 
 
+// (queued) Sets the tthl column for a dl row.
+void db_dl_settthl(const char *tth, const char *tthl, int len) {
+  char hash[40] = {};
+  base32_encode(tth, hash);
+  db_queue_push("UPDATE dl SET tthl = ? WHERE tth = ?",
+    DBQ_BLOB, len, g_memdup(tthl, len),
+    DBQ_TEXT, g_strdup(hash),
+    DBQ_END
+  );
+}
+
 
 
 

@@ -1088,10 +1088,9 @@ void dl_settthl(guint64 uid, char *tth, char *tthl, int len) {
     return;
   }
 
+  db_dl_settthl(tth, tthl, len);
   dl->hastthl = TRUE;
   dl->hash_block = tth_blocksize(dl->size, len/24);
-
-  // TODO: save to the database
 }
 
 

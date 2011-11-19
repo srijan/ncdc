@@ -1765,6 +1765,7 @@ void hub_disconnect(struct hub *hub, gboolean recon) {
     hub->joincomplete_timer = 0;
   }
   net_disconnect(hub->net);
+  ui_hub_disconnect(hub->tab);
   g_hash_table_remove_all(hub->sessions);
   g_hash_table_remove_all(hub->users);
   g_free(hub->nick);     hub->nick = NULL;
@@ -1774,8 +1775,6 @@ void hub_disconnect(struct hub *hub, gboolean recon) {
   hub->nick_valid = hub->isreg = hub->isop = hub->received_first =
     hub->joincomplete =  hub->sharecount = hub->sharesize =
     hub->supports_nogetinfo = hub->state = 0;
-  if(hub->tab->userlist_tab)
-    ui_userlist_disconnect(hub->tab->userlist_tab);
   if(!recon)
     ui_m(hub->tab, 0, "Disconnected.");
   else {

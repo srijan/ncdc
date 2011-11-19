@@ -193,13 +193,16 @@ void ui_msg_close(struct ui_tab *tab) {
 }
 
 
+// *u may be NULL if change = QUIT. A QUIT is always done before the user is
+// removed from the hub_uids table.
 static void ui_msg_userchange(struct ui_tab *tab, int change, struct hub_user *u) {
   switch(change) {
   case UIHUB_UC_JOIN:
     ui_mf(tab, 0, "--> %s has joined.", u->name);
     break;
   case UIHUB_UC_QUIT:
-    ui_mf(tab, 0, "--< %s has quit.", tab->name+1);
+    if(g_hash_table_lookup(hub_uids, &tab->uid))
+      ui_mf(tab, 0, "--< %s has quit.", tab->name+1);
     break;
   case UIHUB_UC_NFO:
     // Detect nick changes.
@@ -426,6 +429,22 @@ void ui_hub_userchange(struct ui_tab *tab, int change, struct hub_user *user) {
       ui_mf(tab, 0, "--> %s has joined.", user->name);
   } else if(change == UIHUB_UC_QUIT && log)
     ui_mf(tab, 0, "--< %s has quit.", user->name);
+}
+
+
+// Called when the hub is disconnected. Notifies any msg tabs and the userlist
+// tab, if there's one open.
+void ui_hub_disconnect(struct ui_tab *tab) {
+  // userlist
+  if(tab->userlist_tab)
+    ui_userlist_disconnect(tab->userlist_tab);
+  // msg tabs
+  GList *n = ui_tabs;
+  for(; n; n=n->next) {
+    struct ui_tab *t = n->data;
+    if(t->type == UIT_MSG && t->hub == tab->hub)
+      ui_msg_userchange(t, UIHUB_UC_QUIT, NULL);
+  }
 }
 
 

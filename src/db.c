@@ -333,10 +333,9 @@ void db_close() {
 // The query is assumed to be a static string that is not freed or modified.
 // Any BLOB or TEXT arguments will be passed directly to the processing thread
 // and will be g_free()'d there.
-// TODO: allow setting of flags
-static void *db_queue_create(const char *q, ...) {
+static void *db_queue_create(int flags, const char *q, ...) {
   GPtrArray *a = g_ptr_array_new();
-  g_ptr_array_add(a, GINT_TO_POINTER(0)); // flags
+  g_ptr_array_add(a, GINT_TO_POINTER(flags));
   g_ptr_array_add(a, (void *)q);
 
   int t;
@@ -406,39 +405,33 @@ static sqlite3 *db;
 
 // Adds a file to hashfiles and, if not present yet, hashdata. Returns the new hashfiles.id.
 gint64 db_fl_addhash(const char *path, guint64 size, time_t lastmod, const char *root, const char *tthl, int tthl_len) {
-  db_begin(0);
-
   char hash[40] = {};
   base32_encode(root, hash);
-  sqlite3_stmt *s;
 
-  // hashdata
-  if(sqlite3_prepare_v2(db, "INSERT OR IGNORE INTO hashdata (root, size, tthl) VALUES(?, ?, ?)", -1, &s, NULL))
-    db_err(NULL, 0);
-  sqlite3_bind_text(s, 1, hash, -1, SQLITE_STATIC);
-  sqlite3_bind_int64(s, 2, size);
-  sqlite3_bind_blob(s, 3, tthl, tthl_len, SQLITE_STATIC);
-  if(sqlite3_step(s) != SQLITE_DONE)
-    db_err(NULL, 0);
-  sqlite3_finalize(s);
+  db_queue_lock();
+  db_queue_push_unlocked(DBF_NEXT,
+    "INSERT OR IGNORE INTO hashdata (root, size, tthl) VALUES(?, ?, ?)",
+    DBQ_TEXT, g_strdup(hash),
+    DBQ_INT64, (gint64)size,
+    DBQ_BLOB, tthl_len, g_strdup(tthl),
+    DBQ_END
+  );
 
   // hashfiles.
   // Note that it in certain situations it may happen that a row with the same
   // filename is already present. This happens when two files in the share have
   // the same realpath() (e.g. one is a symlink). In such a case it is safe to
   // just do a REPLACE.
-  if(sqlite3_prepare_v2(db, "INSERT OR REPLACE INTO hashfiles (tth, lastmod, filename) VALUES(?, ?, ?)", -1, &s, NULL))
-    db_err(NULL, 0);
-  sqlite3_bind_text(s, 1, hash, -1, SQLITE_STATIC);
-  sqlite3_bind_int64(s, 2, lastmod);
-  sqlite3_bind_text(s, 3, path, -1, SQLITE_STATIC);
-  if(sqlite3_step(s) != SQLITE_DONE)
-    db_err(NULL, 0);
-  sqlite3_finalize(s);
+  db_queue_push_unlocked(0,
+    "INSERT OR REPLACE INTO hashfiles (tth, lastmod, filename) VALUES(?, ?, ?)",
+    DBQ_TEXT, g_strdup(hash),
+    DBQ_INT64, (gint64)lastmod,
+    DBQ_TEXT, g_strdup(path),
+    DBQ_END
+  );
 
-  gint64 id = sqlite3_last_insert_rowid(db);
-  db_commit(0);
-  return id;
+  // TODO: GET ID! -> sqlite3_last_insert_rowid(db)
+  return 0;
 }
 
 
@@ -513,23 +506,9 @@ gint64 db_fl_getfile(const char *path, time_t *lastmod, guint64 *size, char *tth
 // exist? A /gc will do this by calling db_fl_purgedata(), but ideally this
 // would be done as soon as the hashdata row has become obsolete.
 void db_fl_rmfiles(gint64 *ids, int num) {
-  db_begin();
-
-  sqlite3_stmt *s;
   int i;
-
-  if(sqlite3_prepare_v2(db, "DELETE FROM hashfiles WHERE id = ?", -1, &s, NULL))
-    db_err(NULL,);
-
-  for(i=0; i<num; i++) {
-    sqlite3_bind_int64(s, 1, ids[i]);
-    if(sqlite3_step(s) != SQLITE_DONE || sqlite3_reset(s))
-      db_err(NULL,);
-  }
-
-  sqlite3_finalize(s);
-
-  db_commit();
+  for(i=0; i<num; i++)
+    db_queue_push(0, "DELETE FROM hashfiles WHERE id = ?", DBQ_INT64, ids[i], DBQ_END);
 }
 
 
@@ -559,16 +538,10 @@ void db_fl_getids(void (*callback)(gint64)) {
 // Remove rows from the hashdata table that are not referenced from the
 // hashfiles table.
 void db_fl_purgedata() {
-  db_lock();
   // Since there is no index on hashfiles(tth), one might expect this query to
   // be extremely slow. Luckily sqlite is clever enough to create a temporary
   // index for this query.
-  char *err;
-  if(sqlite3_exec(db,
-      "DELETE FROM hashdata WHERE NOT EXISTS(SELECT 1 FROM hashfiles WHERE tth = root)",
-      NULL, NULL, &err))
-    db_err(err,);
-  db_unlock();
+  db_queue_push(0, "DELETE FROM hashdata WHERE NOT EXISTS(SELECT 1 FROM hashfiles WHERE tth = root)", DBQ_END);
 }
 
 
@@ -645,8 +618,8 @@ void db_dl_rm(const char *tth) {
   base32_encode(tth, hash);
 
   db_queue_lock();
-  db_queue_push_unlocked("DELETE FROM dl_users WHERE tth = ?", DBQ_TEXT, g_strdup(hash), DBQ_END);
-  db_queue_push_unlocked("DELETE FROM dl WHERE tth = ?", DBQ_TEXT, g_strdup(hash), DBQ_END);
+  db_queue_push_unlocked(0, "DELETE FROM dl_users WHERE tth = ?", DBQ_TEXT, g_strdup(hash), DBQ_END);
+  db_queue_push_unlocked(0, "DELETE FROM dl WHERE tth = ?", DBQ_TEXT, g_strdup(hash), DBQ_END);
   db_queue_unlock();
 }
 
@@ -655,7 +628,7 @@ void db_dl_rm(const char *tth) {
 void db_dl_setstatus(const char *tth, char priority, char error, const char *error_msg) {
   char hash[40] = {};
   base32_encode(tth, hash);
-  db_queue_push("UPDATE dl SET priority = ?, error = ?, error_msg = ? WHERE tth = ?",
+  db_queue_push(0, "UPDATE dl SET priority = ?, error = ?, error_msg = ? WHERE tth = ?",
     DBQ_INT, (int)priority, DBQ_INT, (int)error,
     DBQ_TEXT, error_msg ? g_strdup(error_msg) : NULL,
     DBQ_TEXT, g_strdup(hash),
@@ -672,7 +645,7 @@ void db_dl_setuerr(guint64 uid, const char *tth, char error, const char *error_m
   if(tth) {
     char hash[40] = {};
     base32_encode(tth, hash);
-    db_queue_push("UPDATE dl_users SET error = ?, error_msg = ? WHERE uid = ? AND tth = ?",
+    db_queue_push(0, "UPDATE dl_users SET error = ?, error_msg = ? WHERE uid = ? AND tth = ?",
       DBQ_INT, (int)error,
       DBQ_TEXT, error_msg ? g_strdup(error_msg) : NULL,
       DBQ_INT64, (gint64)uid,
@@ -681,7 +654,7 @@ void db_dl_setuerr(guint64 uid, const char *tth, char error, const char *error_m
     );
   // for all dl items
   } else {
-    db_queue_push("UPDATE dl_users SET error = ?, error_msg = ? WHERE uid = ?",
+    db_queue_push(0, "UPDATE dl_users SET error = ?, error_msg = ? WHERE uid = ?",
       DBQ_INT, (int)error,
       DBQ_TEXT, error_msg ? g_strdup(error_msg) : NULL,
       DBQ_INT64, (gint64)uid,
@@ -699,14 +672,14 @@ void db_dl_rmuser(guint64 uid, const char *tth) {
   if(tth) {
     char hash[40] = {};
     base32_encode(tth, hash);
-    db_queue_push("DELETE FROM dl_users WHERE uid = ? AND tth = ?",
+    db_queue_push(0, "DELETE FROM dl_users WHERE uid = ? AND tth = ?",
       DBQ_INT64, (gint64)uid,
       DBQ_TEXT, g_strdup(hash),
       DBQ_END
     );
   // for all dl items
   } else {
-    db_queue_push("DELETE FROM dl_users WHERE uid = ?",
+    db_queue_push(0, "DELETE FROM dl_users WHERE uid = ?",
       DBQ_INT64, (gint64)uid,
       DBQ_END
     );
@@ -718,7 +691,7 @@ void db_dl_rmuser(guint64 uid, const char *tth) {
 void db_dl_settthl(const char *tth, const char *tthl, int len) {
   char hash[40] = {};
   base32_encode(tth, hash);
-  db_queue_push("UPDATE dl SET tthl = ? WHERE tth = ?",
+  db_queue_push(0, "UPDATE dl SET tthl = ? WHERE tth = ?",
     DBQ_BLOB, len, g_memdup(tthl, len),
     DBQ_TEXT, g_strdup(hash),
     DBQ_END
@@ -730,7 +703,7 @@ void db_dl_settthl(const char *tth, const char *tthl, int len) {
 void db_dl_insert(const char *tth, guint64 size, const char *dest, char priority, char error, const char *error_msg) {
   char hash[40] = {};
   base32_encode(tth, hash);
-  db_queue_push("INSERT OR REPLACE INTO dl (tth, size, dest, priority, error, error_msg) VALUES (?, ?, ?, ?, ?, ?)",
+  db_queue_push(0, "INSERT OR REPLACE INTO dl (tth, size, dest, priority, error, error_msg) VALUES (?, ?, ?, ?, ?, ?)",
     DBQ_TEXT, g_strdup(hash),
     DBQ_INT64, (gint64)size,
     DBQ_TEXT, g_strdup(dest),
@@ -746,7 +719,7 @@ void db_dl_insert(const char *tth, guint64 size, const char *dest, char priority
 void db_dl_adduser(const char *tth, guint64 uid, char error, const char *error_msg) {
   char hash[40] = {};
   base32_encode(tth, hash);
-  db_queue_push("INSERT OR REPLACE INTO dl_users (tth, uid, error, error_msg) VALUES (?, ?, ?, ?)",
+  db_queue_push(0, "INSERT OR REPLACE INTO dl_users (tth, uid, error, error_msg) VALUES (?, ?, ?, ?)",
     DBQ_TEXT, g_strdup(hash),
     DBQ_INT64, (gint64)uid,
     DBQ_INT, (int)error,
@@ -760,9 +733,5 @@ void db_dl_adduser(const char *tth, guint64 uid, char error, const char *error_m
 
 // Executes a VACUUM
 void db_vacuum() {
-  db_lock();
-  char *err;
-  if(sqlite3_exec(db, "VACUUM", NULL, NULL, &err))
-    db_err(err,);
-  db_unlock();
+  db_queue_push(DBF_SINGLE, "VACUUM", DBQ_END);
 }

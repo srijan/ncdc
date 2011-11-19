@@ -166,7 +166,7 @@ int db_queue_needflush = 0;
 #define DBQ_NULL   1 // No arguments
 #define DBQ_INT    2 // GINT_TO_POINTER() argument
 #define DBQ_INT64  3 // pointer to a slice-allocated gint64 as argument
-#define DBQ_TEXT   4 // pointer to a g_malloc()'ed UTF-8 string
+#define DBQ_TEXT   4 // pointer to a g_malloc()'ed UTF-8 string. NULL is allowed as input
 #define DBQ_BLOB   5 // first argument: GINT_TO_POINER(length), second: g_malloc()'d blob
 
 
@@ -195,10 +195,17 @@ static void db_queue_process(gpointer dat, gpointer udat) {
         g_slice_free(gint64, *(a++));
         break;
       case DBQ_TEXT:
-        sqlite3_bind_text(s, i, (char *)*(a++), -1, g_free);
+        if(*a)
+          sqlite3_bind_text(s, i, (char *)*a, -1, g_free);
+        else
+          sqlite3_bind_null(s, i);
+        a++;
         break;
       case DBQ_BLOB:
-        sqlite3_bind_blob(s, i, (char *)*(a+1), GPOINTER_TO_INT(*a), g_free);
+        if(*(a+1))
+          sqlite3_bind_blob(s, i, (char *)*(a+1), GPOINTER_TO_INT(*a), g_free);
+        else
+          sqlite3_bind_null(s, i);
         a += 2;
         break;
       }
@@ -570,6 +577,18 @@ void db_dl_rm(const char *tth) {
   db_queue_unlock();
 }
 
+
+// (queued) Set the priority, error and error_msg columns of a dl row
+void db_dl_setstatus(const char *tth, char priority, char error, char *error_msg) {
+  char hash[40] = {};
+  base32_encode(tth, hash);
+  db_queue_push("UPDATE dl SET priority = ?, error = ?, error_msg = ? WHERE tth = ?",
+    DBQ_INT, (int)priority, DBQ_INT, (int)error,
+    DBQ_TEXT, error_msg ? g_strdup(error_msg) : NULL,
+    DBQ_TEXT, g_strdup(hash),
+    DBQ_END
+  );
+}
 
 
 

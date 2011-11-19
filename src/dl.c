@@ -766,7 +766,7 @@ static void dl_queue_checkrm(struct dl *dl, gboolean justfin) {
 void dl_queue_setprio(struct dl *dl, char prio) {
   gboolean enabled = dl->prio <= DLP_OFF && prio > DLP_OFF;
   dl->prio = prio;
-  // TODO: update database (also make sure to set error/error_msg)
+  db_dl_setstatus(dl->hash, dl->prio, dl->error, dl->error_msg);
   // Make sure the dl_user.queue lists are still in the correct order
   int i;
   for(i=0; i<dl->u->len; i++)

@@ -91,7 +91,8 @@ void db_init() {
 
 // Query flags
 #define DBF_NEXT    1 // Current query must be in the same transaction as next query in the queue.
-#define DBF_SINGLE  2 // Query must not be executed in a transaction (e.g. SELECT, VACUUM)
+#define DBF_LAST    2 // Current query must be the last in a transaction (forces a flush)
+#define DBF_SINGLE  4 // Query must not be executed in a transaction (e.g. SELECT, VACUUM)
 #define DBF_END   128 // Signal the database thread to close
 
 // Column types
@@ -185,6 +186,16 @@ static gboolean db_queue_process_one(sqlite3 *db, void **q, gboolean transaction
 
 
 static void db_queue_process_flush(sqlite3 *db, GPtrArray *q) {
+  if(q->len < 1)
+    return;
+
+  // Bypass the transactions if there's only a single query.
+  if(q->len == 1) {
+    db_queue_process_one(db, g_ptr_array_index(q, 0), FALSE);
+    g_ptr_array_set_size(q, 0);
+    return;
+  }
+
   // start transaction
   char *err = NULL;
   if(sqlite3_exec(db, "BEGIN", NULL, NULL, &err)) {
@@ -287,12 +298,13 @@ static void db_queue_process(sqlite3 *db) {
       continue;
     }
 
+    // - If DBF_LAST is set, flush it
     // - If the queue has somehow grown beyond 50 items, flush it.
     // - If the time for receiving the queue has elapsed, flush it.
     g_get_current_time(&cur_time);
-    if(queue->len > 50 || (cur_time.tv_sec > queue_end.tv_sec
+    if(flags & DBF_LAST || queue->len > 50 || (cur_time.tv_sec > queue_end.tv_sec
         || (cur_time.tv_sec == queue_end.tv_sec && cur_time.tv_usec > queue_end.tv_usec))){
-      g_debug("db: Flushing after timeout or long queue");
+      g_debug("db: Flushing after LAST, timeout or long queue");
       db_queue_process_flush(db, queue);
       queue_end.tv_sec = 0;
     }
@@ -333,7 +345,7 @@ void db_close() {
 // The query is assumed to be a static string that is not freed or modified.
 // Any BLOB or TEXT arguments will be passed directly to the processing thread
 // and will be g_free()'d there.
-static void *db_queue_create(int flags, const char *q, ...) {
+static void *db_queue_item_create(int flags, const char *q, ...) {
   GPtrArray *a = g_ptr_array_new();
   g_ptr_array_add(a, GINT_TO_POINTER(flags));
   g_ptr_array_add(a, (void *)q);
@@ -374,8 +386,8 @@ static void *db_queue_create(int flags, const char *q, ...) {
 
 #define db_queue_lock() g_async_queue_lock(db_queue)
 #define db_queue_unlock() g_async_queue_unlock(db_queue)
-#define db_queue_push(...) g_async_queue_push(db_queue, db_queue_create(__VA_ARGS__))
-#define db_queue_push_unlocked(...) g_async_queue_push_unlocked(db_queue, db_queue_create(__VA_ARGS__))
+#define db_queue_push(...) g_async_queue_push(db_queue, db_queue_item_create(__VA_ARGS__))
+#define db_queue_push_unlocked(...) g_async_queue_push_unlocked(db_queue, db_queue_item_create(__VA_ARGS__))
 
 
 
@@ -422,7 +434,7 @@ gint64 db_fl_addhash(const char *path, guint64 size, time_t lastmod, const char 
   // filename is already present. This happens when two files in the share have
   // the same realpath() (e.g. one is a symlink). In such a case it is safe to
   // just do a REPLACE.
-  db_queue_push_unlocked(0,
+  db_queue_push_unlocked(DBF_LAST,
     "INSERT OR REPLACE INTO hashfiles (tth, lastmod, filename) VALUES(?, ?, ?)",
     DBQ_TEXT, g_strdup(hash),
     DBQ_INT64, (gint64)lastmod,

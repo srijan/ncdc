@@ -123,8 +123,16 @@ static void db_queue_item_free(void *dat) {
 
 
 // Executes a single query.
+// If transaction = TRUE, the query is assumed to be executed in a transaction
+//   (which has already been initiated)
+// If commit = TRUE, the current transaction will be committed. This allows for
+//   returning error responses if the queries themself execute fine, but the
+//   final COMMIT doesn't.
+// If this function returns FALSE, the query has failed and the transaction (if
+//   any) will have been rolled back. The query in question is given an error
+//   response.
 // TODO: support for fetching and passing query results
-static gboolean db_queue_process_one(sqlite3 *db, void **q, gboolean transaction) {
+static gboolean db_queue_process_one(sqlite3 *db, void **q, gboolean transaction, gboolean commit) {
   char *query = (char *)q[1];
 
   // Would be nice to have the parameters logged
@@ -139,6 +147,7 @@ static gboolean db_queue_process_one(sqlite3 *db, void **q, gboolean transaction
   void **a = q+2;
   int i = 1;
 
+  // Bind parameters
   int t;
   while((t = GPOINTER_TO_INT(*(a++))) != DBQ_END) {
     switch(t) {
@@ -169,19 +178,37 @@ static gboolean db_queue_process_one(sqlite3 *db, void **q, gboolean transaction
     i++;
   }
 
+  // Execute query
   int r;
   if(transaction)
     r = sqlite3_step(s);
   else
     while((r = sqlite3_step(s)) == SQLITE_BUSY)
       ;
-  if(r != SQLITE_DONE) {
+  if(r != SQLITE_DONE)
     g_critical("SQLite3 error on step() of `%s': %s", query, sqlite3_errmsg(db));
-    return FALSE;
+  sqlite3_finalize(s);
+
+  // Commit, if requested
+  if(r == SQLITE_DONE && commit) {
+    if(sqlite3_prepare_v2(db, "COMMIT", -1, &s, NULL))
+      r = SQLITE_ERROR;
+    else
+      while((r = sqlite3_step(s)) == SQLITE_BUSY)
+        ;
+    if(r != SQLITE_DONE)
+      g_critical("SQLite3 error committing transaction: %s", sqlite3_errmsg(db));
+    sqlite3_finalize(s);
   }
 
-  sqlite3_finalize(s);
-  return TRUE;
+  // Rollback, if we're in a transaction and the query/commit failed
+  if(r != SQLITE_DONE && transaction) {
+    char *err = NULL;
+    if(sqlite3_exec(db, "ROLLBACK", NULL, NULL, &err) && err)
+      sqlite3_free(err);
+  }
+
+  return r == SQLITE_DONE ? TRUE : FALSE;
 }
 
 
@@ -191,7 +218,7 @@ static void db_queue_process_flush(sqlite3 *db, GPtrArray *q) {
 
   // Bypass the transactions if there's only a single query.
   if(q->len == 1) {
-    db_queue_process_one(db, g_ptr_array_index(q, 0), FALSE);
+    db_queue_process_one(db, g_ptr_array_index(q, 0), FALSE, FALSE);
     g_ptr_array_set_size(q, 0);
     return;
   }
@@ -209,33 +236,9 @@ static void db_queue_process_flush(sqlite3 *db, GPtrArray *q) {
   // execute queries
   int i;
   for(i=0; i<q->len; i++)
-    if(!db_queue_process_one(db, g_ptr_array_index(q, i), TRUE))
+    if(!db_queue_process_one(db, g_ptr_array_index(q, i), TRUE, i == q->len-1 ? TRUE : FALSE))
       break;
-  gboolean error = i < q->len ? TRUE : FALSE;
   g_ptr_array_set_size(q, 0);
-
-  // rollback on error
-  if(error) {
-    err = NULL;
-    if(sqlite3_exec(db, "ROLLBACK", NULL, NULL, &err) && err)
-      sqlite3_free(err);
-    return;
-  }
-
-  // otherwise, commit transaction
-  sqlite3_stmt *s;
-  int r;
-  if(sqlite3_prepare_v2(db, "COMMIT", -1, &s, NULL)) {
-    g_critical("SQLite3 error committing transaction: %s", sqlite3_errmsg(db));
-    return;
-  }
-  while((r = sqlite3_step(s)) == SQLITE_BUSY)
-    ;
-  if(r != SQLITE_DONE) {
-    sqlite3_finalize(s);
-    g_critical("SQLite3 error committing transaction: %s", sqlite3_errmsg(db));
-  }
-  sqlite3_finalize(s);
 }
 
 
@@ -285,7 +288,7 @@ static void db_queue_process(sqlite3 *db) {
         db_queue_process_flush(db, queue);
         queue_end.tv_sec = 0;
       }
-      db_queue_process_one(db, q, FALSE);
+      db_queue_process_one(db, q, FALSE, FALSE);
       continue;
     }
 

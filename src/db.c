@@ -483,16 +483,6 @@ static void *db_queue_item_create(int flags, const char *q, ...) {
 
 
 
-// OLD MACROS! Functions that use these should be rewritten to communicate with
-// the database thread instead.
-#define db_lock(x) return x
-#define db_unlock() {}
-#define db_err(msg, x) return x
-#define db_begin(x) return x
-#define db_step(s, r, x) return x
-#define db_commit(x) return x
-static sqlite3 *db;
-
 
 
 
@@ -526,81 +516,71 @@ gint64 db_fl_addhash(const char *path, guint64 size, time_t lastmod, const char 
   // filename is already present. This happens when two files in the share have
   // the same realpath() (e.g. one is a symlink). In such a case it is safe to
   // just do a REPLACE.
+  GAsyncQueue *a = g_async_queue_new_full(g_free);
   db_queue_push_unlocked(DBF_LAST,
     "INSERT OR REPLACE INTO hashfiles (tth, lastmod, filename) VALUES(?, ?, ?)",
     DBQ_TEXT, hash,
     DBQ_INT64, (gint64)lastmod,
     DBQ_TEXT, path,
+    DBQ_RES, a, DBQ_LASTID,
     DBQ_END
   );
 
-  // TODO: GET ID! -> sqlite3_last_insert_rowid(db)
-  return 0;
+  char *r = g_async_queue_pop(a);
+  guint64 id = darray_get_int32(r) == SQLITE_DONE ? darray_get_int64(r) : 0;
+  g_free(r);
+  g_async_queue_unref(a);
+  return id;
 }
 
 
 // Fetch the tthl data associated with a TTH root. Return value must be
 // g_free()'d. Returns NULL on error or when it's not in the DB.
 char *db_fl_gettthl(const char *root, int *len) {
-  db_lock(NULL);
-
   char hash[40] = {};
   base32_encode(root, hash);
-  sqlite3_stmt *s;
-  int r;
-  int l = 0;
-  char *res = NULL;
 
-  if(sqlite3_prepare_v2(db, "SELECT tthl FROM hashfiles WHERE root = ?", -1, &s, NULL))
-    db_err(NULL, NULL);
-  sqlite3_bind_text(s, 1, hash, -1, SQLITE_STATIC);
+  GAsyncQueue *a = g_async_queue_new_full(g_free);
+  db_queue_push(DBF_SINGLE, "SELECT COALESCE(tthl, "") FROM hashfiles WHERE root = ?",
+    DBQ_TEXT, hash,
+    DBQ_RES, a, DBQ_BLOB,
+    DBQ_END
+  );
 
-  db_step(s, r, NULL);
-  if(r == SQLITE_ROW) {
-    res = (char *)sqlite3_column_blob(s, 0);
-    if(res) {
-      l = sqlite3_column_bytes(s, 0);
-      res = g_memdup(res, l);
-    }
-    if(len)
-      *len = l;
-  }
+  char *r = g_async_queue_pop(a);
+  int n = 0;
+  char *res = darray_get_int32(r) == SQLITE_ROW ? darray_get_dat(r, &n) : NULL;
+  res = n ? g_strdup(res) : NULL;
+  if(len)
+    *len = n;
 
-  sqlite3_finalize(s);
-  db_unlock();
+  g_free(r);
+  g_async_queue_unref(a);
   return res;
 }
 
 
 // Get information for a file. Returns 0 if not found or error.
 gint64 db_fl_getfile(const char *path, time_t *lastmod, guint64 *size, char *tth) {
-  db_lock(0);
+  GAsyncQueue *a = g_async_queue_new_full(g_free);
+  db_queue_push(DBF_SINGLE,
+    "SELECT f.id, f.lastmod, f.tth, d.size FROM hashfiles f JOIN hashdata d ON d.root = f.tth WHERE f.filename = ?",
+    DBQ_TEXT, path,
+    DBQ_RES, a, DBQ_INT64, DBQ_INT64, DBQ_TEXT, DBQ_INT64,
+    DBQ_END
+  );
 
-  sqlite3_stmt *s;
-  int r;
+  char *r = g_async_queue_pop(a);
   gint64 id = 0;
-
-  if(sqlite3_prepare_v2(db,
-       "SELECT f.id, f.lastmod, f.tth, d.size FROM hashfiles f JOIN hashdata d ON d.root = f.tth WHERE f.filename = ?",
-       -1, &s, NULL))
-    db_err(NULL, 0);
-  sqlite3_bind_text(s, 1, path, -1, SQLITE_STATIC);
-
-  db_step(s, r, 0);
-  if(r == SQLITE_ROW) {
-    id = sqlite3_column_int64(s, 0);
-    if(lastmod)
-      *lastmod = sqlite3_column_int64(s, 1);
-    if(tth) {
-      const char *hash = (const char *)sqlite3_column_text(s, 2);
-      base32_decode(hash, tth);
-    }
-    if(size)
-      *size = sqlite3_column_int64(s, 3);
+  if(darray_get_int32(r) == SQLITE_ROW) {
+    id = darray_get_int64(r);
+    *lastmod = darray_get_int64(r);
+    base32_decode(darray_get_string(r), tth);
+    *size = darray_get_int64(r);
   }
+  g_free(r);
+  g_async_queue_unref(a);
 
-  sqlite3_finalize(s);
-  db_unlock();
   return id;
 }
 
@@ -619,23 +599,21 @@ void db_fl_rmfiles(gint64 *ids, int num) {
 // Gets the full list of all ids in the hashfiles table, in ascending order.
 // *callback is called for every row.
 void db_fl_getids(void (*callback)(gint64)) {
-  db_lock();
-  sqlite3_stmt *s;
-  int r;
-
   // This query is fast: `id' is the SQLite rowid, and has an index that is
   // already ordered.
-  if(sqlite3_prepare_v2(db, "SELECT id FROM hashfiles ORDER BY id ASC", -1, &s, NULL))
-    db_err(NULL,);
+  GAsyncQueue *a = g_async_queue_new_full(g_free);
+  db_queue_push(DBF_SINGLE, "SELECT id FROM hashfiles ORDER BY id ASC",
+    DBQ_RES, a, DBQ_INT64,
+    DBQ_END
+  );
 
-  db_step(s, r,);
-  while(r == SQLITE_ROW) {
-    callback(sqlite3_column_int64(s, 0));
-    db_step(s, r,);
+  char *r;
+  while((r = g_async_queue_pop(a)) && darray_get_int32(r) == SQLITE_ROW) {
+    callback(darray_get_int64(r));
+    g_free(r);
   }
-
-  sqlite3_finalize(s);
-  db_unlock();
+  g_free(r);
+  g_async_queue_unref(a);
 }
 
 
@@ -660,59 +638,55 @@ void db_fl_purgedata() {
 void db_dl_getdls(
   void (*callback)(const char *tth, guint64 size, const char *dest, char prio, char error, const char *error_msg, int tthllen)
 ) {
-  db_lock();
-  sqlite3_stmt *s;
-  char hash[24];
-  int r;
+  GAsyncQueue *a = g_async_queue_new_full(g_free);
+  db_queue_push(DBF_SINGLE, "SELECT tth, size, dest, priority, error, error_msg, length(tthl) FROM dl",
+    DBQ_RES, a, DBQ_TEXT, DBQ_INT64, DBQ_TEXT, DBQ_INT, DBQ_INT, DBQ_TEXT, DBQ_INT,
+    DBQ_END
+  );
 
-  if(sqlite3_prepare_v2(db, "SELECT tth, size, dest, priority, error, error_msg, length(tthl) FROM dl", -1, &s, NULL))
-    db_err(NULL,);
-
-  db_step(s, r,);
-  while(r == SQLITE_ROW) {
-    base32_decode((const char *)sqlite3_column_text(s, 0), hash);
+  char *r;
+  while((r = g_async_queue_pop(a)) && darray_get_int32(r) == SQLITE_ROW) {
+    char hash[24];
+    base32_decode(darray_get_string(r), hash);
     callback(
       hash,
-      (guint64)sqlite3_column_int64(s, 1),
-      (const char *)sqlite3_column_text(s, 2),
-      sqlite3_column_int(s, 3),
-      sqlite3_column_int(s, 4),
-      (const char *)sqlite3_column_text(s, 5),
-      sqlite3_column_int(s, 6)
+      (guint64)darray_get_int64(r),
+      darray_get_string(r),
+      darray_get_int32(r),
+      darray_get_int32(r),
+      darray_get_string(r),
+      darray_get_int32(r)
     );
-    db_step(s, r,);
+    g_free(r);
   }
-
-  sqlite3_finalize(s);
-  db_unlock();
+  g_free(r);
+  g_async_queue_unref(a);
 }
 
 
 // Fetches everything from the dl_users table in no particular order, calls the
 // callback for each row.
 void db_dl_getdlus(void (*callback)(const char *tth, guint64 uid, char error, const char *error_msg)) {
-  db_lock();
-  sqlite3_stmt *s;
-  char hash[24];
-  int r;
+  GAsyncQueue *a = g_async_queue_new_full(g_free);
+  db_queue_push(DBF_SINGLE, "SELECT tth, uid, error, error_msg FROM dl_users",
+    DBQ_RES, a, DBQ_TEXT, DBQ_INT64, DBQ_INT, DBQ_TEXT,
+    DBQ_END
+  );
 
-  if(sqlite3_prepare_v2(db, "SELECT tth, uid, error, error_msg FROM dl_users", -1, &s, NULL))
-    db_err(NULL,);
-
-  db_step(s, r,);
-  while(r == SQLITE_ROW) {
-    base32_decode((const char *)sqlite3_column_text(s, 0), hash);
+  char *r;
+  while((r = g_async_queue_pop(a)) && darray_get_int32(r) == SQLITE_ROW) {
+    char hash[24];
+    base32_decode(darray_get_string(r), hash);
     callback(
       hash,
-      (guint64)sqlite3_column_int64(s, 1),
-      sqlite3_column_int(s, 2),
-      (const char *)sqlite3_column_text(s, 3)
+      (guint64)darray_get_int64(r),
+      darray_get_int32(r),
+      darray_get_string(r)
     );
-    db_step(s, r,);
+    g_free(r);
   }
-
-  sqlite3_finalize(s);
-  db_unlock();
+  g_free(r);
+  g_async_queue_unref(a);
 }
 
 

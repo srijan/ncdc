@@ -372,21 +372,21 @@ static void db_queue_process(sqlite3 *db) {
       continue;
     }
 
+    // If we're here and no queue has started yet, start one
+    g_get_current_time(&cur_time);
+    if(!queue_end.tv_sec) {
+      queue_end = cur_time;
+      g_time_val_add(&queue_end, 1000000); // queue queries for 1 second
+    }
+
     // - If DBF_LAST is set, flush it
     // - If the queue has somehow grown beyond 50 items, flush it.
     // - If the time for receiving the queue has elapsed, flush it.
-    g_get_current_time(&cur_time);
     if(flags & DBF_LAST || queue->len > 50 || (cur_time.tv_sec > queue_end.tv_sec
         || (cur_time.tv_sec == queue_end.tv_sec && cur_time.tv_usec > queue_end.tv_usec))){
       g_debug("db: Flushing after LAST, timeout or long queue");
       db_queue_process_flush(db, queue);
       queue_end.tv_sec = 0;
-    }
-
-    // If we're here and no queue has started yet, start one
-    if(!queue_end.tv_sec) {
-      queue_end = cur_time;
-      g_time_val_add(&queue_end, 1000000); // queue queries for 1 second
     }
   }
 
@@ -406,9 +406,10 @@ static gpointer db_thread_func(gpointer dat) {
 // a little cleanup.
 void db_close() {
   // Send a END message to the database thread
-  void **q = g_new0(void *, 1);
-  q[0] = GINT_TO_POINTER(DBF_END);
-  g_async_queue_push(db_queue, q);
+  GByteArray *a = g_byte_array_new();
+  darray_init(a);
+  darray_add_int32(a, DBF_END);
+  g_async_queue_push(db_queue, g_byte_array_free(a, FALSE));
   // And wait for it to quit
   g_thread_join(db_thread);
   g_async_queue_unref(db_queue);
@@ -427,7 +428,7 @@ static void *db_queue_item_create(int flags, const char *q, ...) {
   char *p;
   va_list va;
   va_start(va, q);
-  while((t = va_arg(va, int)) != DBQ_END) {
+  while((t = va_arg(va, int)) != DBQ_END && t != DBQ_RES) {
     switch(t) {
     case DBQ_NULL:
       darray_add_int32(a, DBQ_NULL);
@@ -457,18 +458,20 @@ static void *db_queue_item_create(int flags, const char *q, ...) {
       } else
         darray_add_int32(a, DBQ_NULL);
       break;
-    case DBQ_RES:
-      darray_add_int32(a, DBQ_RES);
-      GAsyncQueue *queue = va_arg(va, GAsyncQueue *);
-      g_async_queue_ref(queue);
-      darray_add_ptr(a, queue);
-      while((t = va_arg(va, int)) != DBQ_END)
-        darray_add_int32(a, t);
-      break;
     default:
       g_return_val_if_reached(NULL);
     }
   }
+
+  if(t == DBQ_RES) {
+    darray_add_int32(a, DBQ_RES);
+    GAsyncQueue *queue = va_arg(va, GAsyncQueue *);
+    g_async_queue_ref(queue);
+    darray_add_ptr(a, queue);
+    while((t = va_arg(va, int)) != DBQ_END)
+      darray_add_int32(a, t);
+  }
+
   va_end(va);
   darray_add_int32(a, DBQ_END);
 
@@ -525,6 +528,7 @@ gint64 db_fl_addhash(const char *path, guint64 size, time_t lastmod, const char 
     DBQ_RES, a, DBQ_LASTID,
     DBQ_END
   );
+  db_queue_unlock();
 
   char *r = g_async_queue_pop(a);
   guint64 id = darray_get_int32(r) == SQLITE_DONE ? darray_get_int64(r) : 0;
@@ -541,7 +545,7 @@ char *db_fl_gettthl(const char *root, int *len) {
   base32_encode(root, hash);
 
   GAsyncQueue *a = g_async_queue_new_full(g_free);
-  db_queue_push(DBF_SINGLE, "SELECT COALESCE(tthl, "") FROM hashfiles WHERE root = ?",
+  db_queue_push(DBF_SINGLE, "SELECT COALESCE(tthl, '') FROM hashfiles WHERE root = ?",
     DBQ_TEXT, hash,
     DBQ_RES, a, DBQ_BLOB,
     DBQ_END
@@ -639,7 +643,7 @@ void db_dl_getdls(
   void (*callback)(const char *tth, guint64 size, const char *dest, char prio, char error, const char *error_msg, int tthllen)
 ) {
   GAsyncQueue *a = g_async_queue_new_full(g_free);
-  db_queue_push(DBF_SINGLE, "SELECT tth, size, dest, priority, error, error_msg, length(tthl) FROM dl",
+  db_queue_push(DBF_SINGLE, "SELECT tth, size, dest, priority, error, COALESCE(error_msg, ''), length(tthl) FROM dl",
     DBQ_RES, a, DBQ_TEXT, DBQ_INT64, DBQ_TEXT, DBQ_INT, DBQ_INT, DBQ_TEXT, DBQ_INT,
     DBQ_END
   );
@@ -648,15 +652,13 @@ void db_dl_getdls(
   while((r = g_async_queue_pop(a)) && darray_get_int32(r) == SQLITE_ROW) {
     char hash[24];
     base32_decode(darray_get_string(r), hash);
-    callback(
-      hash,
-      (guint64)darray_get_int64(r),
-      darray_get_string(r),
-      darray_get_int32(r),
-      darray_get_int32(r),
-      darray_get_string(r),
-      darray_get_int32(r)
-    );
+    guint64 size = darray_get_int64(r);
+    char *dest = darray_get_string(r);
+    char prio = darray_get_int32(r);
+    char err = darray_get_int32(r);
+    char *errmsg = darray_get_string(r);
+    int tthllen = darray_get_int32(r);
+    callback(hash, size, dest, prio, err, errmsg[0]?errmsg:NULL, tthllen);
     g_free(r);
   }
   g_free(r);
@@ -668,7 +670,7 @@ void db_dl_getdls(
 // callback for each row.
 void db_dl_getdlus(void (*callback)(const char *tth, guint64 uid, char error, const char *error_msg)) {
   GAsyncQueue *a = g_async_queue_new_full(g_free);
-  db_queue_push(DBF_SINGLE, "SELECT tth, uid, error, error_msg FROM dl_users",
+  db_queue_push(DBF_SINGLE, "SELECT tth, uid, error, COALESCE(error_msg, '') FROM dl_users",
     DBQ_RES, a, DBQ_TEXT, DBQ_INT64, DBQ_INT, DBQ_TEXT,
     DBQ_END
   );
@@ -677,12 +679,10 @@ void db_dl_getdlus(void (*callback)(const char *tth, guint64 uid, char error, co
   while((r = g_async_queue_pop(a)) && darray_get_int32(r) == SQLITE_ROW) {
     char hash[24];
     base32_decode(darray_get_string(r), hash);
-    callback(
-      hash,
-      (guint64)darray_get_int64(r),
-      darray_get_int32(r),
-      darray_get_string(r)
-    );
+    guint64 uid  = darray_get_int64(r);
+    char err     = darray_get_int32(r);
+    char *errmsg = darray_get_string(r);
+    callback(hash, uid, err, errmsg[0] ? errmsg : NULL);
     g_free(r);
   }
   g_free(r);

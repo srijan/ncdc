@@ -82,11 +82,11 @@ void db_init() {
 }
 
 
-// A "queue item" is a darray (see util.c) of representing an SQL query, with
-// the following structure:
+// A "queue item" is a darray (see util.c) to represent a queued SQL query,
+// with the following structure:
 //   int32 = flags
 //   ptr   = (char *)sql_query. This must be a static string in global memory.
-// bind_values:
+// arguments:
 //   int32 = type
 //   rest depending on type:
 //     NULL:  no further arguments
@@ -94,8 +94,18 @@ void db_init() {
 //     INT64: int64
 //     TEXT:  string
 //     BLOB:  dat
+//     RES:   ptr to a GAsyncQueue followed by an array of int32 DBQ_* items
+//            until DBQ_END. (Only INT, INT64, TEXT and BLOB can be used)
 //   if(type != END)
-//     goto bind_values
+//     goto arguments
+
+// A "result item" is a darray to represent a result row, with the following
+// structure:
+//   int32 = result code (SQLITE_ROW, SQLITE_DONE or anything else for error)
+// For SQLITE_DONE:
+//   if DBQ_LASTID is requested: int64. Otherwise no other arguments.
+// For SQLITE_ROW:
+//   for each array in the above RES thing, the data of the column.
 
 
 // Query flags
@@ -111,7 +121,27 @@ void db_init() {
 #define DBQ_INT64  3 // gint64
 #define DBQ_TEXT   4 // char * (NULL allowed)
 #define DBQ_BLOB   5 // int length, char *data (NULL allowed)
+#define DBQ_RES    6
+#define DBQ_LASTID 7 // To indicate that the query wants the last inserted row id as result
 
+
+// Give back an error result and decrement the reference counter of the
+// response queue. Assumes the `flags' has already been read.
+static void db_queue_item_error(char *q) {
+  char *b = darray_get_ptr(q); // query
+  b++; // otherwise gcc will complain
+  int t;
+  while((t = darray_get_int32(q)) != DBQ_END && t != DBQ_RES)
+    ;
+  if(t == DBQ_RES) {
+    GByteArray *r = g_byte_array_new();
+    darray_init(r);
+    darray_add_int32(r, SQLITE_ERROR);
+    GAsyncQueue *a = darray_get_ptr(q);
+    g_async_queue_push(a, g_byte_array_free(r, FALSE));
+    g_async_queue_unref(a);
+  }
+}
 
 
 // Executes a single query.
@@ -125,7 +155,6 @@ void db_init() {
 //   response.
 // It is assumed that the first `flags' part of the queue item has already been
 // fetched.
-// TODO: support for fetching and passing query results
 static gboolean db_queue_process_one(sqlite3 *db, char *q, gboolean transaction, gboolean commit) {
   char *query = darray_get_ptr(q);
 
@@ -133,17 +162,20 @@ static gboolean db_queue_process_one(sqlite3 *db, char *q, gboolean transaction,
   g_debug("db: Executing \"%s\" (%s transaction)", query, transaction ? "inside" : "outside");
 
   // TODO: use cached prepared statements
+  int r = SQLITE_ROW;
   sqlite3_stmt *s;
   if(sqlite3_prepare_v2(db, query, -1, &s, NULL)) {
     g_critical("SQLite3 error preparing `%s': %s", query, sqlite3_errmsg(db));
-    return FALSE;
+    r = SQLITE_ERROR;
   }
-  int i = 1;
 
   // Bind parameters
-  int t;
+  int t, n;
+  int i = 1;
   char *a;
-  while((t = darray_get_int32(q)) != DBQ_END) {
+  while((t = darray_get_int32(q)) != DBQ_END && t != DBQ_RES) {
+    if(r == SQLITE_ERROR)
+      continue;
     switch(t) {
     case DBQ_NULL:
       sqlite3_bind_null(s, i);
@@ -158,22 +190,61 @@ static gboolean db_queue_process_one(sqlite3 *db, char *q, gboolean transaction,
       sqlite3_bind_text(s, i, darray_get_string(q), -1, SQLITE_STATIC);
       break;
     case DBQ_BLOB:
-      a = darray_get_dat(q, &t);
-      sqlite3_bind_blob(s, i, a, t, SQLITE_STATIC);
+      a = darray_get_dat(q, &n);
+      sqlite3_bind_blob(s, i, a, n, SQLITE_STATIC);
       break;
     }
     i++;
   }
 
+  // Fetch information about what results we need to send back
+  GAsyncQueue *res = NULL;
+  gboolean wantlastid = FALSE;
+  char columns[20]; // 20 should be enough for everyone
+  gint64 lastid;
+  n = 0;
+  if(t == DBQ_RES) {
+    res = darray_get_ptr(q);
+    while((t = darray_get_int32(q)) != DBQ_END) {
+      if(t == DBQ_LASTID)
+        wantlastid = TRUE;
+      else
+        columns[n++] = t;
+    }
+  }
+
   // Execute query
-  int r;
-  if(transaction)
-    r = sqlite3_step(s);
-  else
-    while((r = sqlite3_step(s)) == SQLITE_BUSY)
-      ;
-  if(r != SQLITE_DONE)
-    g_critical("SQLite3 error on step() of `%s': %s", query, sqlite3_errmsg(db));
+  while(r == SQLITE_ROW) {
+    // do the step()
+    if(transaction)
+      r = sqlite3_step(s);
+    else
+      while((r = sqlite3_step(s)) == SQLITE_BUSY)
+        ;
+    if(r != SQLITE_DONE && r != SQLITE_ROW)
+      g_critical("SQLite3 error on step() of `%s': %s", query, sqlite3_errmsg(db));
+    // continue with the next step() if we're not going to do anything with the results
+    if(r != SQLITE_ROW || !res || !n)
+      continue;
+    // send back a response
+    GByteArray *rc = g_byte_array_new();
+    darray_init(rc);
+    darray_add_int32(rc, r);
+    for(i=0; i<n; i++) {
+      switch(columns[i]) {
+      case DBQ_INT:   darray_add_int32( rc, sqlite3_column_int(  s, i)); break;
+      case DBQ_INT64: darray_add_int64( rc, sqlite3_column_int64(s, i)); break;
+      case DBQ_TEXT:  darray_add_string(rc, (char *)sqlite3_column_text( s, i)); break;
+      case DBQ_BLOB:  darray_add_dat(   rc, sqlite3_column_blob( s, i), sqlite3_column_bytes(s, i)); break;
+      default: g_warn_if_reached();
+      }
+    }
+    g_async_queue_push(res, g_byte_array_free(rc, FALSE));
+  }
+
+  // Fetch last id, if requested
+  if(r == SQLITE_DONE && wantlastid)
+    lastid = sqlite3_last_insert_rowid(db);
   sqlite3_finalize(s);
 
   // Commit, if requested
@@ -193,6 +264,17 @@ static gboolean db_queue_process_one(sqlite3 *db, char *q, gboolean transaction,
     char *err = NULL;
     if(sqlite3_exec(db, "ROLLBACK", NULL, NULL, &err) && err)
       sqlite3_free(err);
+  }
+
+  // send back final result and unref
+  if(res) {
+    GByteArray *rc = g_byte_array_new();
+    darray_init(rc);
+    darray_add_int32(rc, r);
+    if(wantlastid && r == SQLITE_DONE)
+      darray_add_int64(rc, lastid);
+    g_async_queue_push(res, g_byte_array_free(rc, FALSE));
+    g_async_queue_unref(res);
   }
 
   return r == SQLITE_DONE ? TRUE : FALSE;
@@ -225,6 +307,8 @@ static void db_queue_process_flush(sqlite3 *db, GPtrArray *q) {
   for(i=0; i<q->len; i++)
     if(!db_queue_process_one(db, g_ptr_array_index(q, i), TRUE, i == q->len-1 ? TRUE : FALSE))
       break;
+  for(; i<q->len; i++)
+    db_queue_item_error(g_ptr_array_index(q, i));
   g_ptr_array_set_size(q, 0);
 }
 
@@ -372,6 +456,14 @@ static void *db_queue_item_create(int flags, const char *q, ...) {
         darray_add_dat(a, p, t);
       } else
         darray_add_int32(a, DBQ_NULL);
+      break;
+    case DBQ_RES:
+      darray_add_int32(a, DBQ_RES);
+      GAsyncQueue *queue = va_arg(va, GAsyncQueue *);
+      g_async_queue_ref(queue);
+      darray_add_ptr(a, queue);
+      while((t = va_arg(va, int)) != DBQ_END)
+        darray_add_int32(a, t);
       break;
     default:
       g_return_val_if_reached(NULL);

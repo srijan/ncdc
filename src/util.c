@@ -1085,6 +1085,68 @@ char *ip4_unpack(guint32 ip) {
 
 
 
+// Handy functions to create and read arbitrary data to/from byte arrays. Data
+// is written to and read from a byte array sequentially. The data is stored as
+// efficient as possible, bit still adds padding to correctly align some values.
+
+// Usage:
+//   GByteArray *a = g_byte_array_new();
+//   darray_init(a);
+//   darray_add_int32(a, 43);
+//   darray_add_string(a, "blah");
+//   char *v = g_byte_array_free(a, FALSE);
+// ...later:
+//   int number = darray_get_int32(v);
+//   char *thestring = darray_get_string(v);
+//   g_free(v);
+//
+// So it's basically a method to efficiently pass around variable arguments to
+// functions without the restrictions imposed by stdarg.h.
+
+#if INTERFACE
+
+// For internal use
+#define darray_append_pad(v, a)\
+  int pad = ((v)->len + (a)) & ~(a);\
+  gint64 zero = 0;\
+  if(pad)\
+    g_byte_array_append(v, (guint8 *)&zero, pad)
+
+// All values (not necessarily the v thing itself) are always evaluated once.
+#define darray_add_int32(v, i)   do { guint32 p=i; darray_append_pad(v, 3); g_byte_array_append(v, (guint8 *)&p, 4); } while(0)
+#define darray_add_int64(v, i)   do { guint64 p=i; darray_append_pad(v, 7); g_byte_array_append(v, (guint8 *)&p, 8); } while(0)
+#define darray_add_ptr(v, p)     do { const void *t=p; darray_append_pad(v, sizeof(void *)-1); g_byte_array_append(v, (guint8 *)&t, sizeof(void *)-1); } while(0)
+#define darray_add_dat(v, b, l)  do { int i=l; darray_add_int32(v, i); g_byte_array_append(v, (guint8 *)(b), i); } while(0)
+#define darray_add_string(v, s)  do { const char *t=s; darray_add_dat(v, t, strlen(t)+1); } while(0)
+#define darray_init(v)           darray_add_int32(v, 4)
+
+#define darray_get_int32(v)      *((gint32 *)darray_get_raw(v, 4, 3))
+#define darray_get_int64(v)      *((gint64 *)darray_get_raw(v, 8, 7))
+#define darray_get_ptr(v)        *((void **)darray_get_raw(v, sizeof(void *), sizeof(void *)-1))
+#define darray_get_string(v)     darray_get_raw(v, darray_get_int32(v), 0)
+#endif
+
+
+// For use by the macros
+char *darray_get_raw(char *v, int i, int a) {
+  int *d = (int *)v;
+  d[0] += a;
+  d[0] &= a;
+  char *r = v + d[0];
+  d[0] += i;
+  return r;
+}
+
+
+char *darray_get_dat(char *v, int *l) {
+  int n = darray_get_int32(v);
+  if(l)
+    *l = n;
+  return darray_get_raw(v, n, 0);
+}
+
+
+
 
 // Transfer / hashing rate calculation
 

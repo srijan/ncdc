@@ -82,11 +82,20 @@ void db_init() {
 }
 
 
-// A "queue item" is an array of pointers representing an SQL query.
-//   q[0] = GINT_TO_POINTER(flags)
-//   q[1] = (char *)sql_query. This must be a static string in global memory.
-//   q[2..n-1] = bind values (see DBQ_* macros)
-//   q[n] = DBQ_END
+// A "queue item" is a darray (see util.c) of representing an SQL query, with
+// the following structure:
+//   int32 = flags
+//   ptr   = (char *)sql_query. This must be a static string in global memory.
+// bind_values:
+//   int32 = type
+//   rest depending on type:
+//     NULL:  no further arguments
+//     INT:   int32
+//     INT64: int64
+//     TEXT:  string
+//     BLOB:  dat
+//   if(type != END)
+//     goto bind_values
 
 
 // Query flags
@@ -98,28 +107,11 @@ void db_init() {
 // Column types
 #define DBQ_END    0
 #define DBQ_NULL   1 // No arguments
-#define DBQ_INT    2 // GINT_TO_POINTER() argument
-#define DBQ_INT64  3 // pointer to a slice-allocated gint64 as argument
-#define DBQ_TEXT   4 // pointer to a g_malloc()'ed UTF-8 string. NULL is allowed as input
-#define DBQ_BLOB   5 // first argument: GINT_TO_POINER(length), second: g_malloc()'d blob
+#define DBQ_INT    2 // int
+#define DBQ_INT64  3 // gint64
+#define DBQ_TEXT   4 // char * (NULL allowed)
+#define DBQ_BLOB   5 // int length, char *data (NULL allowed)
 
-
-// Free a queue item.
-static void db_queue_item_free(void *dat) {
-  void **q = dat;
-  int t;
-  void **a = q+2;
-
-  while((t = GPOINTER_TO_INT(*(a++))) != DBQ_END) {
-    switch(t) {
-    case DBQ_INT:   a++; break;
-    case DBQ_INT64: g_slice_free(gint64, *(a++)); break;
-    case DBQ_TEXT:  g_free(*(a++)); break;
-    case DBQ_BLOB:  g_free(*(a+1)); a += 2; break;
-    }
-  }
-  g_free(q);
-}
 
 
 // Executes a single query.
@@ -131,9 +123,11 @@ static void db_queue_item_free(void *dat) {
 // If this function returns FALSE, the query has failed and the transaction (if
 //   any) will have been rolled back. The query in question is given an error
 //   response.
+// It is assumed that the first `flags' part of the queue item has already been
+// fetched.
 // TODO: support for fetching and passing query results
-static gboolean db_queue_process_one(sqlite3 *db, void **q, gboolean transaction, gboolean commit) {
-  char *query = (char *)q[1];
+static gboolean db_queue_process_one(sqlite3 *db, char *q, gboolean transaction, gboolean commit) {
+  char *query = darray_get_ptr(q);
 
   // Would be nice to have the parameters logged
   g_debug("db: Executing \"%s\" (%s transaction)", query, transaction ? "inside" : "outside");
@@ -144,35 +138,28 @@ static gboolean db_queue_process_one(sqlite3 *db, void **q, gboolean transaction
     g_critical("SQLite3 error preparing `%s': %s", query, sqlite3_errmsg(db));
     return FALSE;
   }
-  void **a = q+2;
   int i = 1;
 
   // Bind parameters
   int t;
-  while((t = GPOINTER_TO_INT(*(a++))) != DBQ_END) {
+  char *a;
+  while((t = darray_get_int32(q)) != DBQ_END) {
     switch(t) {
     case DBQ_NULL:
       sqlite3_bind_null(s, i);
       break;
     case DBQ_INT:
-      sqlite3_bind_int(s, i, GPOINTER_TO_INT(*(a++)));
+      sqlite3_bind_int(s, i, darray_get_int32(q));
       break;
     case DBQ_INT64:
-      sqlite3_bind_int64(s, i, *((gint64 *)*(a++)));
+      sqlite3_bind_int64(s, i, darray_get_int64(q));
       break;
     case DBQ_TEXT:
-      if(*a)
-        sqlite3_bind_text(s, i, (char *)*a, -1, SQLITE_STATIC);
-      else
-        sqlite3_bind_null(s, i);
-      a++;
+      sqlite3_bind_text(s, i, darray_get_string(q), -1, SQLITE_STATIC);
       break;
     case DBQ_BLOB:
-      if(*(a+1))
-        sqlite3_bind_blob(s, i, (char *)*(a+1), GPOINTER_TO_INT(*a), SQLITE_STATIC);
-      else
-        sqlite3_bind_null(s, i);
-      a += 2;
+      a = darray_get_dat(q, &t);
+      sqlite3_bind_blob(s, i, a, t, SQLITE_STATIC);
       break;
     }
     i++;
@@ -245,14 +232,13 @@ static void db_queue_process_flush(sqlite3 *db, GPtrArray *q) {
 static void db_queue_process(sqlite3 *db) {
   GTimeVal queue_end = {}; // tv_sec = 0 if nothing is queued
   GTimeVal cur_time;
-  GPtrArray *queue = g_ptr_array_new_with_free_func(db_queue_item_free);
+  GPtrArray *queue = g_ptr_array_new_with_free_func(g_free);
   gboolean next = FALSE;
 
   while(1) {
-    void **q = (void **)(
-                  next ? g_async_queue_try_pop(db_queue) :
+    char *q =     next ? g_async_queue_try_pop(db_queue) :
       queue_end.tv_sec ? g_async_queue_timed_pop(db_queue, &queue_end) :
-                         g_async_queue_pop(db_queue));
+                         g_async_queue_pop(db_queue);
 
     // Shouldn't happen if items are correctly added to the queue.
     if(next && !q) {
@@ -271,7 +257,7 @@ static void db_queue_process(sqlite3 *db) {
     }
 
     // "handle" the item
-    int flags = *((int *)*q);
+    int flags = darray_get_int32(q);
 
     // signal that the database should be closed
     if(flags == DBF_END) {
@@ -289,6 +275,7 @@ static void db_queue_process(sqlite3 *db) {
         queue_end.tv_sec = 0;
       }
       db_queue_process_one(db, q, FALSE, FALSE);
+      g_free(q);
       continue;
     }
 
@@ -346,44 +333,54 @@ void db_close() {
 
 
 // The query is assumed to be a static string that is not freed or modified.
-// Any BLOB or TEXT arguments will be passed directly to the processing thread
-// and will be g_free()'d there.
 static void *db_queue_item_create(int flags, const char *q, ...) {
-  GPtrArray *a = g_ptr_array_new();
-  g_ptr_array_add(a, GINT_TO_POINTER(flags));
-  g_ptr_array_add(a, (void *)q);
+  GByteArray *a = g_byte_array_new();
+  darray_init(a);
+  darray_add_int32(a, flags);
+  darray_add_ptr(a, q);
 
   int t;
-  gint64 *n;
+  char *p;
   va_list va;
   va_start(va, q);
   while((t = va_arg(va, int)) != DBQ_END) {
-    g_ptr_array_add(a, GINT_TO_POINTER(t));
     switch(t) {
-    case DBQ_NULL: break;
+    case DBQ_NULL:
+      darray_add_int32(a, DBQ_NULL);
+      break;
     case DBQ_INT:
-      g_ptr_array_add(a, GINT_TO_POINTER(va_arg(va, int)));
+      darray_add_int32(a, DBQ_INT);
+      darray_add_int32(a, va_arg(va, int));
       break;
     case DBQ_INT64:
-      n = g_slice_new(gint64);
-      *n = va_arg(va, gint64);
-      g_ptr_array_add(a, n);
+      darray_add_int32(a, DBQ_INT64);
+      darray_add_int64(a, va_arg(va, gint64));
       break;
     case DBQ_TEXT:
-      g_ptr_array_add(a, va_arg(va, char *));
+      p = va_arg(va, char *);
+      if(p) {
+        darray_add_int32(a, DBQ_TEXT);
+        darray_add_string(a, p);
+      } else
+        darray_add_int32(a, DBQ_NULL);
       break;
     case DBQ_BLOB:
-      g_ptr_array_add(a, GINT_TO_POINTER(va_arg(va, int)));
-      g_ptr_array_add(a, va_arg(va, char *));
+      t = va_arg(va, int);
+      p = va_arg(va, char *);
+      if(p) {
+        darray_add_int32(a, DBQ_BLOB);
+        darray_add_dat(a, p, t);
+      } else
+        darray_add_int32(a, DBQ_NULL);
       break;
     default:
       g_return_val_if_reached(NULL);
     }
   }
   va_end(va);
-  g_ptr_array_add(a, GINT_TO_POINTER(DBQ_END));
+  darray_add_int32(a, DBQ_END);
 
-  return g_ptr_array_free(a, FALSE);
+  return g_byte_array_free(a, FALSE);
 }
 
 
@@ -426,9 +423,9 @@ gint64 db_fl_addhash(const char *path, guint64 size, time_t lastmod, const char 
   db_queue_lock();
   db_queue_push_unlocked(DBF_NEXT,
     "INSERT OR IGNORE INTO hashdata (root, size, tthl) VALUES(?, ?, ?)",
-    DBQ_TEXT, g_strdup(hash),
+    DBQ_TEXT, hash,
     DBQ_INT64, (gint64)size,
-    DBQ_BLOB, tthl_len, g_strdup(tthl),
+    DBQ_BLOB, tthl_len, tthl,
     DBQ_END
   );
 
@@ -439,9 +436,9 @@ gint64 db_fl_addhash(const char *path, guint64 size, time_t lastmod, const char 
   // just do a REPLACE.
   db_queue_push_unlocked(DBF_LAST,
     "INSERT OR REPLACE INTO hashfiles (tth, lastmod, filename) VALUES(?, ?, ?)",
-    DBQ_TEXT, g_strdup(hash),
+    DBQ_TEXT, hash,
     DBQ_INT64, (gint64)lastmod,
-    DBQ_TEXT, g_strdup(path),
+    DBQ_TEXT, path,
     DBQ_END
   );
 
@@ -633,8 +630,8 @@ void db_dl_rm(const char *tth) {
   base32_encode(tth, hash);
 
   db_queue_lock();
-  db_queue_push_unlocked(0, "DELETE FROM dl_users WHERE tth = ?", DBQ_TEXT, g_strdup(hash), DBQ_END);
-  db_queue_push_unlocked(0, "DELETE FROM dl WHERE tth = ?", DBQ_TEXT, g_strdup(hash), DBQ_END);
+  db_queue_push_unlocked(0, "DELETE FROM dl_users WHERE tth = ?", DBQ_TEXT, hash, DBQ_END);
+  db_queue_push_unlocked(0, "DELETE FROM dl WHERE tth = ?", DBQ_TEXT, hash, DBQ_END);
   db_queue_unlock();
 }
 
@@ -645,8 +642,8 @@ void db_dl_setstatus(const char *tth, char priority, char error, const char *err
   base32_encode(tth, hash);
   db_queue_push(0, "UPDATE dl SET priority = ?, error = ?, error_msg = ? WHERE tth = ?",
     DBQ_INT, (int)priority, DBQ_INT, (int)error,
-    DBQ_TEXT, error_msg ? g_strdup(error_msg) : NULL,
-    DBQ_TEXT, g_strdup(hash),
+    DBQ_TEXT, error_msg,
+    DBQ_TEXT, hash,
     DBQ_END
   );
 }
@@ -662,16 +659,16 @@ void db_dl_setuerr(guint64 uid, const char *tth, char error, const char *error_m
     base32_encode(tth, hash);
     db_queue_push(0, "UPDATE dl_users SET error = ?, error_msg = ? WHERE uid = ? AND tth = ?",
       DBQ_INT, (int)error,
-      DBQ_TEXT, error_msg ? g_strdup(error_msg) : NULL,
+      DBQ_TEXT, error_msg,
       DBQ_INT64, (gint64)uid,
-      DBQ_TEXT, g_strdup(hash),
+      DBQ_TEXT, hash,
       DBQ_END
     );
   // for all dl items
   } else {
     db_queue_push(0, "UPDATE dl_users SET error = ?, error_msg = ? WHERE uid = ?",
       DBQ_INT, (int)error,
-      DBQ_TEXT, error_msg ? g_strdup(error_msg) : NULL,
+      DBQ_TEXT, error_msg,
       DBQ_INT64, (gint64)uid,
       DBQ_END
     );
@@ -689,7 +686,7 @@ void db_dl_rmuser(guint64 uid, const char *tth) {
     base32_encode(tth, hash);
     db_queue_push(0, "DELETE FROM dl_users WHERE uid = ? AND tth = ?",
       DBQ_INT64, (gint64)uid,
-      DBQ_TEXT, g_strdup(hash),
+      DBQ_TEXT, hash,
       DBQ_END
     );
   // for all dl items
@@ -707,8 +704,8 @@ void db_dl_settthl(const char *tth, const char *tthl, int len) {
   char hash[40] = {};
   base32_encode(tth, hash);
   db_queue_push(0, "UPDATE dl SET tthl = ? WHERE tth = ?",
-    DBQ_BLOB, len, g_memdup(tthl, len),
-    DBQ_TEXT, g_strdup(hash),
+    DBQ_BLOB, len, tthl,
+    DBQ_TEXT, hash,
     DBQ_END
   );
 }
@@ -719,12 +716,12 @@ void db_dl_insert(const char *tth, guint64 size, const char *dest, char priority
   char hash[40] = {};
   base32_encode(tth, hash);
   db_queue_push(0, "INSERT OR REPLACE INTO dl (tth, size, dest, priority, error, error_msg) VALUES (?, ?, ?, ?, ?, ?)",
-    DBQ_TEXT, g_strdup(hash),
+    DBQ_TEXT, hash,
     DBQ_INT64, (gint64)size,
-    DBQ_TEXT, g_strdup(dest),
+    DBQ_TEXT, dest,
     DBQ_INT, (int)priority,
     DBQ_INT, (int)error,
-    DBQ_TEXT, error_msg ? g_strdup(error_msg) : NULL,
+    DBQ_TEXT, error_msg,
     DBQ_END
   );
 }
@@ -735,10 +732,10 @@ void db_dl_adduser(const char *tth, guint64 uid, char error, const char *error_m
   char hash[40] = {};
   base32_encode(tth, hash);
   db_queue_push(0, "INSERT OR REPLACE INTO dl_users (tth, uid, error, error_msg) VALUES (?, ?, ?, ?)",
-    DBQ_TEXT, g_strdup(hash),
+    DBQ_TEXT, hash,
     DBQ_INT64, (gint64)uid,
     DBQ_INT, (int)error,
-    DBQ_TEXT, error_msg ? g_strdup(error_msg) : NULL,
+    DBQ_TEXT, error_msg,
     DBQ_END
   );
 }

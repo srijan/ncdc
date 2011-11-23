@@ -1,0 +1,171 @@
+This is a POD file. If you prefer reading a man page, run `perldoc ./HACKING`.
+Or use `pod2text HACKING` to generate an easier to read text file. Both of
+these programs should come with a default Perl installation.
+
+
+
+=head1 DEBUGGING
+
+=head2 Known issues
+
+If you experience random crashes while using ncdc, try setting the I<tls_policy>
+setting to I<disabled>. If this gets rid of the crashes, then most likely you're
+hit by bugs in glib-networking:
+L<#659821|https://bugzilla.gnome.org/show_bug.cgi?id=659821> and
+L<#660252|https://bugzilla.gnome.org/show_bug.cgi?id=660252>.
+
+
+=head2 General
+
+Any debugging messages are written to C<~/.ncdc/stderr.log>. Note that this
+file is emptied every time ncdc starts up, so be sure to either make backups or
+check the contents of the log file before this happens!
+
+Messages starting with C<CRITICAL> almost always indicate a bug. If you find
+one, please report it! Messages with starting with C<WARNING> can happen both
+because something unexpected happened or because of a bug. If you see such a
+message along the lines of "assertion failure" or "line should not be reached",
+then this always indicates a bug.
+
+By default, debug-level messages are not logged, enable the I<log_debug> setting
+within ncdc to get these as well. Be warned, however, that depending on how you
+use ncdc, this may generate a lot of data. My ncdc generates about 1 GiB per
+week, for instance.
+
+
+=head2 GDB
+
+GDB can be used to debug various kinds of crashes (but not all of them),
+deadlocks or to find out exactly when a C<CRITICAL> or C<WARNING> message is
+being logged.  Note that you usually want ncdc to be compiled with debugging
+symbols when using GDB. Compile as follows:
+
+  ./configure CFLAGS=-g && make clean && make
+
+How you run gdb depends on the kind of problem you are experiencing. Here are
+some tips for various situations:
+
+=over
+
+=item ncdc crashes shortly after startup.
+
+The easiest way is to just start ncdc within gdb directly.
+
+  $ gdb /path/to/ncdc
+  [..]
+  > run
+
+=item ncdc crashes after I perform a certain action.
+
+Running ncdc within gdb as above is in that case not very optimal, since the
+gdb messages may garble the screen and make it annoying to use ncdc. In this
+case it's easier attach gdb to a running ncdc. To do so, run ncdc as you
+usually would, and then run the following in a different terminal:
+
+  $ gdb /path/to/ncdc $ncdc_pid
+  [..]
+  > continue
+
+=item ncdc crashes randomly after a long period of time.
+
+In this case it may be easier to use core dumps, as follows:
+
+  $ ulimit -c unlimited
+  $ ncdc  # run ncdc as you usually would
+  [let it crash]
+  $ gdb /path/to/ncdc core
+
+=back
+
+The above tips work nice for debugging crashes, but gdb can also be used to
+debug when a C<WARNING> or C<CRITICAL> message is logged. Run ncdc with the
+I<G_DEBUG> environment variable set to either I<fatal-criticals> or
+I<fatal-warnings>. For example, the following will let ncdc crash as soon as a
+C<WARNING> message is logged.
+
+  $ G_DEBUG=fatal-warnings /path/to/ncdc
+
+If you happened to get gdb to see the crash, then you can use gdb commands to
+fetch more information on the crash. There are many online resources on
+debugging using gdb, but here are a few important commands:
+
+=over
+
+=item bt
+
+Get a backtrace.
+
+=item info threads
+
+List the active threads.
+
+=item thread $number
+
+Switch to another thread.
+
+=back
+
+In the off chance that you happened to have found a deadlock, these are easiest
+to debug by attaching gdb to a deadlocked ncdc. Running ncdc within gdb or
+using core dumps isn't very useful in these situations.
+
+
+=head2 Valgrind
+
+Valgrind can be used to debug crashes for which GDB fails. Bugs caused by
+incorrect handling of memory are very easily detected with valgrind. A major
+downside, however, is that ncdc takes approximately 10 times as much memory and
+is 10 times slower than when run natively or in GDB. As with GDB, make sure you
+have ncdc compiled with debugging symbols. To run ncdc in valgrind, use the
+following command:
+
+  $ G_DEBUG=gc-friendly G_SLICE=always-malloc valgrind --leak-check=full\
+      --num-callers=25 --log-file=valgrindlog /path/to/ncdc
+
+And any issue valgrind can find will be written to the file 'valgrindlog'. Note
+that some of the reported problems, especially memory leaks, may not
+necessarily come from ncdc itself, but are harmless issues within glib or other
+libraries.
+
+The following is an attempt at a simple valgrind suppression file, save this to
+a file and add the C<--suppressions=$file> argument to the valgrind command in
+order to use it. These suppressions don't cover everything, but will
+significantly reduce the amount of problems reported. Hopefully they aren't so
+general that they might masquerade actual bugs.
+
+  {
+    init keeps memory around
+    Memcheck:Leak
+    ...
+    fun:g_type_init_with_debug_flags
+  }
+  {
+    interfaces are registered dynamically and never freed
+    Memcheck:Leak
+    ...
+    fun:g_type_add_interface_static
+  }
+  {
+    same for types
+    Memcheck:Leak
+    ...
+    fun:g_type_register_static
+  }
+  {
+    class initializations are kept around
+    Memcheck:Leak
+    ...
+    fun:type_class_init_Wm
+  }
+
+If you see a lot of error reports about overlapping memory regions passed to
+C<memcpy()>, then you're probably running a too old version of valgrind with a
+too new version of libc. You can either upgrade valgrind or add the following
+to your suppression file:
+
+  {
+    Valgrind thinks memmove() is a memcpy()
+    Memcheck:Overlap
+    fun:memcpy
+  }
+

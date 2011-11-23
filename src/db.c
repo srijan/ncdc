@@ -690,19 +690,19 @@ void db_dl_getdlus(void (*callback)(const char *tth, guint64 uid, char error, co
 }
 
 
-// (queued) Delete a row from dl and any rows from dl_users that reference the row.
+// Delete a row from dl and any rows from dl_users that reference the row.
 void db_dl_rm(const char *tth) {
   char hash[40] = {};
   base32_encode(tth, hash);
 
   db_queue_lock();
-  db_queue_push_unlocked(0, "DELETE FROM dl_users WHERE tth = ?", DBQ_TEXT, hash, DBQ_END);
+  db_queue_push_unlocked(DBF_NEXT, "DELETE FROM dl_users WHERE tth = ?", DBQ_TEXT, hash, DBQ_END);
   db_queue_push_unlocked(0, "DELETE FROM dl WHERE tth = ?", DBQ_TEXT, hash, DBQ_END);
   db_queue_unlock();
 }
 
 
-// (queued) Set the priority, error and error_msg columns of a dl row
+// Set the priority, error and error_msg columns of a dl row
 void db_dl_setstatus(const char *tth, char priority, char error, const char *error_msg) {
   char hash[40] = {};
   base32_encode(tth, hash);
@@ -715,7 +715,7 @@ void db_dl_setstatus(const char *tth, char priority, char error, const char *err
 }
 
 
-// (queued) Set the error information for a dl_user row (if tth != NULL), or
+// Set the error information for a dl_user row (if tth != NULL), or
 // all rows for a single user if tth = NULL.
 // TODO: tth = NULL is currently not very fast - no index on dl_user(uid).
 void db_dl_setuerr(guint64 uid, const char *tth, char error, const char *error_msg) {
@@ -742,7 +742,7 @@ void db_dl_setuerr(guint64 uid, const char *tth, char error, const char *error_m
 }
 
 
-// (queued) Remove a dl_user row from the database (if tth != NULL), or all
+// Remove a dl_user row from the database (if tth != NULL), or all
 // rows from a single user if tth = NULL. (Same note as for db_dl_setuerr()
 // applies here).
 void db_dl_rmuser(guint64 uid, const char *tth) {
@@ -765,7 +765,7 @@ void db_dl_rmuser(guint64 uid, const char *tth) {
 }
 
 
-// (queued) Sets the tthl column for a dl row.
+// Sets the tthl column for a dl row.
 void db_dl_settthl(const char *tth, const char *tthl, int len) {
   char hash[40] = {};
   base32_encode(tth, hash);
@@ -777,7 +777,7 @@ void db_dl_settthl(const char *tth, const char *tthl, int len) {
 }
 
 
-// (queued) Adds a new row to the dl table.
+// Adds a new row to the dl table.
 void db_dl_insert(const char *tth, guint64 size, const char *dest, char priority, char error, const char *error_msg) {
   char hash[40] = {};
   base32_encode(tth, hash);
@@ -793,7 +793,7 @@ void db_dl_insert(const char *tth, guint64 size, const char *dest, char priority
 }
 
 
-// (queued) Adds a new row to the dl_users table.
+// Adds a new row to the dl_users table.
 void db_dl_adduser(const char *tth, guint64 uid, char error, const char *error_msg) {
   char hash[40] = {};
   base32_encode(tth, hash);

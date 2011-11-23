@@ -49,6 +49,7 @@
 
 static GAsyncQueue *db_queue = NULL;
 static GThread *db_thread = NULL;
+static GHashTable *db_stmt_cache = NULL;
 
 
 static gpointer db_thread_func(gpointer dat);
@@ -144,6 +145,25 @@ static void db_queue_item_error(char *q) {
 }
 
 
+// Similar to sqlite3_prepare_v2(), except this returns a cached statement
+// handler if the query had already been prepared before. Note that the lookup
+// in the db_stmt_cache is *NOT* done by the actual query string, but by its
+// pointer value. This is a lot more efficient, but assumes that SQL statements
+// are never dynamically generated: they must be somewhere in static memory.
+// Note: db_stmt_cache is assumed to be used only for the given *db pointer.
+// Important: DON'T run sqlite3_finalize() on queries returned by this
+// function! Use sqlite3_reset() instead.
+static int db_stmt_prepare(sqlite3 *db, const char *query, sqlite3_stmt **s) {
+  *s = g_hash_table_lookup(db_stmt_cache, query);
+  if(*s)
+    return SQLITE_OK;
+  int r = sqlite3_prepare_v2(db, query, -1, s, NULL);
+  if(r == SQLITE_OK)
+    g_hash_table_insert(db_stmt_cache, (gpointer)query, *s);
+  return r;
+}
+
+
 // Executes a single query.
 // If transaction = TRUE, the query is assumed to be executed in a transaction
 //   (which has already been initiated)
@@ -161,10 +181,10 @@ static gboolean db_queue_process_one(sqlite3 *db, char *q, gboolean transaction,
   // Would be nice to have the parameters logged
   g_debug("db: Executing \"%s\" (%s transaction)", query, transaction ? "inside" : "outside");
 
-  // TODO: use cached prepared statements
+  // Get statement handler
   int r = SQLITE_ROW;
   sqlite3_stmt *s;
-  if(sqlite3_prepare_v2(db, query, -1, &s, NULL)) {
+  if(db_stmt_prepare(db, query, &s)) {
     g_critical("SQLite3 error preparing `%s': %s", query, sqlite3_errmsg(db));
     r = SQLITE_ERROR;
   }
@@ -245,18 +265,18 @@ static gboolean db_queue_process_one(sqlite3 *db, char *q, gboolean transaction,
   // Fetch last id, if requested
   if(r == SQLITE_DONE && wantlastid)
     lastid = sqlite3_last_insert_rowid(db);
-  sqlite3_finalize(s);
+  sqlite3_reset(s);
 
   // Commit, if requested
   if(r == SQLITE_DONE && commit) {
-    if(sqlite3_prepare_v2(db, "COMMIT", -1, &s, NULL))
+    if(db_stmt_prepare(db, "COMMIT", &s))
       r = SQLITE_ERROR;
     else
       while((r = sqlite3_step(s)) == SQLITE_BUSY)
         ;
     if(r != SQLITE_DONE)
       g_critical("SQLite3 error committing transaction: %s", sqlite3_errmsg(db));
-    sqlite3_finalize(s);
+    sqlite3_reset(s);
   }
 
   // Rollback, if we're in a transaction and the query/commit failed
@@ -394,9 +414,13 @@ static void db_queue_process(sqlite3 *db) {
 }
 
 
+static void db_stmt_free(gpointer dat) { sqlite3_finalize(dat); }
+
 static gpointer db_thread_func(gpointer dat) {
   sqlite3 *db = dat;
+  db_stmt_cache = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL, db_stmt_free);
   db_queue_process(db);
+  g_hash_table_unref(db_stmt_cache);
   sqlite3_close(db);
   return NULL;
 }

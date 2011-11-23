@@ -807,6 +807,26 @@ void db_dl_adduser(const char *tth, guint64 uid, char error, const char *error_m
 }
 
 
+gboolean db_dl_checkhash(const char *root, int num, const char *hash) {
+  char rhash[40] = {};
+  base32_encode(root, rhash);
+  GAsyncQueue *a = g_async_queue_new_full(g_free);
+  db_queue_push(DBF_SINGLE, "SELECT 1 FROM dl WHERE tth = ? AND substr(tthl, 1+(24*?), 24) = ?",
+    DBQ_TEXT, rhash,
+    DBQ_INT, num,
+    DBQ_BLOB, 24, hash,
+    DBQ_RES, a, DBQ_INT,
+    DBQ_END
+  );
+
+  char *r = g_async_queue_pop(a);
+  gboolean res = darray_get_int32(r) == SQLITE_ROW ? TRUE : FALSE;
+  g_free(r);
+  g_async_queue_unref(a);
+  return res;
+}
+
+
 
 
 // Executes a VACUUM

@@ -946,14 +946,8 @@ static gboolean dl_hash_check(struct dl *dl, int num, char *tth) {
     g_return_val_if_fail(num == 0, FALSE);
     return memcmp(tth, dl->hash, 24) == 0 ? TRUE : FALSE;
   }
-  // Otherwise, fetch the TTHL data and check against the right block hash.
-  // It is probably faster to keep the TTHL data in memory, but since this data
-  // may be around 200KiB and we can have a large number of dl structs, let's
-  // just hope GDBM has a sensible caching mechanism.
-
-  // TODO: check with sqlite database.
-  // return memcmp(tth, tthl+(num*24), 24) == 0 ? TRUE : FALSE;
-  return TRUE;
+  // Otherwise, check against the TTHL data in the database.
+  return db_dl_checkhash(dl->hash, num, tth);
 }
 
 

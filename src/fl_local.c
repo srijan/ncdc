@@ -57,8 +57,8 @@ struct ratecalc        fl_hash_rate;
 // isn't particularly fast.
 char *fl_local_path(struct fl_list *fl) {
   if(!fl->parent->parent)
-    return g_key_file_get_string(conf_file, "share", fl->name, NULL);
-  char *tmp, *root, *path = g_strdup(fl->name);
+    return g_strdup(db_share_path(fl->name));
+  char *tmp, *path = g_strdup(fl->name);
   struct fl_list *cur = fl->parent;
   while(cur->parent && cur->parent->parent) {
     tmp = path;
@@ -66,12 +66,9 @@ char *fl_local_path(struct fl_list *fl) {
     g_free(tmp);
     cur = cur->parent;
   }
-  root = g_key_file_get_string(conf_file, "share", cur->name, NULL);
-  tmp = path;
-  path = g_build_filename(root, path, NULL);
-  g_free(root);
-  g_free(tmp);
-  return path;
+  tmp = g_build_filename(db_share_path(cur->name), path, NULL);
+  g_free(path);
+  return tmp;
 }
 
 
@@ -83,22 +80,15 @@ char *fl_local_path(struct fl_list *fl) {
 struct fl_list *fl_local_from_path(const char *path) {
   struct fl_list *n = fl_list_from_path(fl_local_list, path);
   if(!n && path[0] == '/') {
-    char **names = g_key_file_get_keys(conf_file, "share", NULL, NULL);
-    char **name;
-    char *cpath = NULL;
-    for(name=names; name && *name; name++) {
-      cpath = g_key_file_get_string(conf_file, "share", *name, NULL);
-      if(strncmp(path, cpath, strlen(cpath)) == 0)
+    struct db_share_item *l = db_share_list();
+    for(; l->name; l++)
+      if(strncmp(path, l->path, strlen(l->path)) == 0)
         break;
-      g_free(cpath);
-    }
-    if(name && *name) {
-      char *npath = g_strconcat(*name, path+strlen(cpath), NULL);
+    if(l->name) {
+      char *npath = g_strconcat(l->name, path+strlen(l->path), NULL);
       n = fl_list_from_path(fl_local_list, npath);
-      g_free(cpath);
       g_free(npath);
     }
-    g_strfreev(names);
   }
   return n;
 }
@@ -822,16 +812,17 @@ static void fl_refresh_process() {
   // refresh the entire share, which consists of multiple dirs.
   } else {
     time(&fl_refresh_last);
-    char **names = g_key_file_get_keys(conf_file, "share", NULL, NULL);
-    int i, len = names ? g_strv_length(names) : 0;
+    struct db_share_item *l;
+    int i, len = 0;
+    for(l=db_share_list(); l->name; l++)
+      len++;
     args->file = g_new0(struct fl_list *, len+1);
     args->res  = g_new0(struct fl_list *, len+1);
     args->path = g_new0(char *, len+1);
-    for(i=0; i<len; i++) {
-      args->file[i] = fl_refresh_getroot(names[i]);
-      args->path[i] = g_key_file_get_string(conf_file, "share", names[i], NULL);
+    for(i=0,l=db_share_list(); l->name; l++) {
+      args->file[i] = fl_refresh_getroot(l->name);
+      args->path[i] = g_strdup(l->path);
     }
-    g_strfreev(names);
   }
 
   // scan the requested directories in the background
@@ -984,12 +975,8 @@ void fl_init() {
   ui_m(NULL, UIM_NOLOG|UIM_DIRECT, "Loading file list...");
   ui_draw();
 
-  // read config
-  gboolean sharing = TRUE;
-  char **shares = g_key_file_get_keys(conf_file, "share", NULL, NULL);
-  if(!shares || !g_strv_length(shares))
-    sharing = FALSE;
-  g_strfreev(shares);
+  // check whether something is shared
+  gboolean sharing = db_share_list()->name ? TRUE : FALSE;
 
   // load our files.xml.bz2
   fl_local_list = sharing ? fl_load(fl_local_list_file, &err, TRUE) : NULL;

@@ -492,23 +492,17 @@ static void c_userlist(char *args) {
 
 
 static void listshares() {
-  gsize len;
-  char **dirs = g_key_file_get_keys(conf_file, "share", &len, NULL);
-  if(!dirs || len == 0)
+  struct db_share_item *l = db_share_list();
+  if(!l->name)
     ui_m(NULL, 0, "Nothing shared.");
   else {
     ui_m(NULL, 0, "");
-    char **cur;
-    for(cur=dirs; *cur; cur++) {
-      char *d = g_key_file_get_string(conf_file, "share", *cur, NULL);
-      struct fl_list *fl = fl_list_file(fl_local_list, *cur);
-      ui_mf(NULL, 0, " /%s -> %s (%s)", *cur, d, str_formatsize(fl->size));
-      g_free(d);
+    for(; l->name; l++) {
+      struct fl_list *fl = fl_local_list ? fl_list_file(fl_local_list, l->name) : NULL;
+      ui_mf(NULL, 0, " /%s -> %s (%s)", l->name, l->path, fl ? str_formatsize(fl->size) : "-");
     }
     ui_m(NULL, 0, "");
   }
-  if(dirs)
-    g_strfreev(dirs);
 }
 
 
@@ -522,7 +516,7 @@ static void c_share(char *args) {
   str_arg2_split(args, &first, &second);
   if(!first || !first[0] || !second || !second[0])
     ui_m(NULL, 0, "Error parsing arguments. See \"/help share\" for details.");
-  else if(g_key_file_has_key(conf_file, "share", first, NULL))
+  else if(db_share_path(first))
     ui_m(NULL, 0, "You have already shared a directory with that name.");
   else {
     char *path = path_expand(second);
@@ -532,28 +526,20 @@ static void c_share(char *args) {
       ui_m(NULL, 0, "Not a directory.");
     else {
       // Check whether it (or a subdirectory) is already shared
-      char **dirs = g_key_file_get_keys(conf_file, "share", NULL, NULL);
-      char **dir;
-      for(dir=dirs; dirs && *dir; dir++) {
-        char *d = g_key_file_get_string(conf_file, "share", *dir, NULL);
-        if(strncmp(d, path, MIN(strlen(d), strlen(path))) == 0) {
-          g_free(d);
+      struct db_share_item *l = db_share_list();
+      for(; l->name; l++)
+        if(strncmp(l->path, path, MIN(strlen(l->path), strlen(path))) == 0)
           break;
-        }
-        g_free(d);
-      }
-      if(dirs && *dir)
-        ui_mf(NULL, 0, "Directory already (partly) shared in /%s", *dir);
+      if(l->name)
+        ui_mf(NULL, 0, "Directory already (partly) shared in /%s", l->name);
       else {
-        g_key_file_set_string(conf_file, "share", first, path);
-        conf_save();
+        db_share_add(first, path);
         fl_share(first);
         ui_mf(NULL, 0, "Added to share: /%s -> %s", first, path);
       }
-      if(dirs)
-        g_strfreev(dirs);
-      free(path);
     }
+    if(path)
+      free(path);
   }
   g_free(first);
 }
@@ -574,29 +560,34 @@ static void c_share_sug(char *args, char **sug) {
 
 
 static void c_unshare(char *args) {
-  if(!args[0])
+  if(!args[0]) {
     listshares();
+    return;
   // otherwise we may crash
-  else if(fl_refresh_queue && fl_refresh_queue->head)
+  } else if(fl_refresh_queue && fl_refresh_queue->head) {
     ui_m(NULL, 0, "Sorry, can't remove directories from the share while refreshing.");
-  else {
-    while(args[0] == '/')
-      args++;
-    char *path = g_key_file_get_string(conf_file, "share", args, NULL);
-    if(!args[0]) {
-      g_key_file_remove_group(conf_file, "share", NULL);
-      conf_save();
-      fl_unshare(NULL);
-      ui_m(NULL, 0, "Removed all directories from share.");
-    } else if(!path)
+    return;
+  }
+
+  while(args[0] == '/')
+    args++;
+
+  // Remove everything
+  if(!args[0]) {
+    db_share_rm(NULL);
+    fl_unshare(NULL);
+    ui_m(NULL, 0, "Removed all directories from share.");
+
+  // Remove a single dir
+  } else {
+    const char *path = db_share_path(args);
+    if(!path)
       ui_m(NULL, 0, "No shared directory with that name.");
     else {
-      g_key_file_remove_key(conf_file, "share", args, NULL);
-      conf_save();
-      fl_unshare(args);
       ui_mf(NULL, 0, "Directory /%s (%s) removed from share.", args, path);
+      db_share_rm(args);
+      fl_unshare(args);
     }
-    g_free(path);
   }
 }
 
@@ -605,11 +596,10 @@ static void c_unshare_sug(char *args, char **sug) {
   int len = strlen(args), i = 0;
   if(args[0] == '/')
     args++;
-  char **dir, **dirs = g_key_file_get_keys(conf_file, "share", NULL, NULL);
-  for(dir=dirs; dir && *dir && i<20; dir++)
-    if(strncmp(args, *dir, len) == 0 && strlen(*dir) != len)
-      sug[i++] = g_strdup(*dir);
-  g_strfreev(dirs);
+  struct db_share_item *l = db_share_list();
+  for(; l->name; l++)
+    if(strncmp(args, l->name, len) == 0 && strlen(l->name) != len)
+      sug[i++] = g_strdup(l->name);
 }
 
 

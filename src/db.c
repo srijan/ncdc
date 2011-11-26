@@ -853,6 +853,123 @@ gboolean db_dl_checkhash(const char *root, int num, const char *hash) {
 
 
 
+
+
+// The share table
+
+// The db_share* functions are NOT thread-safe, and must be accessed only from
+// the main thread. (This is because they do caching)
+
+#if INTERFACE
+struct db_share_item { char *name; char *path; };
+#endif
+
+GArray *db_share_cache = NULL;
+
+
+// Returns a zero-terminated array of the shared directories. The array is
+// ordered by name. The array should not be freed, and may be modified by any
+// later call to a db_share_ function.
+struct db_share_item *db_share_list() {
+  // Return cache
+  if(db_share_cache)
+    return (struct db_share_item *)db_share_cache->data;
+
+  // Otherwise, create the cache
+  db_share_cache = g_array_new(TRUE, FALSE, sizeof(struct db_share_item));
+  GAsyncQueue *a = g_async_queue_new_full(g_free);
+  db_queue_push(DBF_SINGLE, "SELECT name, path FROM share ORDER BY name",
+    DBQ_RES, a, DBQ_TEXT, DBQ_TEXT,
+    DBQ_END
+  );
+
+  char *r;
+  struct db_share_item i;
+  while((r = g_async_queue_pop(a)) && darray_get_int32(r) == SQLITE_ROW) {
+    i.name = g_strdup(darray_get_string(r));
+    i.path = g_strdup(darray_get_string(r));
+    g_array_append_val(db_share_cache, i);
+    g_free(r);
+  }
+  g_free(r);
+  g_async_queue_unref(a);
+
+  return (struct db_share_item *)db_share_cache->data;
+}
+
+
+// Returns the path associated with a shared directory. The returned string
+// should not be freed, and may be modified by any later call to a db_share
+// function.
+const char *db_share_path(const char *name) {
+  // The list is always ordered, so a binary search is possible and will be
+  // more efficient than this linear search. I don't think anyone has enough
+  // shared directories for that to matter, though.
+  struct db_share_item *l = db_share_list();
+  for(; l->name; l++)
+    if(strcmp(name, l->name) == 0)
+      return l->path;
+  return NULL;
+}
+
+
+// Remove an item from the share. Use name = NULL to remove everything.
+void db_share_rm(const char *name) {
+  // Remove all
+  if(!name) {
+    // Purge cache
+    db_share_item *l = db_share_list();
+    for(; l->name; l++) {
+      g_free(l->name);
+      g_free(l->path);
+    }
+    g_array_set_size(db_share_cache, 0);
+
+    // Remove from the db
+    db_queue_push(0, "DELETE FROM share", DBQ_END);
+
+  // Remove one
+  } else {
+    // Remove from the cache
+    struct db_share_item *l = db_share_list();
+    int i;
+    for(i=0; l->name; l++,i++) {
+      if(strcmp(name, l->name) == 0) {
+        g_free(l->name);
+        g_free(l->path);
+        g_array_remove_index(db_share_cache, i);
+        break;
+      }
+    }
+
+    // Remove from the db
+    db_queue_push(0, "DELETE FROM share WHERE name = ?", DBQ_TEXT, name, DBQ_END);
+  }
+}
+
+
+// Add an item to the share.
+void db_share_add(const char *name, const char *path) {
+  // Add to the cache
+  struct db_share_item new;
+  new.name = g_strdup(name);
+  new.path = g_strdup(path);
+
+  struct db_share_item *l = db_share_list();
+  int i;
+  for(i=0; l->name; l++,i++)
+    if(strcmp(l->name, name) > 0)
+      break;
+  g_array_insert_val(db_share_cache, i, new);
+
+  // Add to the db
+  db_queue_push(0, "INSERT INTO share (name, path) VALUES (?, ?)", DBQ_TEXT, name, DBQ_TEXT, path, DBQ_END);
+}
+
+
+
+
+
 // Executes a VACUUM
 void db_vacuum() {
   db_queue_push(DBF_SINGLE, "VACUUM", DBQ_END);

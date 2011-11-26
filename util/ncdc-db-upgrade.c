@@ -379,6 +379,11 @@ static void u20_initsqlite() {
       "  PRIMARY KEY(tth, uid)"
       ");"
 
+      "CREATE TABLE share ("
+      "  name TEXT NOT NULL PRIMARY KEY,"
+      "  path TEXT NOT NULL"
+      ");"
+
     , NULL, NULL, &err))
     u20_revert("%s", err?err:sqlite3_errmsg(u20_sql));
 
@@ -641,6 +646,35 @@ static void u20_dl() {
 };
 
 
+static void u20_config() {
+  printf("-- Converting configuration...");
+  fflush(stdout);
+
+  // Convert [share]
+  sqlite3_stmt *s;
+  if(sqlite3_prepare_v2(u20_sql,
+      "INSERT INTO share (name, path) VALUES(?, ?)", -1, &s, NULL))
+    u20_revert("%s", sqlite3_errmsg(u20_sql));
+  char **dirs = g_key_file_get_keys(u20_conf, "share", NULL, NULL);
+  char **dir;
+  for(dir=dirs; dirs && *dir; dir++) {
+    char *d = g_key_file_get_string(u20_conf, "share", *dir, NULL);
+    if(!d)
+      continue;
+    sqlite3_bind_text(s, 1, *dir, -1, SQLITE_STATIC);
+    sqlite3_bind_text(s, 2, d, -1, SQLITE_STATIC);
+    if(sqlite3_step(s) != SQLITE_DONE || sqlite3_reset(s))
+      u20_revert("%s", sqlite3_errmsg(u20_sql));
+    g_free(d);
+  }
+  g_strfreev(dirs);
+  if(sqlite3_finalize(s))
+    u20_revert("%s", sqlite3_errmsg(u20_sql));
+
+  puts(" done.");
+}
+
+
 static void u20_final() {
   printf("-- Finalizing...");
   fflush(stdout);
@@ -680,6 +714,7 @@ static void u20() {
 
   u20_hashdata();
   u20_dl();
+  u20_config();
   u20_final();
 
   g_key_file_free(u20_conf);

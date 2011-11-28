@@ -96,6 +96,18 @@ void base32_decode(const char *from, char *to) {
 }
 
 
+guint64 rand_64() {
+  GRand *r = g_rand_new();
+  guint32 r1 = g_rand_int(r);
+  g_rand_free(r);
+  r = g_rand_new();
+  g_rand_set_seed(r, g_rand_int(r));
+  guint32 r2 = g_rand_int(r);
+  g_rand_free(r);
+  return (((guint64)r1)<<32) + r2;
+}
+
+
 #define isbase32(s) (strspn(s, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ234567") == strlen(s))
 #define istth(s) (strlen(s) == 39 && isbase32(s))
 
@@ -384,6 +396,13 @@ static void u20_initsqlite() {
       "  path TEXT NOT NULL"
       ");"
 
+      "CREATE TABLE vars ("
+      "  name TEXT NOT NULL,"
+      "  hub INTEGER NOT NULL DEFAULT 0,"
+      "  value TEXT NOT NULL,"
+      "  PRIMARY KEY(name, hub)"
+      ");"
+
     , NULL, NULL, &err))
     u20_revert("%s", err?err:sqlite3_errmsg(u20_sql));
 
@@ -646,6 +665,47 @@ static void u20_dl() {
 };
 
 
+static void u20_config_group(const char *group, sqlite3_stmt *s) {
+  gint64 id = 0;
+  // This is a hub group
+  if(*group == '#') {
+    // Get or create hubid
+    char *tmp = g_key_file_get_string(u20_conf, group, "hubid", NULL);
+    id = tmp ? (gint64)g_ascii_strtoull(tmp, NULL, 10) : 0;
+    if(!id)
+      id = (gint64)rand_64();
+    g_free(tmp);
+    // set hubname
+    sqlite3_bind_text(s, 1, "hubname", -1, SQLITE_STATIC);
+    sqlite3_bind_int64(s, 2, id);
+    sqlite3_bind_text(s, 3, group, -1, SQLITE_STATIC);
+    if(sqlite3_step(s) != SQLITE_DONE || sqlite3_reset(s))
+      u20_revert("%s", sqlite3_errmsg(u20_sql));
+
+  // Ignore groups we don't know
+  } else if(strcmp(group, "global") != 0 && strcmp(group, "log") != 0 && strcmp(group, "color") != 0)
+    return;
+
+  // Convert the keys
+  sqlite3_bind_int64(s, 2, id);
+  char **keys = g_key_file_get_keys(u20_conf, group, NULL, NULL);
+  char **key = keys;
+  for(; key&&*key; key++) {
+    // Ignore `hubid'
+    if(strcmp(*key, "hubid") == 0)
+      continue;
+    // Get value and convert
+    char *v = g_key_file_get_string(u20_conf, group, *key, NULL);
+    sqlite3_bind_text(s, 1, *key, -1, SQLITE_STATIC);
+    sqlite3_bind_text(s, 3, v, -1, SQLITE_STATIC);
+    if(sqlite3_step(s) != SQLITE_DONE || sqlite3_reset(s))
+      u20_revert("%s", sqlite3_errmsg(u20_sql));
+    g_free(v);
+  }
+  g_strfreev(keys);
+}
+
+
 static void u20_config() {
   printf("-- Converting configuration...");
   fflush(stdout);
@@ -668,6 +728,20 @@ static void u20_config() {
     g_free(d);
   }
   g_strfreev(dirs);
+  if(sqlite3_finalize(s))
+    u20_revert("%s", sqlite3_errmsg(u20_sql));
+
+  // vars
+  if(sqlite3_prepare_v2(u20_sql,
+      "INSERT INTO vars (name, hub, value) VALUES(?, ?, ?)", -1, &s, NULL))
+    u20_revert("%s", sqlite3_errmsg(u20_sql));
+
+  char **groups = g_key_file_get_groups(u20_conf, NULL);
+  char **group = groups;
+  for(; group&&*group; group++)
+    u20_config_group(*group, s);
+  g_strfreev(groups);
+
   if(sqlite3_finalize(s))
     u20_revert("%s", sqlite3_errmsg(u20_sql));
 

@@ -1056,6 +1056,25 @@ guint64 db_vars_hubid(const char *name) {
 }
 
 
+// Get a sorted list of hub names. Should be freed with g_strfreev()
+char **db_vars_hubs() {
+  db_vars_cacheget();
+
+  GPtrArray *p = g_ptr_array_new();
+  GHashTableIter i;
+  struct db_var_item *n;
+  g_hash_table_iter_init(&i, db_vars_cache);
+  while(g_hash_table_iter_next(&i, NULL, (gpointer *)&n))
+    if(strcmp(n->name, "hubname") == 0)
+      g_ptr_array_add(p, g_strdup(n->val));
+  g_ptr_array_sort(p, cmpstringp);
+  g_ptr_array_add(p, NULL);
+  return (char **)g_ptr_array_free(p, FALSE);
+}
+
+
+
+
 // conf_* macros and functions. These are provided here to ease the conversion
 // from the old glib key files to the new database format. These should be
 // replaced with a separate and better abstraction later on in a separate file

@@ -589,19 +589,20 @@ static void get_color(char *group, char *key) {
 
 static void set_color(char *group, char *key, char *val) {
   if(!val) {
-    UNSET(group, key);
+    db_vars_rm(0, key);
+    ui_mf(NULL, 0, "global.%s reset.", key);
     ui_colors_update();
+    return;
+  }
+
+  GError *err = NULL;
+  if(!ui_color_str_parse(val, NULL, NULL, NULL, &err)) {
+    ui_m(NULL, 0, err->message);
+    g_error_free(err);
   } else {
-    GError *err = NULL;
-    if(!ui_color_str_parse(val, NULL, NULL, NULL, &err)) {
-      ui_m(NULL, 0, err->message);
-      g_error_free(err);
-    } else {
-      g_key_file_set_string(conf_file, group, key, val);
-      conf_save();
-      ui_colors_update();
-      get_color(group, key);
-    }
+    db_vars_set(0, key, val);
+    ui_colors_update();
+    get_color(group, key);
   }
 }
 

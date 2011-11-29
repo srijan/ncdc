@@ -300,19 +300,20 @@ static void get_autorefresh(char *group, char *key) {
 
 
 static void set_autorefresh(char *group, char *key, char *val) {
-  if(!val)
-    UNSET(group, key);
+  if(!val) {
+    db_vars_rm(0, key);
+    ui_mf(NULL, 0, "global.%s reset.", key);
+    return;
+  }
+
+  long v = strtol(val, NULL, 10);
+  if((!v && errno == EINVAL) || v < INT_MIN || v > INT_MAX || v < 0)
+    ui_m(NULL, 0, "Invalid number.");
+  else if(v > 0 && v < 10)
+    ui_m(NULL, 0, "Interval between automatic refreshes should be at least 10 minutes.");
   else {
-    long v = strtol(val, NULL, 10);
-    if((!v && errno == EINVAL) || v < INT_MIN || v > INT_MAX || v < 0)
-      ui_m(NULL, 0, "Invalid number.");
-    else if(v > 0 && v < 10)
-      ui_m(NULL, 0, "Interval between automatic refreshes should be at least 10 minutes.");
-    else {
-      g_key_file_set_integer(conf_file, group, key, v);
-      conf_save();
-      get_autorefresh(group, key);
-    }
+    conf_set_int(0, key, v);
+    get_autorefresh(group, key);
   }
 }
 
@@ -513,15 +514,15 @@ static void set_dl_inc_dir(char *group, char *key, char *val) {
   }
   // no errors? save.
   if(cont) {
-    if(!val)
-      UNSET(group, key);
-    else {
-      g_key_file_set_string(conf_file, group, key, val);
+    if(!val) {
+      db_vars_rm(0, key);
+      ui_mf(NULL, 0, "global.%s reset.", key);
+    } else {
+      db_vars_set(0, key, val);
       if(dl)
         get_download_dir(group, key);
       else
         get_incoming_dir(group, key);
-      conf_save();
     }
   }
   if(warn)

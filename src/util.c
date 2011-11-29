@@ -76,10 +76,6 @@ char conf_pid[24];
     ? g_key_file_get_string(conf_file, "global", "encoding", NULL) \
     : g_strdup("UTF-8"))
 
-#define conf_autorefresh() (\
-  !g_key_file_has_key(conf_file, "global", "autorefresh", NULL) ? 60\
-    : g_key_file_get_integer(conf_file, "global", "autorefresh", NULL))
-
 #define conf_slots() (\
   !g_key_file_has_key(conf_file, "global", "slots", NULL) ? 10\
     : g_key_file_get_integer(conf_file, "global", "slots", NULL))
@@ -92,17 +88,9 @@ char conf_pid[24];
   !g_key_file_has_key(conf_file, "global", "minislot_size", NULL) ? 64\
     : g_key_file_get_integer(conf_file, "global", "minislot_size", NULL)))
 
-#define conf_download_dir() (\
-  !g_key_file_has_key(conf_file, "global", "download_dir", NULL) ? g_build_filename(conf_dir, "dl", NULL)\
-    : g_key_file_get_string(conf_file, "global", "download_dir", NULL))
-
 #define conf_download_slots() (\
   !g_key_file_has_key(conf_file, "global", "download_slots", NULL) ? 3\
     : g_key_file_get_integer(conf_file, "global", "download_slots", NULL))
-
-#define conf_incoming_dir() (\
-  !g_key_file_has_key(conf_file, "global", "incoming_dir", NULL) ? g_build_filename(conf_dir, "inc", NULL)\
-    : g_key_file_get_string(conf_file, "global", "incoming_dir", NULL))
 
 // Can be used even before the configuration file is loaded. In which case it
 // returns TRUE. Default is otherwise FALSE.

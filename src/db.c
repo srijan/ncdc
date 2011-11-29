@@ -1073,6 +1073,47 @@ void db_vars_set(guint64 hub, const char *name, const char *val) {
 }
 
 
+// conf_* macros and functions. These are provided here to ease the conversion
+// from the old glib key files to the new database format. These should be
+// replaced with a separate and better abstraction later on in a separate file
+// (vars.c, which will most likely replace set.c).
+
+#if INTERFACE
+
+#define conf_set_bool(h, n, v) db_vars_set(h, n, (v) ? "true" : "false")
+
+#define conf_set_int(h, n, v) do {\
+    char int_val[30];\
+    sprintf(int_val, "%d", (int)(v));\
+    db_vars_set(h, n, int_val);\
+  } while(0)
+
+#define conf_exists(h, n) (db_vars_get(h, n) ? TRUE : FALSE)
+
+#define conf_autorefresh() (!conf_exists(0, "autorefresh") ? 60 : conf_get_int(0, "autorefresh"))
+
+#define conf_download_dir() (\
+  !conf_exists(0, "download_dir") ? g_build_filename(conf_dir, "dl", NULL)\
+    : db_vars_get(0, "download_dir"))
+
+#define conf_incoming_dir() (\
+  !conf_exists(0, "incoming_dir") ? g_build_filename(conf_dir, "inc", NULL)\
+    : db_vars_get(0, "incoming_dir"))
+
+#endif
+
+gboolean conf_get_bool(guint64 hub, const char *name) {
+  char *v = db_vars_get(hub, name);
+  return v && strcmp(v, "true") == 0 ? TRUE : FALSE;
+}
+
+int conf_get_int(guint64 hub, const char *name) {
+  char *v = db_vars_get(hub, name);
+  if(!v)
+    return 0;
+  return g_ascii_strtoll(v, NULL, 0);
+}
+
 
 
 

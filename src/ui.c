@@ -173,7 +173,7 @@ struct ui_tab *ui_msg_create(struct hub *hub, struct hub_user *user) {
   tab->hub = hub;
   tab->uid = user->uid;
   tab->name = g_strdup_printf("~%s", user->name);
-  tab->log = ui_logwindow_create(tab->name, g_key_file_get_integer(conf_file, "global", "backlog", NULL));
+  tab->log = ui_logwindow_create(tab->name, conf_get_int(0, "backlog"));
   tab->log->handle = tab;
   tab->log->checkchat = ui_hub_log_checkchat;
 
@@ -1497,9 +1497,8 @@ static void ui_fl_key(struct ui_tab *tab, guint64 key) {
       ui_m(NULL, 0, "Directory empty.");
     else {
       g_return_if_fail(!sel->isfile || sel->hastth);
-      char *excl = g_key_file_get_string(conf_file, "global", "download_exclude", NULL);
+      char *excl = db_vars_get(0, "download_exclude");
       GRegex *r = excl ? g_regex_new(excl, 0, 0, NULL) : NULL;
-      g_free(excl);
       dl_queue_add_fl(tab->uid, sel, NULL, r);
       if(r)
         g_regex_unref(r);

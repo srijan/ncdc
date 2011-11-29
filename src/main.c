@@ -41,6 +41,7 @@
 GMainLoop *main_loop;
 
 gboolean have_tls_support;
+gboolean log_debug = FALSE;
 
 
 // input handling declarations
@@ -233,7 +234,7 @@ char *ncdc_version() {
 
 // redirect all non-fatal errors to stderr (NOT stdout!)
 static void log_redirect(const gchar *dom, GLogLevelFlags level, const gchar *msg, gpointer dat) {
-  if(!(level & (G_LOG_LEVEL_INFO|G_LOG_LEVEL_DEBUG)) || conf_log_debug()) {
+  if(!(level & (G_LOG_LEVEL_INFO|G_LOG_LEVEL_DEBUG)) || log_debug) {
     time_t tm = time(NULL);
     char ts[50];
     strftime(ts, 49, "[%F %H:%M:%S %Z]", localtime(&tm));

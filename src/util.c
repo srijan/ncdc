@@ -59,19 +59,6 @@
 const char *conf_dir = NULL;
 GKeyFile *conf_file;
 
-#if INTERFACE
-
-
-// Can be used even before the configuration file is loaded. In which case it
-// returns TRUE. Default is otherwise FALSE.
-// TODO: this needs fixing:
-// - Use db_* instead of conf_file
-// - Allow multithreaded access
-#define conf_log_debug() (\
-  !conf_file ? TRUE : !g_key_file_has_key(conf_file, "log", "log_debug", NULL) ? FALSE :\
-    g_key_file_get_boolean(conf_file, "log", "log_debug", NULL))
-
-#endif
 
 #if TLS_SUPPORT
 GTlsCertificate *conf_certificate = NULL;

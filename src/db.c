@@ -498,9 +498,12 @@ static void *db_queue_item_create(int flags, const char *q, ...) {
 
 #if INTERFACE
 
-// TODO!
-#define db_fl_getdone() TRUE
-#define db_fl_setdone(v) {}
+#define db_fl_getdone() (db_vars_get(0, "fl_done") ? TRUE : FALSE)
+
+#define db_fl_setdone(v) do {\
+    if(!!db_fl_getdone() != !!(v))\
+      db_vars_set(0, "fl_done", (v) ? "true" : NULL);\
+  } while(0)
 
 #endif
 

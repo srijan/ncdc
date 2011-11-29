@@ -465,7 +465,6 @@ static void u20_hashdata_item(GDBM_FILE dat, datum key, sqlite3_stmt *data, sqli
 }
 
 
-// TODO: The `done' flag in hashdata.dat should also be transferred to somewhere.
 static void u20_hashdata() {
   printf("-- Converting hashdata.dat...");
   fflush(stdout);
@@ -474,6 +473,15 @@ static void u20_hashdata() {
   if(!dat)
     u20_revert("%s", gdbm_strerror(gdbm_errno));
 
+  // Convert the "done" flag
+  char keydat[] = { 2 };
+  datum key = { keydat, 1 };
+  if(gdbm_exists(dat, key)) {
+    char *er;
+    if(sqlite3_exec(u20_sql, "INSERT INTO vars (name, hub, value) VALUES('fl_done', 0, 'true')", NULL, NULL, &er))
+      u20_revert("%s", er?er:sqlite3_errmsg(u20_sql));
+  }
+
   sqlite3_stmt *data, *files;
   if(sqlite3_prepare_v2(u20_sql, "INSERT INTO hashdata (root, size, tthl) VALUES(?, ?, ?)", -1, &data, NULL))
     u20_revert("%s", sqlite3_errmsg(u20_sql));
@@ -481,7 +489,7 @@ static void u20_hashdata() {
     u20_revert("%s", sqlite3_errmsg(u20_sql));
 
   // walk through the keys
-  datum key = gdbm_firstkey(dat);
+  key = gdbm_firstkey(dat);
   char *freethis = NULL;
   for(; key.dptr; key=gdbm_nextkey(dat, key)) {
     if(freethis)

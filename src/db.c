@@ -864,7 +864,7 @@ gboolean db_dl_checkhash(const char *root, int num, const char *hash) {
 struct db_share_item { char *name; char *path; };
 #endif
 
-GArray *db_share_cache = NULL;
+static GArray *db_share_cache = NULL;
 
 
 // Returns a zero-terminated array of the shared directories. The array is
@@ -964,6 +964,112 @@ void db_share_add(const char *name, const char *path) {
 
   // Add to the db
   db_queue_push(0, "INSERT INTO share (name, path) VALUES (?, ?)", DBQ_TEXT, name, DBQ_TEXT, path, DBQ_END);
+}
+
+
+
+
+
+// Vars table
+
+// As with db_share*, the db_vars* functions are NOT thread-safe, and must be
+// accessed only from the main thread.
+
+struct db_var_item { char *name; char *val; guint64 hub; };
+static GHashTable *db_vars_cache = NULL;
+
+
+// Hash, equal and free functions for the hash table
+static guint db_vars_cachehash(gconstpointer a) {
+  const struct db_var_item *i = a;
+  return g_str_hash(i->name) + g_int64_hash(&i->hub);
+}
+
+static gboolean db_vars_cacheeq(gconstpointer a, gconstpointer b) {
+  const struct db_var_item *x = a;
+  const struct db_var_item *y = b;
+  return strcmp(x->name, y->name) == 0 && x->hub == y->hub ? TRUE : FALSE;
+}
+
+static void db_vars_cachefree(gpointer a) {
+  struct db_var_item *i = a;
+  g_free(i->name);
+  g_free(i->val);
+  g_slice_free(struct db_var_item, i);
+}
+
+
+// Ensures db_vars_cache is initialized
+static void db_vars_cacheget() {
+  if(db_vars_cache)
+    return;
+
+  db_vars_cache = g_hash_table_new_full(db_vars_cachehash, db_vars_cacheeq, NULL, db_vars_cachefree);
+  GAsyncQueue *a = g_async_queue_new_full(g_free);
+  db_queue_push(DBF_SINGLE, "SELECT name, hub, value FROM vars",
+    DBQ_RES, a, DBQ_TEXT, DBQ_INT64, DBQ_TEXT,
+    DBQ_END
+  );
+
+  char *r;
+  while((r = g_async_queue_pop(a)) && darray_get_int32(r) == SQLITE_ROW) {
+    struct db_var_item *i = g_slice_new(struct db_var_item);
+    i->name = g_strdup(darray_get_string(r));
+    i->hub = darray_get_int64(r);
+    i->val = g_strdup(darray_get_string(r));
+    g_hash_table_insert(db_vars_cache, i, i);
+    g_free(r);
+  }
+  g_free(r);
+  g_async_queue_unref(a);
+}
+
+
+// Get a value from the vars table. The return value should not be modified or freed.
+char *db_vars_get(guint64 hub, const char *name) {
+  db_vars_cacheget();
+  struct db_var_item i, *r;
+  i.name = (char *)name;
+  i.hub = hub;
+  r = g_hash_table_lookup(db_vars_cache, &i);
+  return r ? r->val : NULL;
+}
+
+
+// Unset a value (remove it)
+void db_vars_rm(guint64 hub, const char *name) {
+  db_vars_cacheget();
+
+  // Update cache
+  struct db_var_item i;
+  i.name = (char *)name;
+  i.hub = hub;
+  g_hash_table_remove(db_vars_cache, &i);
+
+  // Update database
+  db_queue_push(0, "DELETE FROM vars WHERE name = ? AND hub = ?",
+    DBQ_TEXT, name, DBQ_INT64, hub, DBQ_END);
+}
+
+
+// Set a value. If val = NULL, then _rm() is called instead.
+void db_vars_set(guint64 hub, const char *name, const char *val) {
+  if(!val) {
+    db_vars_rm(hub, name);
+    return;
+  }
+  db_vars_cacheget();
+
+  // Update cache
+  struct db_var_item *i = g_slice_new(struct db_var_item);;
+  i->hub = hub;
+  i->name = g_strdup(name);
+  i->val = g_strdup(val);
+  g_hash_table_replace(db_vars_cache, i, i);
+
+  // Update database
+  db_queue_push(0, "INSERT OR REPLACE INTO vars (name, hub, value) VALUES (?, ?, ?)",
+    DBQ_TEXT, name, DBQ_INT64, hub, DBQ_TEXT, val, DBQ_END);
 }
 
 

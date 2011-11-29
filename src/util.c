@@ -57,7 +57,6 @@
 
 // global vars
 const char *conf_dir = NULL;
-GKeyFile *conf_file;
 
 
 #if TLS_SUPPORT
@@ -217,28 +216,6 @@ void conf_init() {
   // the lock) when ncdc is closed, was killed or has crashed.
   if(dir_ver[0] > 1)
     g_error("Incompatible data directory. Please upgrade ncdc or use a different directory.");
-
-  // load config file (or create it)
-  conf_file = g_key_file_new();
-  char *cf = g_build_filename(conf_dir, "config.ini", NULL);
-  GError *err = NULL;
-  if(g_file_test(cf, G_FILE_TEST_EXISTS)) {
-    if(!g_key_file_load_from_file(conf_file, cf, G_KEY_FILE_KEEP_COMMENTS, &err))
-      g_error("Could not load '%s': %s", cf, err->message);
-  }
-  g_free(cf);
-  // always set the initial comment
-  g_key_file_set_comment(conf_file, NULL, NULL,
-    "This file is automatically managed by ncdc.\n"
-    "While you could edit it yourself, doing so is highly discouraged.\n"
-    "It is better to use the respective commands to change something.\n"
-    "Warning: Editing this file while ncdc is running may result in your changes getting lost!", NULL);
-  // make sure a nick is set
-  if(!g_key_file_has_key(conf_file, "global", "nick", NULL)) {
-    char *nick = g_strdup_printf("ncdc_%d", g_random_int_range(1, 9999));
-    g_key_file_set_string(conf_file, "global", "nick", nick);
-    g_free(nick);
-  }
 
   // load client certificate
 #if TLS_SUPPORT

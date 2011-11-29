@@ -1211,6 +1211,13 @@ void db_init() {
   base32_decode(db_vars_get(0, "pid"), db_pid);
   base32_decode(db_vars_get(0, "cid"), db_cid);
 
+  // make sure a nick is set
+  if(!db_vars_get(0, "nick")) {
+    char *nick = g_strdup_printf("ncdc_%d", g_random_int_range(1, 9999));
+    db_vars_set(0, "nick", nick);
+    g_free(nick);
+  }
+
   // load fadv_enabled
   g_atomic_int_set(&fadv_enabled, conf_get_bool(0, "flush_file_cache"));
 

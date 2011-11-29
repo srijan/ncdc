@@ -462,7 +462,7 @@ static void xfer_log_add(struct cc *cc) {
     return;
 
   char *key = cc->dl ? "log_downloads" : "log_uploads";
-  if(g_key_file_has_key(conf_file, "log", key, NULL) && !g_key_file_get_boolean(conf_file, "log", key, NULL))
+  if(conf_exists(0, key) && !conf_get_bool(0, key))
     return;
 
   static struct logfile *log = NULL;
@@ -1697,20 +1697,19 @@ gboolean cc_listen_start() {
   GError *err = NULL;
 
   cc_listen_stop();
-  if(!g_key_file_get_boolean(conf_file, "global", "active", NULL)) {
+  if(!conf_get_bool(0, "active")) {
     hub_global_nfochange();
     return FALSE;
   }
 
   // can be 0, in which case it'll be randomly assigned
-  int port = g_key_file_get_integer(conf_file, "global", "active_port", NULL);
+  int port = conf_get_int(0, "active_port");
 
   // local addr
-  char *bind = g_key_file_get_string(conf_file, "global", "active_bind", NULL);
+  char *bind = db_vars_get(0, "active_bind");
   GInetAddress *laddr = NULL;
   if(bind && *bind && !(laddr = g_inet_address_new_from_string(bind)))
     ui_m(ui_main, 0, "Error parsing `active_bind' setting, binding to all interfaces instead.");
-  g_free(bind);
   if(!laddr)
     laddr = g_inet_address_new_any(G_SOCKET_FAMILY_IPV4);
 
@@ -1750,7 +1749,7 @@ gboolean cc_listen_start() {
   cc_listen = tcp;
   cc_listen_udp = udp;
   cc_listen_port = port;
-  cc_listen_ip = g_key_file_get_string(conf_file, "global", "active_ip", NULL);
+  cc_listen_ip = g_strdup(db_vars_get(0, "active_ip"));
 
   if(conf_certificate)
     ui_mf(ui_main, 0, "Listening on TCP+UDP port %d and TCP port %d, remote IP is %s.", cc_listen_port, cc_listen_port+1, cc_listen_ip);

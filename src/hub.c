@@ -466,8 +466,9 @@ void hub_global_nfochange() {
 void hub_password(struct hub *hub, char *pass) {
   g_return_if_fail(hub->adc ? hub->state == ADC_S_VERIFY : !hub->nick_valid);
 
-  char *rpass = !pass ? g_key_file_get_string(conf_file, hub->tab->name, "password", NULL) : g_strdup(pass);
-  if(!rpass) {
+  if(!pass)
+    pass = db_vars_get(hub->id, "password");
+  if(!pass) {
     ui_m(hub->tab, UIP_HIGH,
       "\nPassword required. Type '/password <your password>' to log in without saving your password."
       "\nOr use '/set password <your password>' to log in and save your password in the config file (unencrypted!).\n");
@@ -476,17 +477,16 @@ void hub_password(struct hub *hub, char *pass) {
     char res[24];
     struct tiger_ctx t;
     tiger_init(&t);
-    tiger_update(&t, rpass, strlen(rpass));
+    tiger_update(&t, pass, strlen(pass));
     tiger_update(&t, hub->gpa_salt, hub->gpa_salt_len);
     tiger_final(&t, res);
     base32_encode(res, enc);
     net_sendf(hub->net, "HPAS %s", enc);
     hub->isreg = TRUE;
   } else {
-    net_sendf(hub->net, "$MyPass %s", rpass); // Password is sent raw, not encoded. Don't think encoding really matters here.
+    net_sendf(hub->net, "$MyPass %s", pass); // Password is sent raw, not encoded. Don't think encoding really matters here.
     hub->isreg = TRUE;
   }
-  g_free(rpass);
 }
 
 
@@ -1501,7 +1501,7 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
 
   // $BadPass
   if(strncmp(cmd, "$BadPass", 8) == 0) {
-    if(g_key_file_has_key(conf_file, hub->tab->name, "password", NULL))
+    if(conf_exists(hub->id, "password"))
       ui_m(hub->tab, 0, "Wrong password. Use '/set password <password>' to edit your password or '/unset password' to reset it.");
     else
       ui_m(hub->tab, 0, "Wrong password. Type /reconnect to try again.");
@@ -1654,21 +1654,18 @@ static gboolean handle_accept_cert(GTlsConnection *conn, GTlsCertificate *cert, 
   base32_encode_dat(raw, enc, 32);
 
   // Get configured keyprint
-  char *old = g_key_file_get_string(conf_file, hub->tab->name, "hubkp", NULL);
+  char *old = db_vars_get(hub->id, "hubkp");
 
   // No keyprint? Then assume first-use trust and save it to the config file.
   if(!old) {
     ui_mf(hub->tab, 0, "No previous TLS keyprint known. Storing `%s' for future validation.", enc);
-    g_key_file_set_string(conf_file, hub->tab->name, "hubkp", enc);
-    conf_save();
+    db_vars_set(hub->id, "hubkp", enc);
     return TRUE;
   }
 
   // Keyprint matches? no problems!
-  if(strcmp(old, enc) == 0) {
-    g_free(old);
+  if(strcmp(old, enc) == 0)
     return TRUE;
-  }
 
   // Keyprint doesn't match... now we have a problem!
   hub->kp = g_slice_alloc(32);
@@ -1682,7 +1679,6 @@ static gboolean handle_accept_cert(GTlsConnection *conn, GTlsCertificate *cert, 
     "- The hub owner has changed the TLS certificate.\n"
     "If you accept the new keyprint and wish continue connecting, type `/accept'.\n",
     old, enc);
-  g_free(old);
   return FALSE;
 }
 

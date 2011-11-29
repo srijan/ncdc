@@ -64,11 +64,6 @@ char conf_pid[24];
 
 #if INTERFACE
 
-#define conf_hub_get(type, name, key) (\
-  g_key_file_has_key(conf_file, name, (key), NULL)\
-    ? g_key_file_get_##type(conf_file, name, (key), NULL)\
-    : g_key_file_get_##type(conf_file, "global", (key), NULL))
-
 
 // Can be used even before the configuration file is loaded. In which case it
 // returns TRUE. Default is otherwise FALSE.

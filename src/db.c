@@ -1108,6 +1108,8 @@ guint64 db_vars_hubid(const char *name) {
     : conf_exists(hub, "tls_policy") ? conf_get_int(hub, "tls_policy")\
     : conf_exists(0, "tls_policy")   ? conf_get_int(0, "tls_policy") : CONF_TLSP_ALLOW)
 
+#define conf_hub_get(hub, key) (conf_exists(hub, key) ? db_vars_get(hub, key) : db_vars_get(0, key))
+
 #endif
 
 char *conf_tlsp_list[] = { "disabled", "allow", "prefer" };

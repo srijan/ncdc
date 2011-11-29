@@ -603,9 +603,9 @@ void hub_send_nfo(struct hub *hub) {
   unsigned short port;
   gboolean sup_tls;
 
-  desc = conf_hub_get(string, hub->tab->name, "description");
-  conn = conf_hub_get(string, hub->tab->name, "connection");
-  mail = conf_hub_get(string, hub->tab->name, "email");
+  desc = conf_hub_get(hub->id, "description");
+  conn = conf_hub_get(hub->id, "connection");
+  mail = conf_hub_get(hub->id, "email");
 
   h_norm = h_reg = h_op = 0;
   GList *n;
@@ -634,12 +634,8 @@ void hub_send_nfo(struct hub *hub) {
 
   // check whether we need to make any further effort
   if(hub->nick_valid && streq(desc) && streq(conn) && streq(mail) && eq(slots)
-      && eq(h_norm) && eq(h_reg) && eq(h_op) && eq(share) && eq(ip4) && eq(port) && beq(sup_tls)) {
-    g_free(desc);
-    g_free(conn);
-    g_free(mail);
+      && eq(h_norm) && eq(h_reg) && eq(h_op) && eq(share) && eq(ip4) && eq(port) && beq(sup_tls))
     return;
-  }
 
   char *nfo;
   // ADC
@@ -707,9 +703,9 @@ void hub_send_nfo(struct hub *hub) {
   g_free(nfo);
 
   // update
-  g_free(hub->nfo_desc); hub->nfo_desc = desc;
-  g_free(hub->nfo_conn); hub->nfo_conn = conn;
-  g_free(hub->nfo_mail); hub->nfo_mail = mail;
+  g_free(hub->nfo_desc); hub->nfo_desc = g_strdup(desc);
+  g_free(hub->nfo_conn); hub->nfo_conn = g_strdup(conn);
+  g_free(hub->nfo_mail); hub->nfo_mail = g_strdup(mail);
   hub->nfo_slots = slots;
   hub->nfo_h_norm = h_norm;
   hub->nfo_h_reg = h_reg;
@@ -911,7 +907,7 @@ static void adc_handle(struct hub *hub, char *msg) {
     else {
       hub->sid = ADC_DFCC(cmd.argv[0]);
       hub->state = ADC_S_IDENTIFY;
-      hub->nick = conf_hub_get(string, hub->tab->name, "nick");
+      hub->nick = g_strdup(conf_hub_get(hub->id, "nick"));
       ui_hub_setnick(hub->tab);
       hub_send_nfo(hub);
     }
@@ -1252,7 +1248,7 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
       net_send(hub->net, "$Supports NoGetINFO NoHello UserIP2");
     char *key = nmdc_lock2key(lock);
     net_sendf(hub->net, "$Key %s", key);
-    hub->nick = conf_hub_get(string, hub->tab->name, "nick");
+    hub->nick = g_strdup(conf_hub_get(hub->id, "nick"));
     hub->nick_hub = charset_convert(hub, FALSE, hub->nick);
     ui_hub_setnick(hub->tab);
     net_sendf(hub->net, "$ValidateNick %s", hub->nick_hub);
@@ -1611,19 +1607,20 @@ static void handle_error(struct net *n, int action, GError *err) {
 
 struct hub *hub_create(struct ui_tab *tab) {
   struct hub *hub = g_new0(struct hub, 1);
+
+  // Get or create the hub id
+  hub->id = db_vars_hubid(tab->name);
+  if(!hub->id) {
+    hub->id = rand_64();
+    db_vars_set(hub->id, "hubname", tab->name);
+  }
+
   // actual separator is set in handle_connect()
   hub->net = net_create('|', hub, TRUE, handle_cmd, handle_error);
   hub->tab = tab;
   hub->users = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, user_free);
   hub->sessions = g_hash_table_new(g_direct_hash, g_direct_equal);
   hub->nfo_timer = g_timeout_add_seconds(5*60, check_nfo, hub);
-#if GLIB_CHECK_VERSION(2, 26, 0)
-  hub->id = g_key_file_get_uint64(conf_file, hub->tab->name, "hubid", NULL);
-#else
-  char *tmp = g_key_file_get_string(conf_file, hub->tab->name, "hubid", NULL);
-  hub->id = g_ascii_strtoull(tmp, NULL, 10);
-  g_free(tmp);
-#endif
   return hub;
 }
 
@@ -1693,7 +1690,7 @@ static gboolean handle_accept_cert(GTlsConnection *conn, GTlsCertificate *cert, 
 
 
 void hub_connect(struct hub *hub) {
-  char *oaddr = conf_hub_get(string, hub->tab->name, "hubaddr");
+  char *oaddr = conf_hub_get(hub->id, "hubaddr");
   char *addr = oaddr;
   g_return_if_fail(addr);
   // The address should be in the form of "dchub://hostname:port/", but older
@@ -1750,8 +1747,6 @@ void hub_connect(struct hub *hub) {
     hub->kp = NULL;
   }
 #endif
-
-  g_free(oaddr);
 }
 
 

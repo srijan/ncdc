@@ -301,25 +301,13 @@ struct ui_tab *ui_hub_create(const char *name, gboolean conn) {
   // NOTE: tab name is also used as configuration group
   tab->name = g_strdup_printf("#%s", name);
   tab->type = UIT_HUB;
-  tab->log = ui_logwindow_create(tab->name, conf_hub_get(integer, tab->name, "backlog"));
+  tab->hub = hub_create(tab);
+  tab->log = ui_logwindow_create(tab->name,
+      conf_get_int(conf_exists(tab->hub->id, "backlog") ? tab->hub->id : 0, "backlog"));
   tab->log->handle = tab;
   tab->log->checkchat = ui_hub_log_checkchat;
-  // Every hub tab should have a unique ID. The name of the tab (which is the
-  // group name in the config file) is changable, but internally we'd want a
-  // more stable ID for user CID creation on NMDC hubs, so let's create one.
-  if(!g_key_file_has_key(conf_file, tab->name, "hubid", NULL)) {
-#if GLIB_CHECK_VERSION(2, 26, 0)
-    g_key_file_set_uint64(conf_file, tab->name, "hubid", rand_64());
-#else
-    char *tmp = g_strdup_printf("%016"G_GINT64_FORMAT, rand_64());
-    g_key_file_set_string(conf_file, tab->name, "hubid", tmp);
-    g_free(tmp);
-#endif
-    conf_save();
-  }
-  tab->hub = hub_create(tab);
   // already used this name before? open connection again
-  if(conn && g_key_file_has_key(conf_file, tab->name, "hubaddr", NULL))
+  if(conn && conf_exists(tab->hub->id, "hubaddr"))
     hub_connect(tab->hub);
   return tab;
 }
@@ -366,11 +354,10 @@ static void ui_hub_draw(struct ui_tab *tab) {
   else if(!tab->hub->nick_valid)
     mvaddstr(winrows-4, wincols-15, "Logging in...");
   else {
-    char *addr = conf_hub_get(string, tab->name, "hubaddr");
+    char *addr = conf_hub_get(tab->hub->id, "hubaddr");
     char *tmp = g_strdup_printf("%s @ %s%s", tab->hub->nick, addr,
       tab->hub->isop ? " (operator)" : tab->hub->isreg ? " (registered)" : "");
     mvaddstr(winrows-4, 0, tmp);
-    g_free(addr);
     g_free(tmp);
     int count = g_hash_table_size(tab->hub->users);
     tmp = g_strdup_printf("%6d users  %10s%c", count,
@@ -418,7 +405,7 @@ void ui_hub_userchange(struct ui_tab *tab, int change, struct hub_user *user) {
     ui_msg_userchange(mt, change, user);
 
   // display the join/quit, when requested
-  gboolean log = conf_hub_get(boolean, tab->name, "show_joinquit");
+  gboolean log = conf_get_bool(conf_exists(tab->hub->id, "show_joinquit") ? tab->hub->id : 0, "show_joinquit");
   if(change == UIHUB_UC_NFO && !user->isjoined) {
     user->isjoined = TRUE;
     if(log && tab->hub->joincomplete && (!tab->hub->nick_valid

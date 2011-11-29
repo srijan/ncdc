@@ -2664,7 +2664,6 @@ void ui_draw() {
     xoffset = 2 + str_columns(ts);
 #endif
   }
-  g_free(tfmt);
   // tabs
   ui_draw_tablist(xoffset);
 

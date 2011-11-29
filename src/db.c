@@ -52,37 +52,6 @@ static GThread *db_thread = NULL;
 static GHashTable *db_stmt_cache = NULL;
 
 
-static gpointer db_thread_func(gpointer dat);
-
-
-void db_init() {
-  char *dbfn = g_build_filename(conf_dir, "db.sqlite3", NULL);
-
-  if(!sqlite3_threadsafe())
-    g_error("sqlite3 has not been compiled with threading support. Please recompile sqlite3 with SQLITE_THREADSAFE enabled.");
-
-  // TODO: should look at the version file instead. This check is simply for debugging purposes.
-  gboolean newdb = !g_file_test(dbfn, G_FILE_TEST_EXISTS);
-  if(newdb)
-    g_error("No db.sqlite3 file present yet. Please run ncdc-db-upgrade.");
-
-  sqlite3 *db;
-  if(sqlite3_open(dbfn, &db))
-    g_error("Couldn't open `%s': %s", dbfn, sqlite3_errmsg(db));
-  g_free(dbfn);
-
-  sqlite3_busy_timeout(db, 10);
-
-  sqlite3_exec(db, "PRAGMA foreign_keys = FALSE", NULL, NULL, NULL);
-
-  // TODO: create SQL schema, if it doesn't exist yet
-
-  // start database thread
-  db_queue = g_async_queue_new();
-  db_thread = g_thread_create(db_thread_func, db, TRUE, NULL);
-}
-
-
 // A "queue item" is a darray (see util.c) to represent a queued SQL query,
 // with the following structure:
 //   int32 = flags
@@ -1096,9 +1065,21 @@ void db_vars_set(guint64 hub, const char *name, const char *val) {
   !conf_exists(0, "download_dir") ? g_build_filename(conf_dir, "dl", NULL)\
     : db_vars_get(0, "download_dir"))
 
+#define conf_download_slots() (!conf_exists(0, "download_slots") ? 3 : conf_get_int(0, "download_slots"))
+
+#define conf_filelist_maxage() (!conf_exists(0, "filelist_maxage") ? (7*24*3600) : conf_get_int(0, "filelist_maxage"))
+
 #define conf_incoming_dir() (\
   !conf_exists(0, "incoming_dir") ? g_build_filename(conf_dir, "inc", NULL)\
     : db_vars_get(0, "incoming_dir"))
+
+#define conf_minislots() (!conf_exists(0, "minislots") ? 3 : conf_get_int(0, "minislots"))
+
+#define conf_minislot_size() (1024*(!conf_exists(0, "minislot_size") ? 64 : conf_get_int(0, "minislot_size")))
+
+#define conf_slots() (!conf_exists(0, "slots") ? 10 : conf_get_int(0, "slots"))
+
+#define conf_ui_time_format() (!conf_exists(0, "ui_time_format") ? "[%H:%M:%S]" : db_vars_get(0, "ui_time_format"))
 
 #endif
 
@@ -1112,6 +1093,42 @@ int conf_get_int(guint64 hub, const char *name) {
   if(!v)
     return 0;
   return g_ascii_strtoll(v, NULL, 0);
+}
+
+
+
+
+
+// Initialize the database
+
+void db_init() {
+  char *dbfn = g_build_filename(conf_dir, "db.sqlite3", NULL);
+
+  if(!sqlite3_threadsafe())
+    g_error("sqlite3 has not been compiled with threading support. Please recompile sqlite3 with SQLITE_THREADSAFE enabled.");
+
+  // TODO: should look at the version file instead. This check is simply for debugging purposes.
+  gboolean newdb = !g_file_test(dbfn, G_FILE_TEST_EXISTS);
+  if(newdb)
+    g_error("No db.sqlite3 file present yet. Please run ncdc-db-upgrade.");
+
+  sqlite3 *db;
+  if(sqlite3_open(dbfn, &db))
+    g_error("Couldn't open `%s': %s", dbfn, sqlite3_errmsg(db));
+  g_free(dbfn);
+
+  sqlite3_busy_timeout(db, 10);
+
+  sqlite3_exec(db, "PRAGMA foreign_keys = FALSE", NULL, NULL, NULL);
+
+  // TODO: create SQL schema, if it doesn't exist yet
+
+  // start database thread
+  db_queue = g_async_queue_new();
+  db_thread = g_thread_create(db_thread_func, db, TRUE, NULL);
+
+  // load fadv_enabled
+  g_atomic_int_set(&fadv_enabled, conf_get_bool(0, "flush_file_cache"));
 }
 
 

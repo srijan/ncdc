@@ -76,35 +76,11 @@ char conf_pid[24];
     ? g_key_file_get_string(conf_file, "global", "encoding", NULL) \
     : g_strdup("UTF-8"))
 
-#define conf_slots() (\
-  !g_key_file_has_key(conf_file, "global", "slots", NULL) ? 10\
-    : g_key_file_get_integer(conf_file, "global", "slots", NULL))
-
-#define conf_minislots() (\
-  !g_key_file_has_key(conf_file, "global", "minislots", NULL) ? 3\
-    : g_key_file_get_integer(conf_file, "global", "minislots", NULL))
-
-#define conf_minislot_size() (1024*(\
-  !g_key_file_has_key(conf_file, "global", "minislot_size", NULL) ? 64\
-    : g_key_file_get_integer(conf_file, "global", "minislot_size", NULL)))
-
-#define conf_download_slots() (\
-  !g_key_file_has_key(conf_file, "global", "download_slots", NULL) ? 3\
-    : g_key_file_get_integer(conf_file, "global", "download_slots", NULL))
-
 // Can be used even before the configuration file is loaded. In which case it
 // returns TRUE. Default is otherwise FALSE.
 #define conf_log_debug() (\
   !conf_file ? TRUE : !g_key_file_has_key(conf_file, "log", "log_debug", NULL) ? FALSE :\
     g_key_file_get_boolean(conf_file, "log", "log_debug", NULL))
-
-#define conf_ui_time_format() (\
-  !g_key_file_has_key(conf_file, "global", "ui_time_format", NULL) ? g_strdup("[%H:%M:%S]")\
-    : g_key_file_get_string(conf_file, "global", "ui_time_format", NULL))
-
-#define conf_filelist_maxage() (\
-  !g_key_file_has_key(conf_file, "global", "filelist_maxage", NULL) ? (7*24*3600) \
-    : g_key_file_get_integer(conf_file, "global", "filelist_maxage", NULL))
 
 
 #define CONF_TLSP_DISABLE 0
@@ -345,9 +321,6 @@ void conf_init() {
   if(have_tls_support)
     conf_load_cert();
 #endif
-
-  // load fadv_enabled
-  g_atomic_int_set(&fadv_enabled, g_key_file_get_boolean(conf_file, "global", "flush_file_cache", NULL));
 }
 
 

@@ -324,19 +324,20 @@ static void get_slots(char *group, char *key) {
 
 
 static void set_slots(char *group, char *key, char *val) {
-  if(!val)
-    UNSET(group, key);
-  else {
+  if(!val) {
+    db_vars_rm(0, key);
+    ui_mf(NULL, 0, "global.%s reset.", key);
+  } else {
     long v = strtol(val, NULL, 10);
     if((!v && errno == EINVAL) || v < INT_MIN || v > INT_MAX || v < 0)
       ui_m(NULL, 0, "Invalid number.");
     else {
-      g_key_file_set_integer(conf_file, group, key, v);
-      conf_save();
+      conf_set_int(0, key, v);
       get_slots(group, key);
       hub_global_nfochange();
     }
   }
+  hub_global_nfochange();
 }
 
 
@@ -346,19 +347,20 @@ static void get_minislot_size(char *group, char *key) {
 
 
 static void set_minislot_size(char *group, char *key, char *val) {
-  if(!val)
-    UNSET(group, key);
+  if(!val) {
+    db_vars_rm(0, key);
+    ui_mf(NULL, 0, "global.%s reset.", key);
+    return;
+  }
+
+  long v = strtol(val, NULL, 10);
+  if((!v && errno == EINVAL) || v < INT_MIN || v > INT_MAX/1024 || v < 0)
+    ui_m(NULL, 0, "Invalid number.");
+  else if(v < 64)
+    ui_m(NULL, 0, "Minislot size must be at least 64 KiB.");
   else {
-    long v = strtol(val, NULL, 10);
-    if((!v && errno == EINVAL) || v < INT_MIN || v > INT_MAX/1024 || v < 0)
-      ui_m(NULL, 0, "Invalid number.");
-    else if(v < 64)
-      ui_m(NULL, 0, "Minislot size must be at least 64 KiB.");
-    else {
-      g_key_file_set_integer(conf_file, group, key, v);
-      conf_save();
-      get_minislot_size(group, key);
-    }
+    conf_set_int(0, key, v);
+    get_minislot_size(group, key);
   }
 }
 
@@ -369,19 +371,20 @@ static void get_minislots(char *group, char *key) {
 
 
 static void set_minislots(char *group, char *key, char *val) {
-  if(!val)
-    UNSET(group, key);
+  if(!val) {
+    db_vars_rm(0, key);
+    ui_mf(NULL, 0, "global.%s reset.", key);
+    return;
+  }
+
+  long v = strtol(val, NULL, 10);
+  if((!v && errno == EINVAL) || v < INT_MIN || v > INT_MAX || v < 0)
+    ui_m(NULL, 0, "Invalid number.");
+  else if(v < 1)
+    ui_m(NULL, 0, "You must have at least 1 minislot.");
   else {
-    long v = strtol(val, NULL, 10);
-    if((!v && errno == EINVAL) || v < INT_MIN || v > INT_MAX || v < 0)
-      ui_m(NULL, 0, "Invalid number.");
-    else if(v < 1)
-      ui_m(NULL, 0, "You must have at least 1 minislot.");
-    else {
-      g_key_file_set_integer(conf_file, group, key, v);
-      conf_save();
-      get_minislots(group, key);
-    }
+    conf_set_int(0, key, v);
+    get_minislots(group, key);
   }
 }
 
@@ -539,15 +542,15 @@ static void get_download_slots(char *group, char *key) {
 
 static void set_download_slots(char *group, char *key, char *val) {
   int oldval = conf_download_slots();
-  if(!val)
-    UNSET(group, key);
-  else {
+  if(!val) {
+    db_vars_rm(0, key);
+    ui_mf(NULL, 0, "global.%s reset.", key);
+  } else {
     long v = strtol(val, NULL, 10);
     if((!v && errno == EINVAL) || v < INT_MIN || v > INT_MAX || v <= 0)
       ui_m(NULL, 0, "Invalid number.");
     else {
-      g_key_file_set_integer(conf_file, group, key, v);
-      conf_save();
+      conf_set_int(0, key, v);
       get_download_slots(group, key);
     }
   }
@@ -684,20 +687,19 @@ static void set_regex(char *group, char *key, char *val) {
 
 
 static void get_ui_time_format(char *group, char *key) {
-  char *d = conf_ui_time_format();
-  ui_mf(NULL, 0, "%s.%s = %s", group, key, d);
-  g_free(d);
+  ui_mf(NULL, 0, "%s.%s = %s", group, key, conf_ui_time_format());
 }
 
 
 static void set_ui_time_format(char *group, char *key, char *val) {
   if(!val) {
-    UNSET(group, key);
-  } else {
-    g_key_file_set_string(conf_file, group, key, val);
-    conf_save();
-    get_ui_time_format(group, key);
+    db_vars_rm(0, key);
+    ui_mf(NULL, 0, "%s.%s reset.", group, key);\
+    return;
   }
+
+  db_vars_set(0, key, val);
+  get_ui_time_format(group, key);
 }
 
 
@@ -724,17 +726,18 @@ static void get_filelist_maxage(char *group, char *key) {
 
 
 static void set_filelist_maxage(char *group, char *key, char *val) {
-  if(!val)
-    UNSET(group, key);
+  if(!val) {
+    db_vars_rm(0, key);
+    ui_mf(NULL, 0, "%s.%s reset.", group, key);\
+    return;
+  }
+
+  int v = str_parseinterval(val);
+  if(v < 0)
+    ui_m(NULL, 0, "Invalid number.");
   else {
-    int v = str_parseinterval(val);
-    if(v < 0)
-      ui_m(NULL, 0, "Invalid number.");
-    else {
-      g_key_file_set_integer(conf_file, group, key, v);
-      conf_save();
-      get_filelist_maxage(group, key);
-    }
+    conf_set_int(0, key, v);
+    get_filelist_maxage(group, key);
   }
 }
 
@@ -749,12 +752,13 @@ static void get_flush_file_cache(char *group, char *key) {
 
 
 static void set_flush_file_cache(char *group, char *key, char *val) {
-  if(!val)
-    UNSET(group, key);
-  else {
+  if(!val) {
+    db_vars_rm(0, key);
+    g_atomic_int_set(&fadv_enabled, 0);
+    ui_mf(NULL, 0, "%s.%s reset.", group, key);
+  } else {
     int v = bool_var(val);
-    g_key_file_set_boolean(conf_file, group, key, v);
-    conf_save();
+    conf_set_bool(0, key, v);
     g_atomic_int_set(&fadv_enabled, v);
     get_flush_file_cache(group, key);
   }

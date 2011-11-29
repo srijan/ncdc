@@ -866,7 +866,7 @@ gboolean fl_save(struct fl_list *fl, const char *file, GString *buf, int level, 
   CHECKFAIL(xmlTextWriterWriteAttribute(writer, (xmlChar *)"Generator", (xmlChar *)PACKAGE_STRING));
 
   char cid[40] = {};
-  base32_encode(conf_cid, cid);
+  base32_encode(db_cid, cid);
   CHECKFAIL(xmlTextWriterWriteAttribute(writer, (xmlChar *)"CID", (xmlChar *)cid));
 
   char *path = fl ? fl_list_path(fl) : g_strdup("/");

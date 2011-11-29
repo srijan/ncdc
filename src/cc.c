@@ -878,7 +878,7 @@ static void adc_handle(struct cc *cc, char *msg) {
 
       GString *r = adc_generate('C', ADCC_INF, 0, 0);
       char cid[40] = {};
-      base32_encode(conf_cid, cid);
+      base32_encode(db_cid, cid);
       adc_append(r, "ID", cid);
       if(!cc->active)
         adc_append(r, "TO", cc->token);

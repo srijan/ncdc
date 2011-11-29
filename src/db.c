@@ -1151,6 +1151,34 @@ int conf_get_int(guint64 hub, const char *name) {
 
 // Initialize the database
 
+
+char db_cid[24];
+char db_pid[24];
+
+static void generate_pid() {
+  guint64 r = rand_64();
+
+  struct tiger_ctx t;
+  char pid[24];
+  tiger_init(&t);
+  tiger_update(&t, (char *)&r, 8);
+  tiger_final(&t, pid);
+
+  // now hash the PID so we have our CID
+  char cid[24];
+  tiger_init(&t);
+  tiger_update(&t, pid, 24);
+  tiger_final(&t, cid);
+
+  // encode and save
+  char enc[40] = {};
+  base32_encode(pid, enc);
+  db_vars_set(0, "pid", enc);
+  base32_encode(cid, enc);
+  db_vars_set(0, "cid", enc);
+}
+
+
 void db_init() {
   char *dbfn = g_build_filename(conf_dir, "db.sqlite3", NULL);
 
@@ -1176,6 +1204,12 @@ void db_init() {
   // start database thread
   db_queue = g_async_queue_new();
   db_thread = g_thread_create(db_thread_func, db, TRUE, NULL);
+
+  // load db_pid and db_cid
+  if(!db_vars_get(0, "pid"))
+    generate_pid();
+  base32_decode(db_vars_get(0, "pid"), db_pid);
+  base32_decode(db_vars_get(0, "cid"), db_cid);
 
   // load fadv_enabled
   g_atomic_int_set(&fadv_enabled, conf_get_bool(0, "flush_file_cache"));

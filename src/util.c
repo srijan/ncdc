@@ -59,9 +59,6 @@
 const char *conf_dir = NULL;
 GKeyFile *conf_file;
 
-char conf_cid[24];
-char conf_pid[24];
-
 #if INTERFACE
 
 
@@ -173,30 +170,6 @@ static void conf_load_cert() {
 #endif // TLS_SUPPORT
 
 
-static void generate_pid() {
-  guint64 r = rand_64();
-
-  struct tiger_ctx t;
-  char pid[24];
-  tiger_init(&t);
-  tiger_update(&t, (char *)&r, 8);
-  tiger_final(&t, pid);
-
-  // now hash the PID so we have our CID
-  char cid[24];
-  tiger_init(&t);
-  tiger_update(&t, pid, 24);
-  tiger_final(&t, cid);
-
-  // encode and save
-  char enc[40] = {};
-  base32_encode(pid, enc);
-  g_key_file_set_string(conf_file, "global", "pid", enc);
-  base32_encode(cid, enc);
-  g_key_file_set_string(conf_file, "global", "cid", enc);
-}
-
-
 void conf_init() {
   // get location of the configuration directory
   if(!conf_dir && (conf_dir = g_getenv("NCDC_DIR")))
@@ -279,37 +252,12 @@ void conf_init() {
     g_key_file_set_string(conf_file, "global", "nick", nick);
     g_free(nick);
   }
-  // make sure we have a PID and CID
-  if(!g_key_file_has_key(conf_file, "global", "pid", NULL))
-    generate_pid();
-  conf_save();
-
-  // load conf_pid and conf_cid
-  char *tmp = g_key_file_get_string(conf_file, "global", "pid", NULL);
-  base32_decode(tmp, conf_pid);
-  g_free(tmp);
-  tmp = g_key_file_get_string(conf_file, "global", "cid", NULL);
-  base32_decode(tmp, conf_cid);
-  g_free(tmp);
 
   // load client certificate
 #if TLS_SUPPORT
   if(have_tls_support)
     conf_load_cert();
 #endif
-}
-
-
-void conf_save() {
-  char *cf = g_build_filename(conf_dir, "config.ini", NULL);
-  char *tmpf = g_strdup_printf("%s.tmp", cf);
-  char *dat = g_key_file_to_data(conf_file, NULL, NULL);
-  FILE *f = fopen(tmpf, "w");
-  if(!f || fputs(dat, f) < 0 || fclose(f) || rename(tmpf, cf) < 0)
-    g_critical("Cannot save config file '%s': %s", cf, g_strerror(errno));
-  g_free(dat);
-  g_free(tmpf);
-  g_free(cf);
 }
 
 

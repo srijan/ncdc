@@ -645,8 +645,8 @@ void hub_send_nfo(struct hub *hub) {
     gboolean f = hub->state == ADC_S_IDENTIFY;
     if(f) {
       char cid[40] = {}, pid[40] = {};
-      base32_encode(conf_pid, pid);
-      base32_encode(conf_cid, cid);
+      base32_encode(db_pid, pid);
+      base32_encode(db_cid, cid);
       g_string_append_printf(cmd, " ID%s PD%s VEncdc\\s%s", cid, pid, VERSION);
       adc_append(cmd, "NI", hub->nick);
       // Always add our KP field, even if we're not active. Other clients may
@@ -837,7 +837,7 @@ static void adc_sch(struct hub *hub, struct adc_cmd *cmd) {
   char cid[40] = {};
   char *dest = NULL;
   if(u->hasudp4) {
-    base32_encode(conf_cid, cid);
+    base32_encode(db_cid, cid);
     dest = g_strdup_printf("%s:%d", ip4_unpack(u->ip4), u->udp4);
   }
 

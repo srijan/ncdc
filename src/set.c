@@ -641,7 +641,6 @@ static void set_tls_policy(guint64 hub, char *key, char *val) {
       ui_m(NULL, 0, "Invalid TLS policy.");
     else {
       conf_set_int(hub, key, p);
-      conf_save();
       get_tls_policy(hub, key);
     }
   }

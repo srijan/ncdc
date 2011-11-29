@@ -33,52 +33,45 @@
 #include "doc.h"
 
 
+#define hubname(g) (!(g) ? "global" : db_vars_get((g), "hubname"))
+
+
 // set options
 struct setting {
   char *name;
-  char *group;      // NULL = hub name or "global" on non-hub-tabs
-  void (*get)(char *, char *);
-  void (*set)(char *, char *, char *);
-  void (*suggest)(char *, char *, char *, char **);
+  void (*get)(guint64, char *);
+  void (*set)(guint64, char *, char *);
+  void (*suggest)(guint64, char *, char *, char **);
   struct doc_set *doc;
 };
 
 
-
-static void get_string(char *group, char *key) {
-  GError *err = NULL;
-  char *str = g_key_file_get_string(conf_file, group, key, &err);
-  if(!str) {
-    ui_mf(NULL, 0, "%s.%s is not set.", group, key);
-    g_error_free(err);
-  } else {
-    ui_mf(NULL, 0, "%s.%s = %s", group, key, str);
-    g_free(str);
-  }
+static void get_string(guint64 hub, char *key) {
+  char *str = db_vars_get(hub, key);
+  if(!str)
+    ui_mf(NULL, 0, "%s.%s is not set.", hubname(hub), key);
+  else
+    ui_mf(NULL, 0, "%s.%s = %s", hubname(hub), key, str);
 }
 
 
 // not set => false
-static void get_bool_f(char *group, char *key) {
-  ui_mf(NULL, 0, "%s.%s = %s", group, key, g_key_file_get_boolean(conf_file, group, key, NULL) ? "true" : "false");
+static void get_bool_f(guint64 hub, char *key) {
+  ui_mf(NULL, 0, "%s.%s = %s", hubname(hub), key, conf_get_bool(hub, key) ? "true" : "false");
 }
 
 
 // not set => true
-static void get_bool_t(char *group, char *key) {
-  ui_mf(NULL, 0, "%s.%s = %s", group, key,
-    !g_key_file_has_key(conf_file, group, key, NULL) || g_key_file_get_boolean(conf_file, group, key, NULL) ? "true" : "false");
+static void get_bool_t(guint64 hub, char *key) {
+  ui_mf(NULL, 0, "%s.%s = %s", hubname(hub), key, !conf_exists(hub, key) || conf_get_bool(hub, key) ? "true" : "false");
 }
 
 
-static void get_int(char *group, char *key) {
-  GError *err = NULL;
-  int val = g_key_file_get_integer(conf_file, group, key, &err);
-  if(err) {
-    ui_mf(NULL, 0, "%s.%s is not set.", group, key);
-    g_error_free(err);
-  } else
-    ui_mf(NULL, 0, "%s.%s = %d", group, key, val);
+static void get_int(guint64 hub, char *key) {
+  if(!conf_exists(hub, key))
+    ui_mf(NULL, 0, "%s.%s is not set.", hubname(hub), key);
+  else
+    ui_mf(NULL, 0, "%s.%s = %d", hubname(hub), key, conf_get_int(hub, key));
 }
 
 
@@ -90,26 +83,22 @@ static gboolean bool_var(const char *val) {
 }
 
 
-#define UNSET(group, key) do {\
-    g_key_file_remove_key(conf_file, group, key, NULL);\
-    conf_save();\
-    ui_mf(NULL, 0, "%s.%s reset.", group, key);\
-  } while(0)
-
-
-static void set_nick(char *group, char *key, char *val) {
+static void set_nick(guint64 hub, char *key, char *val) {
   if(!val) {
-    if(strcmp(group, "global") == 0) {
+    if(!hub) {
       ui_m(NULL, 0, "global.nick may not be unset.");
       return;
     }
-    UNSET(group, key);
+    db_vars_rm(hub, key);
+    ui_mf(NULL, 0, "%s.%s reset.", hubname(hub), key);
     return;
   }
+
   if(strlen(val) > 32) {
     ui_m(NULL, 0, "Too long nick name.");
     return;
   }
+
   int i;
   for(i=strlen(val)-1; i>=0; i--)
     if(val[i] == '$' || val[i] == '|' || val[i] == ' ' || val[i] == '<' || val[i] == '>')
@@ -118,58 +107,55 @@ static void set_nick(char *group, char *key, char *val) {
     ui_m(NULL, 0, "Invalid character in nick name.");
     return;
   }
-  g_key_file_set_string(conf_file, group, key, val);
-  conf_save();
-  get_string(group, key);
+
+  db_vars_set(hub, key, val);
+  get_string(hub, key);
   ui_m(NULL, 0, "Your new nick will be used for new hub connections.");
   // TODO: nick change without reconnect on ADC?
 }
 
 
 // set email/description/connection info
-static void set_userinfo(char *group, char *key, char *val) {
-  if(!val)
-    UNSET(group, key);
-  else {
+static void set_userinfo(guint64 hub, char *key, char *val) {
+  if(!val) {
+    db_vars_rm(hub, key);
+    ui_mf(NULL, 0, "%s.%s reset.", hubname(hub), key);
+  } else {
     if(strcmp(key, "connection") == 0 && !connection_to_speed(val))
       ui_mf(NULL, 0, "Couldn't convert `%s' to bytes/second, won't broadcast upload speed on ADC. See `/help set connection' for more information.", val);
-    g_key_file_set_string(conf_file, group, key, val);
-    conf_save();
-    get_string(group, key);
+    db_vars_set(hub, key, val);
+    get_string(hub, key);
   }
   hub_global_nfochange();
 }
 
 
-static void get_encoding(char *group, char *key) {
-  char *enc = conf_encoding(group);
-  ui_mf(NULL, 0, "%s.%s = %s", group, key, enc);
-  g_free(enc);
+static void get_encoding(guint64 hub, char *key) {
+  ui_mf(NULL, 0, "%s.%s = %s", hubname(hub), key, conf_encoding(hub));
 }
 
 
-static void set_encoding(char *group, char *key, char *val) {
+static void set_encoding(guint64 hub, char *key, char *val) {
   GError *err = NULL;
-  if(!val)
-    UNSET(group, key);
-  else if(!str_convert_check(val, &err)) {
+  if(!val) {
+    db_vars_rm(hub, key);
+    ui_mf(NULL, 0, "%s.%s reset.", hubname(hub), key);
+  } else if(!str_convert_check(val, &err)) {
     if(err) {
       ui_mf(NULL, 0, "ERROR: Can't use that encoding: %s", err->message);
       g_error_free(err);
-    } else {
+    } else
       ui_m(NULL, 0, "ERROR: Invalid encoding.");
-    }
   } else {
-    g_key_file_set_string(conf_file, group, key, val);
-    conf_save();
-    get_encoding(group, key);
+    db_vars_set(hub, key, val);
+    get_encoding(hub, key);
   }
   // TODO: note that this only affects new incoming data? and that a reconnect
   // may be necessary to re-convert all names/descriptions/stuff?
 }
 
 
-static void set_encoding_sug(char *group, char *key, char *val, char **sug) {
+static void set_encoding_sug(guint64 hub, char *key, char *val, char **sug) {
   // This list is neither complete nor are the entries guaranteed to be
   // available. Just a few commonly used encodings. There does not seem to be a
   // portable way of obtaining the available encodings.
@@ -187,62 +173,67 @@ static void set_encoding_sug(char *group, char *key, char *val, char **sug) {
 
 
 // generic set function for boolean settings that don't require any special attention
-static void set_bool_f(char *group, char *key, char *val) {
-  if(!val)
-    UNSET(group, key);
-  else {
-    g_key_file_set_boolean(conf_file, group, key, bool_var(val));
-    conf_save();
-    get_bool_f(group, key);
+static void set_bool_f(guint64 hub, char *key, char *val) {
+  if(!val) {
+    db_vars_rm(hub, key);
+    ui_mf(NULL, 0, "%s.%s reset.", hubname(hub), key);
+    return;
   }
+
+  conf_set_bool(hub, key, bool_var(val));
+  get_bool_f(hub, key);
 }
 
 
-static void set_bool_t(char *group, char *key, char *val) {
-  if(!val)
-    UNSET(group, key);
-  else {
-    g_key_file_set_boolean(conf_file, group, key, bool_var(val));
-    conf_save();
-    get_bool_t(group, key);
+static void set_bool_t(guint64 hub, char *key, char *val) {
+  if(!val) {
+    db_vars_rm(hub, key);
+    ui_mf(NULL, 0, "%s.%s reset.", hubname(hub), key);
+    return;
   }
+
+  conf_set_bool(hub, key, bool_var(val));
+  get_bool_t(hub, key);
 }
 
 
 // Only suggests "true" or "false" regardless of the input. There are only two
 // states anyway, and one would want to switch between those two without any
 // hassle.
-static void set_bool_sug(char *group, char *key, char *val, char **sug) {
+static void set_bool_sug(guint64 hub, char *key, char *val, char **sug) {
   gboolean f = !(val[0] == 0 || val[0] == '1' || val[0] == 't' || val[0] == 'y' || val[0] == 'o');
   sug[f ? 1 : 0] = g_strdup("true");
   sug[f ? 0 : 1] = g_strdup("false");
 }
 
 
-static void set_autoconnect(char *group, char *key, char *val) {
-  if(strcmp(group, "global") == 0 || group[0] != '#')
+static void set_autoconnect(guint64 hub, char *key, char *val) {
+  if(!hub)
     ui_m(NULL, 0, "ERROR: autoconnect can only be used as hub setting.");
   else
-    set_bool_f(group, key, val);
+    set_bool_f(hub, key, val);
 }
 
 
-static void set_active(char *group, char *key, char *val) {
-  if(!val)
-    UNSET(group, key);
-  else if(bool_var(val) && !g_key_file_has_key(conf_file, "global", "active_ip", NULL)) {
+static void set_active(guint64 hub, char *key, char *val) {
+  if(!val) {
+    db_vars_rm(0, key);
+    ui_mf(NULL, 0, "global.%s reset.", key);
+  } else if(bool_var(val) && !conf_exists(0, "active_ip")) {
     ui_m(NULL, 0, "ERROR: No IP address set. Please use `/set active_ip <your_ip>' first.");
     return;
   }
-  set_bool_f(group, key, val);
+  set_bool_f(0, key, val);
   cc_listen_start();
 }
 
 
-static void set_active_ip(char *group, char *key, char *val) {
+static void set_active_ip(guint64 hub, char *key, char *val) {
   if(!val) {
-    UNSET(group, key);
-    set_active(group, key, NULL);
+    db_vars_rm(0, key);
+    ui_mf(NULL, 0, "global.%s reset.", key);
+    set_active(hub, key, NULL);
+    return;
   }
   // TODO: IPv6?
   if(!g_regex_match_simple("^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}$", val, 0, 0)
@@ -250,56 +241,54 @@ static void set_active_ip(char *group, char *key, char *val) {
     ui_m(NULL, 0, "ERROR: Invalid IP.");
     return;
   }
-  g_key_file_set_string(conf_file, group, key, val);
-  conf_save();
-  get_string(group, key);
+  db_vars_set(hub, key, val);
+  get_string(hub, key);
   cc_listen_start();
 }
 
 
-static void set_active_port(char *group, char *key, char *val) {
-  long v = -1;
-  if(!val)
-    UNSET(group, key);
-  else {
-    v = strtol(val, NULL, 10);
+static void set_active_port(guint64 hub, char *key, char *val) {
+  if(!val) {
+    db_vars_rm(0, key);
+    ui_mf(NULL, 0, "global.%s reset.", key);
+  } else {
+    long v = strtol(val, NULL, 10);
     if((!v && errno == EINVAL) || v < 0 || v > 65535) {
       ui_m(NULL, 0, "Invalid port number.");
       return;
     }
-    g_key_file_set_integer(conf_file, group, key, v);
-    conf_save();
-    get_int(group, key);
+    conf_set_int(0, key, v);
+    get_int(0, key);
   }
   cc_listen_start();
 }
 
 
-static void set_active_bind(char *group, char *key, char *val) {
-  if(!val)
-    UNSET(group, key);
-  else {
+static void set_active_bind(guint64 hub, char *key, char *val) {
+  if(!val) {
+    db_vars_rm(0, key);
+    ui_mf(NULL, 0, "global.%s reset.", key);
+  } else {
     GInetAddress *a = g_inet_address_new_from_string(val);
     if(!a) {
       ui_m(NULL, 0, "Invalid IP.");
       return;
     }
     g_object_unref(a);
-    g_key_file_set_string(conf_file, group, key, val);
-    conf_save();
-    get_string(group, key);
+    db_vars_set(0, key, val);
+    get_string(0, key);
   }
   cc_listen_start();
 }
 
 
-static void get_autorefresh(char *group, char *key) {
+static void get_autorefresh(guint64 hub, char *key) {
   int a = conf_autorefresh();
-  ui_mf(NULL, 0, "%s.%s = %d%s", group, key, a, !a ? " (disabled)" : "");
+  ui_mf(NULL, 0, "global.%s = %d%s", key, a, !a ? " (disabled)" : "");
 }
 
 
-static void set_autorefresh(char *group, char *key, char *val) {
+static void set_autorefresh(guint64 hub, char *key, char *val) {
   if(!val) {
     db_vars_rm(0, key);
     ui_mf(NULL, 0, "global.%s reset.", key);
@@ -313,17 +302,17 @@ static void set_autorefresh(char *group, char *key, char *val) {
     ui_m(NULL, 0, "Interval between automatic refreshes should be at least 10 minutes.");
   else {
     conf_set_int(0, key, v);
-    get_autorefresh(group, key);
+    get_autorefresh(0, key);
   }
 }
 
 
-static void get_slots(char *group, char *key) {
-  ui_mf(NULL, 0, "%s.%s = %d", group, key, conf_slots());
+static void get_slots(guint64 hub, char *key) {
+  ui_mf(NULL, 0, "global.%s = %d", key, conf_slots());
 }
 
 
-static void set_slots(char *group, char *key, char *val) {
+static void set_slots(guint64 hub, char *key, char *val) {
   if(!val) {
     db_vars_rm(0, key);
     ui_mf(NULL, 0, "global.%s reset.", key);
@@ -333,7 +322,7 @@ static void set_slots(char *group, char *key, char *val) {
       ui_m(NULL, 0, "Invalid number.");
     else {
       conf_set_int(0, key, v);
-      get_slots(group, key);
+      get_slots(0, key);
       hub_global_nfochange();
     }
   }
@@ -341,12 +330,12 @@ static void set_slots(char *group, char *key, char *val) {
 }
 
 
-static void get_minislot_size(char *group, char *key) {
-  ui_mf(NULL, 0, "%s.%s = %d KiB", group, key, conf_minislot_size() / 1024);
+static void get_minislot_size(guint64 hub, char *key) {
+  ui_mf(NULL, 0, "global.%s = %d KiB", key, conf_minislot_size() / 1024);
 }
 
 
-static void set_minislot_size(char *group, char *key, char *val) {
+static void set_minislot_size(guint64 hub, char *key, char *val) {
   if(!val) {
     db_vars_rm(0, key);
     ui_mf(NULL, 0, "global.%s reset.", key);
@@ -360,17 +349,17 @@ static void set_minislot_size(char *group, char *key, char *val) {
     ui_m(NULL, 0, "Minislot size must be at least 64 KiB.");
   else {
     conf_set_int(0, key, v);
-    get_minislot_size(group, key);
+    get_minislot_size(0, key);
   }
 }
 
 
-static void get_minislots(char *group, char *key) {
-  ui_mf(NULL, 0, "%s.%s = %d", group, key, conf_minislots());
+static void get_minislots(guint64 hub, char *key) {
+  ui_mf(NULL, 0, "global.%s = %d", key, conf_minislots());
 }
 
 
-static void set_minislots(char *group, char *key, char *val) {
+static void set_minislots(guint64 hub, char *key, char *val) {
   if(!val) {
     db_vars_rm(0, key);
     ui_mf(NULL, 0, "global.%s reset.", key);
@@ -384,24 +373,24 @@ static void set_minislots(char *group, char *key, char *val) {
     ui_m(NULL, 0, "You must have at least 1 minislot.");
   else {
     conf_set_int(0, key, v);
-    get_minislots(group, key);
+    get_minislots(0, key);
   }
 }
 
 
-static void get_password(char *group, char *key) {
-  ui_mf(NULL, 0, "%s.%s is %s", group, key, g_key_file_has_key(conf_file, group, key, NULL) ? "set" : "not set");
+static void get_password(guint64 hub, char *key) {
+  ui_mf(NULL, 0, "%s.%s is %s", hubname(hub), key, conf_exists(hub, key) ? "set" : "not set");
 }
 
 
-static void set_password(char *group, char *key, char *val) {
-  if(strcmp(group, "global") == 0 || group[0] != '#')
+static void set_password(guint64 hub, char *key, char *val) {
+  if(!hub)
     ui_m(NULL, 0, "ERROR: password can only be used as hub setting.");
-  else if(!val)
-    UNSET(group, key);
-  else {
-    g_key_file_set_string(conf_file, group, key, val);
-    conf_save();
+  else if(!val) {
+    db_vars_rm(hub, key);
+    ui_mf(NULL, 0, "%s.%s reset.", hubname(hub), key);
+  } else {
+    db_vars_set(hub, key, val);
     struct ui_tab *tab = ui_tab_cur->data;
     if(tab->type == UIT_HUB && tab->hub->net->conn && !tab->hub->nick_valid)
       hub_password(tab->hub, NULL);
@@ -411,65 +400,65 @@ static void set_password(char *group, char *key, char *val) {
 
 
 // a bit pointless, but for consistency's sake
-static void get_hubname(char *group, char *key) {
-  if(group[0] != '#')
-    ui_mf(NULL, 0, "%s.%s is not set.", group, key);
+static void get_hubname(guint64 hub, char *key) {
+  if(!hub)
+    ui_mf(NULL, 0, "global.%s is not set.", key);
   else
-    ui_mf(NULL, 0, "%s.%s = %s", group, key, group+1);
+    ui_mf(NULL, 0, "%s.%s = %s", hubname(hub), key, hubname(hub)+1);
 }
 
 
-static void set_hubname(char *group, char *key, char *val) {
-  if(group[0] != '#')
+static void set_hubname(guint64 hub, char *key, char *val) {
+  if(!hub)
     ui_mf(NULL, 0, "ERROR: hubname can only be used as hub setting.");
   else if(!val[0])
-    ui_mf(NULL, 0, "%s.%s may not be unset.", group, key);
+    ui_mf(NULL, 0, "%s.%s may not be unset.", hubname(hub), key);
   else {
     if(val[0] == '#')
       val++;
     char *g = g_strdup_printf("#%s", val);
     if(!is_valid_hubname(val))
       ui_mf(NULL, 0, "Invalid name.");
-    else if(g_key_file_has_group(conf_file, g))
+    else if(db_vars_hubid(g))
       ui_mf(NULL, 0, "Name already used.");
     else {
-      conf_group_rename(group, g);
+      db_vars_set(hub, key, g);
       GList *n;
       for(n=ui_tabs; n; n=n->next) {
         struct ui_tab *t = n->data;
-        if(t->type == UIT_HUB && strcmp(t->name, group) == 0) {
+        if(t->type == UIT_HUB && t->hub->id == hub) {
           g_free(t->name);
           t->name = g_strdup(g);
         }
       }
-      get_hubname(g, key);
+      get_hubname(hub, key);
     }
     g_free(g);
   }
 }
 
 
-static void set_hubname_sug(char *group, char *key, char *val, char **sug) {
-  if(group && *group == '#')
-    sug[0] = g_strdup(group);
+static void set_hubname_sug(guint64 hub, char *key, char *val, char **sug) {
+  if(hub)
+    sug[0] = g_strdup(hubname(hub));
 }
 
 
-static void get_download_dir(char *group, char *key) {
+static void get_download_dir(guint64 hub, char *key) {
   char *d = conf_download_dir();
-  ui_mf(NULL, 0, "%s.%s = %s", group, key, d);
+  ui_mf(NULL, 0, "global.%s = %s", key, d);
   g_free(d);
 }
 
 
-static void get_incoming_dir(char *group, char *key) {
+static void get_incoming_dir(guint64 hub, char *key) {
   char *d = conf_incoming_dir();
-  ui_mf(NULL, 0, "%s.%s = %s", group, key, d);
+  ui_mf(NULL, 0, "global.%s = %s", key, d);
   g_free(d);
 }
 
 
-static void set_dl_inc_dir(char *group, char *key, char *val) {
+static void set_dl_inc_dir(guint64 hub, char *key, char *val) {
   gboolean dl = strcmp(key, "download_dir") == 0 ? TRUE : FALSE;
 
   // Don't allow changes to incoming_dir when the download queue isn't empty
@@ -523,9 +512,9 @@ static void set_dl_inc_dir(char *group, char *key, char *val) {
     } else {
       db_vars_set(0, key, val);
       if(dl)
-        get_download_dir(group, key);
+        get_download_dir(0, key);
       else
-        get_incoming_dir(group, key);
+        get_incoming_dir(0, key);
     }
   }
   if(warn)
@@ -535,12 +524,12 @@ static void set_dl_inc_dir(char *group, char *key, char *val) {
 }
 
 
-static void get_download_slots(char *group, char *key) {
-  ui_mf(NULL, 0, "%s.%s = %d", group, key, conf_download_slots());
+static void get_download_slots(guint64 hub, char *key) {
+  ui_mf(NULL, 0, "global.%s = %d", key, conf_download_slots());
 }
 
 
-static void set_download_slots(char *group, char *key, char *val) {
+static void set_download_slots(guint64 hub, char *key, char *val) {
   int oldval = conf_download_slots();
   if(!val) {
     db_vars_rm(0, key);
@@ -551,7 +540,7 @@ static void set_download_slots(char *group, char *key, char *val) {
       ui_m(NULL, 0, "Invalid number.");
     else {
       conf_set_int(0, key, v);
-      get_download_slots(group, key);
+      get_download_slots(0, key);
     }
   }
   if(conf_download_slots() > oldval)
@@ -559,39 +548,40 @@ static void set_download_slots(char *group, char *key, char *val) {
 }
 
 
-static void get_backlog(char *group, char *key) {
-  int n = g_key_file_get_integer(conf_file, group, key, NULL);
-  ui_mf(NULL, 0, "%s.%s = %d%s", group, key, n, !n ? " (disabled)" : "");
+static void get_backlog(guint64 hub, char *key) {
+  int n = conf_get_int(hub, key);
+  ui_mf(NULL, 0, "%s.%s = %d%s", hubname(hub), key, n, !n ? " (disabled)" : "");
 }
 
 
-static void set_backlog(char *group, char *key, char *val) {
-  if(!val)
-    UNSET(group, key);
+static void set_backlog(guint64 hub, char *key, char *val) {
+  if(!val) {
+    db_vars_rm(hub, key);
+    ui_mf(NULL, 0, "%s.%s reset.", hubname(hub), key);
+    return;
+  }
+
+  long v = strtol(val, NULL, 10);
+  if((!v && errno == EINVAL) || v < INT_MIN || v > INT_MAX || v < 0)
+    ui_m(NULL, 0, "Invalid number.");
+  else if(v >= LOGWIN_BUF)
+    ui_mf(NULL, 0, "Maximum value is %d.", LOGWIN_BUF-1);
   else {
-    long v = strtol(val, NULL, 10);
-    if((!v && errno == EINVAL) || v < INT_MIN || v > INT_MAX || v < 0)
-      ui_m(NULL, 0, "Invalid number.");
-    else if(v >= LOGWIN_BUF)
-      ui_mf(NULL, 0, "Maximum value is %d.", LOGWIN_BUF-1);
-    else {
-      g_key_file_set_integer(conf_file, group, key, v);
-      conf_save();
-      get_backlog(group, key);
-    }
+    conf_set_int(hub, key, v);
+    get_backlog(hub, key);
   }
 }
 
 
-static void get_color(char *group, char *key) {
+static void get_color(guint64 hub, char *key) {
   g_return_if_fail(strncmp(key, "color_", 6) == 0);
   struct ui_color *c = ui_color_by_name(key+6);
   g_return_if_fail(c);
-  ui_mf(NULL, 0, "%s.%s = %s", group, key, ui_color_str_gen(c->fg, c->bg, c->x));
+  ui_mf(NULL, 0, "global.%s = %s", key, ui_color_str_gen(c->fg, c->bg, c->x));
 }
 
 
-static void set_color(char *group, char *key, char *val) {
+static void set_color(guint64 hub, char *key, char *val) {
   if(!val) {
     db_vars_rm(0, key);
     ui_mf(NULL, 0, "global.%s reset.", key);
@@ -606,12 +596,12 @@ static void set_color(char *group, char *key, char *val) {
   } else {
     db_vars_set(0, key, val);
     ui_colors_update();
-    get_color(group, key);
+    get_color(0, key);
   }
 }
 
 
-static void set_color_sug(char *group, char *key, char *val, char **sug) {
+static void set_color_sug(guint64 hub, char *key, char *val, char **sug) {
   char *attr = strrchr(val, ',');
   if(attr)
     *(attr++) = 0;
@@ -628,17 +618,18 @@ static void set_color_sug(char *group, char *key, char *val, char **sug) {
 }
 
 
-static void get_tls_policy(char *group, char *key) {
-  ui_mf(NULL, 0, "%s.%s = %s%s", group, key,
-    conf_tlsp_list[conf_tls_policy(group)], conf_certificate ? "" : " (not supported)");
+static void get_tls_policy(guint64 hub, char *key) {
+  ui_mf(NULL, 0, "%s.%s = %s%s", hubname(hub), key,
+    conf_tlsp_list[conf_tls_policy(hub)], conf_certificate ? "" : " (not supported)");
 }
 
 
-static void set_tls_policy(char *group, char *key, char *val) {
-  int old = conf_tls_policy(group);
-  if(!val)
-    UNSET(group, key);
-  else if(!conf_certificate)
+static void set_tls_policy(guint64 hub, char *key, char *val) {
+  int old = conf_tls_policy(hub);
+  if(!val) {
+    db_vars_rm(hub, key);
+    ui_mf(NULL, 0, "%s.%s reset.", hubname(hub), key);
+  } else if(!conf_certificate)
     ui_mf(NULL, 0, "This option can't be modified: %s.",
       !have_tls_support ? "no TLS support available" : "no client certificate available");
   else {
@@ -649,17 +640,17 @@ static void set_tls_policy(char *group, char *key, char *val) {
     if(p < 0)
       ui_m(NULL, 0, "Invalid TLS policy.");
     else {
-      g_key_file_set_integer(conf_file, group, key, p);
+      conf_set_int(hub, key, p);
       conf_save();
-      get_tls_policy(group, key);
+      get_tls_policy(hub, key);
     }
   }
-  if(old != conf_tls_policy(group))
+  if(old != conf_tls_policy(hub))
     hub_global_nfochange();
 }
 
 
-static void set_tls_policy_sug(char *group, char *key, char *val, char **sug) {
+static void set_tls_policy_sug(guint64 hub, char *key, char *val, char **sug) {
   int i = 0, j = 0, len = strlen(val);
   for(i=0; i<=2; i++)
     if(g_ascii_strncasecmp(val, conf_tlsp_list[i], len) == 0 && strlen(conf_tlsp_list[i]) != len)
@@ -667,9 +658,10 @@ static void set_tls_policy_sug(char *group, char *key, char *val, char **sug) {
 }
 
 
-static void set_regex(char *group, char *key, char *val) {
+static void set_regex(guint64 hub, char *key, char *val) {
   if(!val) {
-    UNSET(group, key);
+    db_vars_rm(hub, key);
+    ui_mf(NULL, 0, "%s.%s reset.", hubname(hub), key);
     return;
   }
   GError *err = NULL;
@@ -679,31 +671,30 @@ static void set_regex(char *group, char *key, char *val) {
     g_error_free(err);
   } else {
     g_regex_unref(r);
-    g_key_file_set_string(conf_file, group, key, val);
-    conf_save();
-    get_string(group, key);
+    db_vars_set(hub, key, val);
+    get_string(hub, key);
   }
 }
 
 
-static void get_ui_time_format(char *group, char *key) {
-  ui_mf(NULL, 0, "%s.%s = %s", group, key, conf_ui_time_format());
+static void get_ui_time_format(guint64 hub, char *key) {
+  ui_mf(NULL, 0, "global.%s = %s", key, conf_ui_time_format());
 }
 
 
-static void set_ui_time_format(char *group, char *key, char *val) {
+static void set_ui_time_format(guint64 hub, char *key, char *val) {
   if(!val) {
     db_vars_rm(0, key);
-    ui_mf(NULL, 0, "%s.%s reset.", group, key);\
+    ui_mf(NULL, 0, "global.%s reset.", key);\
     return;
   }
 
   db_vars_set(0, key, val);
-  get_ui_time_format(group, key);
+  get_ui_time_format(0, key);
 }
 
 
-static void set_path_sug(char *group, char *key, char *val, char **sug) {
+static void set_path_sug(guint64 hub, char *key, char *val, char **sug) {
   path_suggest(val, sug);
 }
 
@@ -711,24 +702,22 @@ static void set_path_sug(char *group, char *key, char *val, char **sug) {
 // Suggest the current value. Works for both integers and strings. Perhaps also
 // for booleans, but set_bool_sug() is more useful there anyway.
 // BUG: This does not use a default value, if there is one...
-static void set_old_sug(char *group, char *key, char *val, char **sug) {
-  char *old = g_key_file_get_string(conf_file, group, key, NULL);
-  if(strncmp(old, val, strlen(val)) == 0)
-    sug[0] = old;
-  else
-    g_free(old);
+static void set_old_sug(guint64 hub, char *key, char *val, char **sug) {
+  char *old = db_vars_get(hub, key);
+  if(old && strncmp(old, val, strlen(val)) == 0)
+    sug[0] = g_strdup(old);
 }
 
 
-static void get_filelist_maxage(char *group, char *key) {
-  ui_mf(NULL, 0, "%s.%s = %s", group, key, str_formatinterval(conf_filelist_maxage()));
+static void get_filelist_maxage(guint64 hub, char *key) {
+  ui_mf(NULL, 0, "global.%s = %s", key, str_formatinterval(conf_filelist_maxage()));
 }
 
 
-static void set_filelist_maxage(char *group, char *key, char *val) {
+static void set_filelist_maxage(guint64 hub, char *key, char *val) {
   if(!val) {
     db_vars_rm(0, key);
-    ui_mf(NULL, 0, "%s.%s reset.", group, key);\
+    ui_mf(NULL, 0, "global.%s reset.", key);\
     return;
   }
 
@@ -737,30 +726,30 @@ static void set_filelist_maxage(char *group, char *key, char *val) {
     ui_m(NULL, 0, "Invalid number.");
   else {
     conf_set_int(0, key, v);
-    get_filelist_maxage(group, key);
+    get_filelist_maxage(0, key);
   }
 }
 
 
-static void get_flush_file_cache(char *group, char *key) {
+static void get_flush_file_cache(guint64 hub, char *key) {
 #if HAVE_POSIX_FADVISE
-  ui_mf(NULL, 0, "%s.%s = %s", group, key, g_atomic_int_get(&fadv_enabled) ? "true" : "false");
+  ui_mf(NULL, 0, "global.%s = %s", key, g_atomic_int_get(&fadv_enabled) ? "true" : "false");
 #else
-  ui_mf(NULL, 0, "%s.%s = false (not supported)", group, key);
+  ui_mf(NULL, 0, "global.%s = false (not supported)", key);
 #endif
 }
 
 
-static void set_flush_file_cache(char *group, char *key, char *val) {
+static void set_flush_file_cache(guint64 hub, char *key, char *val) {
   if(!val) {
     db_vars_rm(0, key);
     g_atomic_int_set(&fadv_enabled, 0);
-    ui_mf(NULL, 0, "%s.%s reset.", group, key);
+    ui_mf(NULL, 0, "global.%s reset.", key);
   } else {
     int v = bool_var(val);
     conf_set_bool(0, key, v);
     g_atomic_int_set(&fadv_enabled, v);
-    get_flush_file_cache(group, key);
+    get_flush_file_cache(0, key);
   }
 }
 
@@ -768,41 +757,41 @@ static void set_flush_file_cache(char *group, char *key, char *val) {
 
 // the settings list
 static struct setting settings[] = {
-  { "active",           "global", get_bool_f,          set_active,          set_bool_sug       },
-  { "active_bind",      "global", get_string,          set_active_bind,     set_old_sug        },
-  { "active_ip",        "global", get_string,          set_active_ip,       set_old_sug        },
-  { "active_port",      "global", get_int,             set_active_port,     NULL,              },
-  { "autoconnect",      NULL,     get_bool_f,          set_autoconnect,     set_bool_sug       },
-  { "autorefresh",      "global", get_autorefresh,     set_autorefresh,     NULL               },
-  { "backlog",          NULL,     get_backlog,         set_backlog,         NULL,              },
-  { "chat_only",        NULL,     get_bool_f,          set_bool_f,          set_bool_sug       },
-#define C(n, a,b,c) { "color_" G_STRINGIFY(n), "color", get_color, set_color, set_color_sug },
+  { "active",           get_bool_f,          set_active,          set_bool_sug       },
+  { "active_bind",      get_string,          set_active_bind,     set_old_sug        },
+  { "active_ip",        get_string,          set_active_ip,       set_old_sug        },
+  { "active_port",      get_int,             set_active_port,     NULL,              },
+  { "autoconnect",      get_bool_f,          set_autoconnect,     set_bool_sug       },
+  { "autorefresh",      get_autorefresh,     set_autorefresh,     NULL               },
+  { "backlog",          get_backlog,         set_backlog,         NULL,              },
+  { "chat_only",        get_bool_f,          set_bool_f,          set_bool_sug       },
+#define C(n, a,b,c) { "color_" G_STRINGIFY(n), get_color, set_color, set_color_sug },
   UI_COLORS
 #undef C
-  { "connection",       NULL,     get_string,          set_userinfo,        set_old_sug        },
-  { "description",      NULL,     get_string,          set_userinfo,        set_old_sug        },
-  { "download_dir",     "global", get_download_dir,    set_dl_inc_dir,      set_path_sug       },
-  { "download_slots",   "global", get_download_slots,  set_download_slots,  NULL               },
-  { "download_exclude", "global", get_string,          set_regex,           set_old_sug        },
-  { "email",            NULL,     get_string,          set_userinfo,        set_old_sug        },
-  { "encoding",         NULL,     get_encoding,        set_encoding,        set_encoding_sug   },
-  { "filelist_maxage",  "global", get_filelist_maxage, set_filelist_maxage, set_old_sug        },
-  { "flush_file_cache", "global", get_flush_file_cache,set_flush_file_cache,set_bool_sug       },
-  { "hubname",          NULL,     get_hubname,         set_hubname,         set_hubname_sug    },
-  { "incoming_dir",     "global", get_incoming_dir,    set_dl_inc_dir,      set_path_sug       },
-  { "log_debug",        "log",    get_bool_f,          set_bool_f,          set_bool_sug       },
-  { "log_downloads",    "log",    get_bool_t,          set_bool_t,          set_bool_sug       },
-  { "log_uploads",      "log",    get_bool_t,          set_bool_t,          set_bool_sug       },
-  { "minislots",        "global", get_minislots,       set_minislots,       NULL               },
-  { "minislot_size",    "global", get_minislot_size,   set_minislot_size,   NULL               },
-  { "nick",             NULL,     get_string,          set_nick,            set_old_sug        },
-  { "password",         NULL,     get_password,        set_password,        NULL               },
-  { "share_hidden",     "global", get_bool_f,          set_bool_f,          set_bool_sug       },
-  { "share_exclude",    "global", get_string,          set_regex,           set_old_sug        },
-  { "show_joinquit",    NULL,     get_bool_f,          set_bool_f,          set_bool_sug       },
-  { "slots",            "global", get_slots,           set_slots,           NULL               },
-  { "tls_policy",       NULL,     get_tls_policy,      set_tls_policy,      set_tls_policy_sug },
-  { "ui_time_format",   "global", get_ui_time_format,  set_ui_time_format,  set_old_sug        },
+  { "connection",       get_string,          set_userinfo,        set_old_sug        },
+  { "description",      get_string,          set_userinfo,        set_old_sug        },
+  { "download_dir",     get_download_dir,    set_dl_inc_dir,      set_path_sug       },
+  { "download_slots",   get_download_slots,  set_download_slots,  NULL               },
+  { "download_exclude", get_string,          set_regex,           set_old_sug        },
+  { "email",            get_string,          set_userinfo,        set_old_sug        },
+  { "encoding",         get_encoding,        set_encoding,        set_encoding_sug   },
+  { "filelist_maxage",  get_filelist_maxage, set_filelist_maxage, set_old_sug        },
+  { "flush_file_cache", get_flush_file_cache,set_flush_file_cache,set_bool_sug       },
+  { "hubname",          get_hubname,         set_hubname,         set_hubname_sug    },
+  { "incoming_dir",     get_incoming_dir,    set_dl_inc_dir,      set_path_sug       },
+  { "log_debug",        get_bool_f,          set_bool_f,          set_bool_sug       },
+  { "log_downloads",    get_bool_t,          set_bool_t,          set_bool_sug       },
+  { "log_uploads",      get_bool_t,          set_bool_t,          set_bool_sug       },
+  { "minislots",        get_minislots,       set_minislots,       NULL               },
+  { "minislot_size",    get_minislot_size,   set_minislot_size,   NULL               },
+  { "nick",             get_string,          set_nick,            set_old_sug        },
+  { "password",         get_password,        set_password,        NULL               },
+  { "share_hidden",     get_bool_f,          set_bool_f,          set_bool_sug       },
+  { "share_exclude",    get_string,          set_regex,           set_old_sug        },
+  { "show_joinquit",    get_bool_f,          set_bool_f,          set_bool_sug       },
+  { "slots",            get_slots,           set_slots,           NULL               },
+  { "tls_policy",       get_tls_policy,      set_tls_policy,      set_tls_policy_sug },
+  { "ui_time_format",   get_ui_time_format,  set_ui_time_format,  set_old_sug        },
   { NULL }
 };
 
@@ -832,17 +821,18 @@ static struct doc_set *getdoc(struct setting *s) {
 }
 
 
-static gboolean parsesetting(char *name, char **group, char **key, struct setting **s, gboolean *checkalt) {
+static gboolean parsesetting(char *name, guint64 *hub, char **key, struct setting **s, gboolean *checkalt) {
   char *sep;
 
   *key = name;
-  *group = NULL; // NULL = figure out automatically
+  *hub = 0;
+  char *group = NULL;
   *checkalt = FALSE;
 
   // separate key/group
   if((sep = strchr(*key, '.'))) {
     *sep = 0;
-    *group = *key;
+    group = *key;
     *key = sep+1;
   }
 
@@ -852,21 +842,19 @@ static gboolean parsesetting(char *name, char **group, char **key, struct settin
     ui_mf(NULL, 0, "No configuration variable with the name '%s'.", *key);
     return FALSE;
   }
-  if(*group && (
-      ((*s)->group && strcmp(*group, (*s)->group) != 0) ||
-      (!(*s)->group && !g_key_file_has_group(conf_file, *group)))) {
+  if(group && strcmp(group, "global") != 0)
+    *hub = db_vars_hubid(group);
+  if(group && strcmp(group, "global") != 0 && (!getdoc(*s)->hub || !*hub)) {
     ui_m(NULL, 0, "Wrong configuration group.");
     return FALSE;
   }
-  if(!*group)
-    *group = (*s)->group;
-  if(!*group) {
+
+  if(!group) {
     struct ui_tab *tab = ui_tab_cur->data;
     if(tab->type == UIT_HUB) {
       *checkalt = TRUE;
-      *group = tab->name;
-    } else
-      *group = "global";
+      *hub = tab->hub->id;
+    }
   }
   return TRUE;
 }
@@ -883,7 +871,7 @@ void c_set(char *args) {
   }
 
   char *key;
-  char *group; // NULL = figure out automatically
+  guint64 hub = 0;
   char *val = NULL; // NULL = get
   char *sep;
   struct setting *s;
@@ -896,22 +884,19 @@ void c_set(char *args) {
     g_strstrip(val);
   }
 
-  // get group and key
-  if(!parsesetting(args, &group, &key, &s, &checkalt))
+  // get hub and key
+  if(!parsesetting(args, &hub, &key, &s, &checkalt))
     return;
 
   // get
   if(!val || !val[0]) {
-    if(checkalt && !g_key_file_has_key(conf_file, group, key, NULL) && strcmp(key, "hubname") != 0)
-      group = "global";
-    s->get(group, key);
+    if(checkalt && !conf_exists(hub, key))
+      hub = 0;
+    s->get(hub, key);
 
   // set
-  } else {
-    s->set(group, key, val);
-    // set() may not always modify the config, but let's just save anyway
-    conf_save();
-  }
+  } else
+    s->set(hub, key, val);
 }
 
 
@@ -921,18 +906,18 @@ void c_unset(char *args) {
     return;
   }
 
-  char *key, *group;
+  char *key;
+  guint64 hub;
   struct setting *s;
   gboolean checkalt;
 
-  // get group and key
-  if(!parsesetting(args, &group, &key, &s, &checkalt))
+  // get hub and key
+  if(!parsesetting(args, &hub, &key, &s, &checkalt))
     return;
 
-  if(checkalt && !g_key_file_has_key(conf_file, group, key, NULL) && strcmp(key, "hubname") != 0)
-    group = "global";
-  s->set(group, key, NULL);
-  conf_save();
+  if(checkalt && !conf_exists(hub, key))
+    hub = 0;
+  s->set(hub, key, NULL);
 }
 
 
@@ -956,15 +941,16 @@ void c_set_sug(char *args, char **sug) {
     char *pre = g_strdup(args);
 
     // Get group and key
-    char *key, *group;
+    char *key;
+    guint64 hub;
     struct setting *s;
     gboolean checkalt;
-    if(parsesetting(pre, &group, &key, &s, &checkalt)) {
-      if(checkalt && !g_key_file_has_key(conf_file, group, key, NULL) && strcmp(key, "hubname") != 0)
-        group = "global";
+    if(parsesetting(pre, &hub, &key, &s, &checkalt)) {
+      if(checkalt && !conf_exists(hub, key))
+        hub = 0;
 
       if(s->suggest) {
-        s->suggest(group, key, sep+1, sug);
+        s->suggest(hub, key, sep+1, sug);
         strv_prefix(sug, args, " ", NULL);
       }
     }
@@ -981,6 +967,6 @@ void c_help_set(char *args) {
   else if(!d)
     ui_mf(NULL, 0, "\nNo documentation available for %s.", args);
   else
-    ui_mf(NULL, 0, "\nSetting: %s.%s %s\n\n%s\n", !s->group ? "#hub" : s->group, s->name, d->type, d->desc);
+    ui_mf(NULL, 0, "\nSetting: %s.%s %s\n\n%s\n", d->hub ? "#hub" : "global", s->name, d->type, d->desc);
 }
 

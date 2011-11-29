@@ -1042,6 +1042,20 @@ void db_vars_set(guint64 hub, const char *name, const char *val) {
 }
 
 
+// Get the hub id given the `hubname' variable. (linear search)
+guint64 db_vars_hubid(const char *name) {
+  db_vars_cacheget();
+
+  GHashTableIter i;
+  struct db_var_item *n;
+  g_hash_table_iter_init(&i, db_vars_cache);
+  while(g_hash_table_iter_next(&i, NULL, (gpointer *)&n))
+    if(strcmp(n->name, "hubname") == 0 && strcmp(n->val, name) == 0)
+      return n->hub;
+  return 0;
+}
+
+
 // conf_* macros and functions. These are provided here to ease the conversion
 // from the old glib key files to the new database format. These should be
 // replaced with a separate and better abstraction later on in a separate file
@@ -1063,15 +1077,19 @@ void db_vars_set(guint64 hub, const char *name, const char *val) {
 
 #define conf_download_dir() (\
   !conf_exists(0, "download_dir") ? g_build_filename(conf_dir, "dl", NULL)\
-    : db_vars_get(0, "download_dir"))
+    : g_strdup(db_vars_get(0, "download_dir")))
 
 #define conf_download_slots() (!conf_exists(0, "download_slots") ? 3 : conf_get_int(0, "download_slots"))
+
+#define conf_encoding(hub) (\
+  conf_exists(hub, "encoding")   ? db_vars_get(hub, "encoding") \
+    : conf_exists(0, "encoding") ? db_vars_get(0, "encoding") : "UTF-8")
 
 #define conf_filelist_maxage() (!conf_exists(0, "filelist_maxage") ? (7*24*3600) : conf_get_int(0, "filelist_maxage"))
 
 #define conf_incoming_dir() (\
   !conf_exists(0, "incoming_dir") ? g_build_filename(conf_dir, "inc", NULL)\
-    : db_vars_get(0, "incoming_dir"))
+    : g_strdup(db_vars_get(0, "incoming_dir")))
 
 #define conf_minislots() (!conf_exists(0, "minislots") ? 3 : conf_get_int(0, "minislots"))
 
@@ -1081,7 +1099,18 @@ void db_vars_set(guint64 hub, const char *name, const char *val) {
 
 #define conf_ui_time_format() (!conf_exists(0, "ui_time_format") ? "[%H:%M:%S]" : db_vars_get(0, "ui_time_format"))
 
+#define CONF_TLSP_DISABLE 0
+#define CONF_TLSP_ALLOW   1
+#define CONF_TLSP_PREFER  2
+
+#define conf_tls_policy(hub) (\
+  !conf_certificate ? CONF_TLSP_DISABLE\
+    : conf_exists(hub, "tls_policy") ? conf_get_int(hub, "tls_policy")\
+    : conf_exists(0, "tls_policy")   ? conf_get_int(0, "tls_policy") : CONF_TLSP_ALLOW)
+
 #endif
+
+char *conf_tlsp_list[] = { "disabled", "allow", "prefer" };
 
 gboolean conf_get_bool(guint64 hub, const char *name) {
   char *v = db_vars_get(hub, name);

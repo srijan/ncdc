@@ -69,36 +69,17 @@ char conf_pid[24];
     ? g_key_file_get_##type(conf_file, name, (key), NULL)\
     : g_key_file_get_##type(conf_file, "global", (key), NULL))
 
-#define conf_encoding(hub) (\
-  g_key_file_has_key(conf_file, hub, "encoding", NULL)\
-    ? g_key_file_get_string(conf_file, hub, "encoding", NULL) \
-    : g_key_file_has_key(conf_file, "global", "encoding", NULL) \
-    ? g_key_file_get_string(conf_file, "global", "encoding", NULL) \
-    : g_strdup("UTF-8"))
 
 // Can be used even before the configuration file is loaded. In which case it
 // returns TRUE. Default is otherwise FALSE.
+// TODO: this needs fixing:
+// - Use db_* instead of conf_file
+// - Allow multithreaded access
 #define conf_log_debug() (\
   !conf_file ? TRUE : !g_key_file_has_key(conf_file, "log", "log_debug", NULL) ? FALSE :\
     g_key_file_get_boolean(conf_file, "log", "log_debug", NULL))
 
-
-#define CONF_TLSP_DISABLE 0
-#define CONF_TLSP_ALLOW   1
-#define CONF_TLSP_PREFER  2
-
-#define conf_tls_policy(hub) (\
-  !conf_certificate ? CONF_TLSP_DISABLE\
-    : g_key_file_has_key(conf_file, hub, "tls_policy", NULL)\
-    ? g_key_file_get_integer(conf_file, hub, "tls_policy", NULL)\
-    : g_key_file_has_key(conf_file, "global", "tls_policy", NULL)\
-    ? g_key_file_get_integer(conf_file, "global", "tls_policy", NULL)\
-    : CONF_TLSP_ALLOW)
-
 #endif
-
-char *conf_tlsp_list[] = { "disabled", "allow", "prefer" };
-
 
 #if TLS_SUPPORT
 GTlsCertificate *conf_certificate = NULL;
@@ -334,28 +315,6 @@ void conf_save() {
   g_free(dat);
   g_free(tmpf);
   g_free(cf);
-}
-
-
-void conf_group_rename(const char *from, const char *to) {
-  g_return_if_fail(!g_key_file_has_group(conf_file, to));
-  char **keys = g_key_file_get_keys(conf_file, from, NULL, NULL);
-  char **key = keys;
-  for(; key&&*key; key++) {
-    char *v = g_key_file_get_value(conf_file, from, *key, NULL);
-    g_key_file_set_value(conf_file, to, *key, v);
-    g_free(v);
-    v = g_key_file_get_comment(conf_file, from, *key, NULL);
-    if(v)
-      g_key_file_set_comment(conf_file, to, *key, v, NULL);
-    g_free(v);
-  }
-  g_strfreev(keys);
-  char *c = g_key_file_get_comment(conf_file, from, NULL, NULL);
-  if(c)
-    g_key_file_set_comment(conf_file, to, NULL, c, NULL);
-  g_free(c);
-  g_key_file_remove_group(conf_file, from, NULL);
 }
 
 

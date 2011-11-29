@@ -254,13 +254,13 @@ static void log_fatal(const gchar *dom, GLogLevelFlags level, const gchar *msg, 
 
 
 static void open_autoconnect() {
-  char **groups = g_key_file_get_groups(conf_file, NULL);
-  char **group;
+  char **hubs = db_vars_hubs();
+  char **hub;
   // TODO: make sure the tabs are opened in the same order as they were in the last run?
-  for(group=groups; *group; group++)
-    if(**group == '#' && g_key_file_get_boolean(conf_file, *group, "autoconnect", NULL))
-      ui_tab_open(ui_hub_create(*group+1, TRUE), FALSE, NULL);
-  g_strfreev(groups);
+  for(hub=hubs; *hub; hub++)
+    if(conf_exists(db_vars_hubid(*hub), "autoconnect"))
+      ui_tab_open(ui_hub_create(*hub+1, TRUE), FALSE, NULL);
+  g_strfreev(hubs);
 }
 
 

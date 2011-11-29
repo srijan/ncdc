@@ -789,12 +789,11 @@ static void fl_refresh_process() {
   struct fl_list *dir = fl_refresh_queue->head->data;
   struct fl_scan_args *args = g_slice_new0(struct fl_scan_args);
   args->donefun = fl_refresh_scanned;
-  args->inc_hidden = g_key_file_get_boolean(conf_file, "global", "share_hidden", NULL);
+  args->inc_hidden = conf_get_bool(0, "share_hidden");
 
-  char *excl = g_key_file_get_string(conf_file, "global", "share_exclude", NULL);
+  char *excl = db_vars_get(0, "share_exclude");
   if(excl)
     args->excl_regex = g_regex_new(excl, G_REGEX_OPTIMIZE, 0, NULL);
-  g_free(excl);
 
   // Don't allow files in the scanned directory to be hashed while refreshing.
   // Since the refresh thread will create a completely new fl_list structure,

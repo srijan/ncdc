@@ -386,10 +386,22 @@ static void db_queue_process(sqlite3 *db) {
 static void db_stmt_free(gpointer dat) { sqlite3_finalize(dat); }
 
 static gpointer db_thread_func(gpointer dat) {
-  sqlite3 *db = dat;
+  // Open database
+  char *dbfn = dat;
+  sqlite3 *db;
+  if(sqlite3_open(dbfn, &db))
+    g_error("Couldn't open `%s': %s", dbfn, sqlite3_errmsg(db));
+  g_free(dbfn);
+
+  sqlite3_busy_timeout(db, 10);
+  sqlite3_exec(db, "PRAGMA foreign_keys = FALSE", NULL, NULL, NULL);
+
+  // Create prepared statement cache and start handling queries
   db_stmt_cache = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL, db_stmt_free);
   db_queue_process(db);
   g_hash_table_unref(db_stmt_cache);
+
+  // Close
   sqlite3_close(db);
   return NULL;
 }
@@ -1182,28 +1194,16 @@ static void generate_pid() {
 void db_init() {
   char *dbfn = g_build_filename(conf_dir, "db.sqlite3", NULL);
 
-  if(!sqlite3_threadsafe())
-    g_error("sqlite3 has not been compiled with threading support. Please recompile sqlite3 with SQLITE_THREADSAFE enabled.");
-
   // TODO: should look at the version file instead. This check is simply for debugging purposes.
   gboolean newdb = !g_file_test(dbfn, G_FILE_TEST_EXISTS);
   if(newdb)
     g_error("No db.sqlite3 file present yet. Please run ncdc-db-upgrade.");
 
-  sqlite3 *db;
-  if(sqlite3_open(dbfn, &db))
-    g_error("Couldn't open `%s': %s", dbfn, sqlite3_errmsg(db));
-  g_free(dbfn);
-
-  sqlite3_busy_timeout(db, 10);
-
-  sqlite3_exec(db, "PRAGMA foreign_keys = FALSE", NULL, NULL, NULL);
-
-  // TODO: create SQL schema, if it doesn't exist yet
-
   // start database thread
   db_queue = g_async_queue_new();
-  db_thread = g_thread_create(db_thread_func, db, TRUE, NULL);
+  db_thread = g_thread_create(db_thread_func, dbfn, TRUE, NULL);
+
+  // TODO: create SQL schema, if it doesn't exist yet
 
   // load db_pid and db_cid
   if(!db_vars_get(0, "pid"))

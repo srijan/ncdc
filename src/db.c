@@ -557,7 +557,7 @@ char *db_fl_gettthl(const char *root, int *len) {
   base32_encode(root, hash);
 
   GAsyncQueue *a = g_async_queue_new_full(g_free);
-  db_queue_push(DBF_SINGLE, "SELECT COALESCE(tthl, '') FROM hashfiles WHERE root = ?",
+  db_queue_push(DBF_SINGLE, "SELECT COALESCE(tthl, '') FROM hashdata WHERE root = ?",
     DBQ_TEXT, hash,
     DBQ_RES, a, DBQ_BLOB,
     DBQ_END

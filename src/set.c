@@ -411,7 +411,7 @@ static void get_hubname(guint64 hub, char *key) {
 static void set_hubname(guint64 hub, char *key, char *val) {
   if(!hub)
     ui_mf(NULL, 0, "ERROR: hubname can only be used as hub setting.");
-  else if(!val[0])
+  else if(!val || !val[0])
     ui_mf(NULL, 0, "%s.%s may not be unset.", hubname(hub), key);
   else {
     if(val[0] == '#')

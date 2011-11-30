@@ -41,7 +41,7 @@
 GMainLoop *main_loop;
 
 gboolean have_tls_support;
-gboolean log_debug = FALSE;
+gboolean log_debug = TRUE;
 
 
 // input handling declarations
@@ -232,9 +232,11 @@ char *ncdc_version() {
 }
 
 
+static gboolean stderr_redir = FALSE;
+
 // redirect all non-fatal errors to stderr (NOT stdout!)
 static void log_redirect(const gchar *dom, GLogLevelFlags level, const gchar *msg, gpointer dat) {
-  if(!(level & (G_LOG_LEVEL_INFO|G_LOG_LEVEL_DEBUG)) || log_debug) {
+  if(!(level & (G_LOG_LEVEL_INFO|G_LOG_LEVEL_DEBUG)) || (stderr_redir && log_debug)) {
     time_t tm = time(NULL);
     char ts[50];
     strftime(ts, 49, "[%F %H:%M:%S %Z]", localtime(&tm));
@@ -248,8 +250,10 @@ static void log_redirect(const gchar *dom, GLogLevelFlags level, const gchar *ms
 static void log_fatal(const gchar *dom, GLogLevelFlags level, const gchar *msg, gpointer dat) {
   endwin();
   // print to both stderr (log file) and stdout
-  fprintf(stderr, "\n\n*%s* %s\n", loglevel_to_str(level), msg);
-  fflush(stderr);
+  if(stderr_redir) {
+    fprintf(stderr, "\n\n*%s* %s\n", loglevel_to_str(level), msg);
+    fflush(stderr);
+  }
   printf("\n\n*%s* %s\n", loglevel_to_str(level), msg);
 }
 
@@ -391,21 +395,25 @@ int main(int argc, char **argv) {
   have_tls_support = FALSE;
 #endif
 
-  db_init();
-  hub_init_global();
-  net_init_global();
-
   // setup logging
+  g_log_set_handler(NULL, G_LOG_FATAL_MASK | G_LOG_FLAG_FATAL | G_LOG_LEVEL_ERROR, log_fatal, NULL);
+  g_log_set_default_handler(log_redirect, NULL);
+
+  // Init database
+  db_init();
+
+  // redirect stderr to a log file
   char *errlog = g_build_filename(db_dir, "stderr.log", NULL);
   if(!freopen(errlog, "w", stderr)) {
     fprintf(stderr, "ERROR: Couldn't open %s for writing: %s\n", errlog, strerror(errno));
     exit(1);
   }
   g_free(errlog);
-  g_log_set_handler(NULL, G_LOG_FATAL_MASK | G_LOG_FLAG_FATAL | G_LOG_LEVEL_ERROR, log_fatal, NULL);
-  g_log_set_default_handler(log_redirect, NULL);
+  stderr_redir = TRUE;
 
-  // init more stuff
+  // Init more stuff
+  hub_init_global();
+  net_init_global();
   cc_init_global();
   dl_init_global();
   ui_cmdhist_init("history");

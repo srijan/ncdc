@@ -1677,7 +1677,7 @@ static GSocketListener *listen_tcp_create(GInetAddress *ia, int *port, GError **
   g_object_unref(newaddr);
 
   // TLS port (use a bogus GCancellable object to differenciate betwen the two)
-  if(s && conf_certificate) {
+  if(s && db_certificate) {
     saddr = G_SOCKET_ADDRESS(g_inet_socket_address_new(ia, *port+1));
     GCancellable *t = g_cancellable_new();
     r = g_socket_listener_add_address(s, saddr, G_SOCKET_TYPE_STREAM, G_SOCKET_PROTOCOL_TCP, G_OBJECT(t), NULL, err);
@@ -1751,7 +1751,7 @@ gboolean cc_listen_start() {
   cc_listen_port = port;
   cc_listen_ip = g_strdup(db_vars_get(0, "active_ip"));
 
-  if(conf_certificate)
+  if(db_certificate)
     ui_mf(ui_main, 0, "Listening on TCP+UDP port %d and TCP port %d, remote IP is %s.", cc_listen_port, cc_listen_port+1, cc_listen_ip);
   else
     ui_mf(ui_main, 0, "Listening on TCP+UDP port %d, remote IP is %s.", cc_listen_port, cc_listen_ip);

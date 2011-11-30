@@ -620,7 +620,7 @@ static void set_color_sug(guint64 hub, char *key, char *val, char **sug) {
 
 static void get_tls_policy(guint64 hub, char *key) {
   ui_mf(NULL, 0, "%s.%s = %s%s", hubname(hub), key,
-    conf_tlsp_list[conf_tls_policy(hub)], conf_certificate ? "" : " (not supported)");
+    conf_tlsp_list[conf_tls_policy(hub)], db_certificate ? "" : " (not supported)");
 }
 
 
@@ -629,7 +629,7 @@ static void set_tls_policy(guint64 hub, char *key, char *val) {
   if(!val) {
     db_vars_rm(hub, key);
     ui_mf(NULL, 0, "%s.%s reset.", hubname(hub), key);
-  } else if(!conf_certificate)
+  } else if(!db_certificate)
     ui_mf(NULL, 0, "This option can't be modified: %s.",
       !have_tls_support ? "no TLS support available" : "no client certificate available");
   else {

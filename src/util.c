@@ -59,103 +59,6 @@
 const char *conf_dir = NULL;
 
 
-#if TLS_SUPPORT
-GTlsCertificate *conf_certificate = NULL;
-
-// Fallback, if TLS_SUPPORT is false then no certificates are used and this
-// variable is never dereferenced. It is, however, checked against NULL in some
-// places to detect support for client-to-client TLS.
-#else
-char *conf_certificate = NULL;
-#endif
-
-// Base32-encoded keyprint of our own certificate
-char *conf_certificate_kp = NULL;
-
-
-#if TLS_SUPPORT
-
-// Tries to generate the certificate, returns TRUE on success or FALSE when it
-// failed and the user ignored the error.
-static gboolean conf_gen_cert(char *cert_file, char *key_file) {
-  if(g_file_test(cert_file, G_FILE_TEST_EXISTS) && g_file_test(key_file, G_FILE_TEST_EXISTS))
-    return TRUE;
-
-  printf("Generating certificates...");
-  fflush(stdout);
-
-  // Make sure either both exists or none exists
-  unlink(cert_file);
-  unlink(key_file);
-
-  // Now try to run `ncdc-gen-cert' to create them
-  GError *err = NULL;
-  char *argv[] = { "ncdc-gen-cert", (char *)conf_dir, NULL };
-  int ret;
-  g_spawn_sync(NULL, argv, NULL,
-    G_SPAWN_SEARCH_PATH|G_SPAWN_SEARCH_PATH|G_SPAWN_STDERR_TO_DEV_NULL,
-    NULL, NULL, NULL, NULL, &ret, &err);
-  if(!err) {
-    printf(" Done!\n");
-    return TRUE;
-  }
-
-  printf(" Error!\n\n");
-
-  printf(
-    "ERROR: Could not generate the client certificate files.\n"
-    "  %s\n\n"
-    "This certificate is not required, but client-to-client encryption will be\n"
-    "disabled without it.\n\n"
-    "To diagnose the problem, please run the `ncdc-gen-cert` utility. This\n"
-    "script should have been installed along with ncdc, but is available in the\n"
-    "util/ directory of the ncdc distribution in case it hasn't.\n\n"
-    "Hit Ctrl+c to abort ncdc, or the return key to continue without a certificate.",
-    err->message);
-  g_error_free(err);
-  getchar();
-  return FALSE;
-}
-
-
-static void conf_load_cert() {
-  char *cert_file = g_build_filename(conf_dir, "cert", "client.crt", NULL);
-  char *key_file = g_build_filename(conf_dir, "cert", "client.key", NULL);
-
-  // If they don't exist, try to create them
-  if(!conf_gen_cert(cert_file, key_file)) {
-    g_free(cert_file);
-    g_free(key_file);
-    return;
-  }
-
-  // Try to load them
-  GError *err = NULL;
-  conf_certificate = g_tls_certificate_new_from_files(cert_file, key_file, &err);
-  if(err) {
-    printf(
-      "ERROR: Could not load the client certificate files.\n"
-      "  %s\n\n"
-      "Please check that a valid client certificate is stored in the following two files:\n"
-      "  %s\n  %s\n"
-      "Or remove the files to automatically generate a new certificate.\n",
-      err->message, cert_file, key_file);
-    exit(1);
-    g_error_free(err);
-  } else {
-    conf_certificate_kp = g_malloc0(53);
-    char raw[32];
-    certificate_sha256(conf_certificate, raw);
-    base32_encode_dat(raw, conf_certificate_kp, 32);
-  }
-
-  g_free(cert_file);
-  g_free(key_file);
-}
-
-#endif // TLS_SUPPORT
-
-
 void conf_init() {
   // get location of the configuration directory
   if(!conf_dir && (conf_dir = g_getenv("NCDC_DIR")))
@@ -216,12 +119,6 @@ void conf_init() {
   // the lock) when ncdc is closed, was killed or has crashed.
   if(dir_ver[0] > 1)
     g_error("Incompatible data directory. Please upgrade ncdc or use a different directory.");
-
-  // load client certificate
-#if TLS_SUPPORT
-  if(have_tls_support)
-    conf_load_cert();
-#endif
 }
 
 

@@ -27,12 +27,14 @@
 #include "ncdc.h"
 #include <sqlite3.h>
 #include <stdarg.h>
+#include <stdlib.h>
+#include <unistd.h>
 
 // TODO: The conf_* stuff in util.c should eventually be merged into this file as well.
 
-// All of the db_* functions can be used from multiple threads. The database is
-// only accessed from within the database thread (db_thread_func()). All access
-// to the database from other threads is performed via message passing.
+// Most of the db_* functions can be used from multiple threads. The database
+// is only accessed from within the database thread (db_thread_func()). All
+// access to the database from other threads is performed via message passing.
 //
 // Some properties of this implementation:
 // - Multiple UPDATE/DELETE/INSERT statements in a short interval are grouped
@@ -1138,7 +1140,7 @@ char **db_vars_hubs() {
 #define CONF_TLSP_PREFER  2
 
 #define conf_tls_policy(hub) (\
-  !conf_certificate ? CONF_TLSP_DISABLE\
+  !db_certificate ? CONF_TLSP_DISABLE\
     : conf_exists(hub, "tls_policy") ? conf_get_int(hub, "tls_policy")\
     : conf_exists(0, "tls_policy")   ? conf_get_int(0, "tls_policy") : CONF_TLSP_ALLOW)
 
@@ -1165,6 +1167,103 @@ int conf_get_int(guint64 hub, const char *name) {
 
 
 // Initialize the database
+
+#if TLS_SUPPORT
+GTlsCertificate *db_certificate = NULL;
+
+// Fallback, if TLS_SUPPORT is false then no certificates are used and this
+// variable is never dereferenced. It is, however, checked against NULL in some
+// places to detect support for client-to-client TLS.
+#else
+char *db_certificate = NULL;
+#endif
+
+// Base32-encoded keyprint of our own certificate
+char *db_certificate_kp = NULL;
+
+
+#if TLS_SUPPORT
+
+// Tries to generate the certificate, returns TRUE on success or FALSE when it
+// failed and the user ignored the error.
+static gboolean db_gen_cert(char *cert_file, char *key_file) {
+  if(g_file_test(cert_file, G_FILE_TEST_EXISTS) && g_file_test(key_file, G_FILE_TEST_EXISTS))
+    return TRUE;
+
+  printf("Generating certificates...");
+  fflush(stdout);
+
+  // Make sure either both exists or none exists
+  unlink(cert_file);
+  unlink(key_file);
+
+  // Now try to run `ncdc-gen-cert' to create them
+  GError *err = NULL;
+  char *argv[] = { "ncdc-gen-cert", (char *)conf_dir, NULL };
+  int ret;
+  g_spawn_sync(NULL, argv, NULL,
+    G_SPAWN_SEARCH_PATH|G_SPAWN_SEARCH_PATH|G_SPAWN_STDERR_TO_DEV_NULL,
+    NULL, NULL, NULL, NULL, &ret, &err);
+  if(!err) {
+    printf(" Done!\n");
+    return TRUE;
+  }
+
+  printf(" Error!\n\n");
+
+  printf(
+    "ERROR: Could not generate the client certificate files.\n"
+    "  %s\n\n"
+    "This certificate is not required, but client-to-client encryption will be\n"
+    "disabled without it.\n\n"
+    "To diagnose the problem, please run the `ncdc-gen-cert` utility. This\n"
+    "script should have been installed along with ncdc, but is available in the\n"
+    "util/ directory of the ncdc distribution in case it hasn't.\n\n"
+    "Hit Ctrl+c to abort ncdc, or the return key to continue without a certificate.",
+    err->message);
+  g_error_free(err);
+  getchar();
+  return FALSE;
+}
+
+
+static void db_load_cert() {
+  char *cert_file = g_build_filename(conf_dir, "cert", "client.crt", NULL);
+  char *key_file = g_build_filename(conf_dir, "cert", "client.key", NULL);
+
+  // If they don't exist, try to create them
+  if(!db_gen_cert(cert_file, key_file)) {
+    g_free(cert_file);
+    g_free(key_file);
+    return;
+  }
+
+  // Try to load them
+  GError *err = NULL;
+  db_certificate = g_tls_certificate_new_from_files(cert_file, key_file, &err);
+  if(err) {
+    printf(
+      "ERROR: Could not load the client certificate files.\n"
+      "  %s\n\n"
+      "Please check that a valid client certificate is stored in the following two files:\n"
+      "  %s\n  %s\n"
+      "Or remove the files to automatically generate a new certificate.\n",
+      err->message, cert_file, key_file);
+    exit(1);
+    g_error_free(err);
+  } else {
+    db_certificate_kp = g_malloc0(53);
+    char raw[32];
+    certificate_sha256(db_certificate, raw);
+    base32_encode_dat(raw, db_certificate_kp, 32);
+  }
+
+  g_free(cert_file);
+  g_free(key_file);
+}
+
+#endif // TLS_SUPPORT
+
 
 
 char db_cid[24];
@@ -1220,6 +1319,12 @@ void db_init() {
     db_vars_set(0, "nick", nick);
     g_free(nick);
   }
+
+  // load client certificate
+#if TLS_SUPPORT
+  if(have_tls_support)
+    db_load_cert();
+#endif
 
   // load fadv_enabled
   g_atomic_int_set(&fadv_enabled, conf_get_bool(0, "flush_file_cache"));

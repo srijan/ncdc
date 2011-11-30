@@ -651,8 +651,8 @@ void hub_send_nfo(struct hub *hub) {
       adc_append(cmd, "NI", hub->nick);
       // Always add our KP field, even if we're not active. Other clients may
       // validate our certificate even when we are the one connecting.
-      if(conf_certificate)
-        g_string_append_printf(cmd, " KPSHA256/%s", conf_certificate_kp);
+      if(db_certificate)
+        g_string_append_printf(cmd, " KPSHA256/%s", db_certificate_kp);
     }
     if(f || !eq(ip4))
       g_string_append_printf(cmd, " I4%s", ip4_unpack(ip4)); // ip4 = 0 == 0.0.0.0, which is exactly what we want

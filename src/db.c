@@ -1355,27 +1355,96 @@ static int db_dir_init() {
   g_free(ver_file);
   // Don't close the above file. Keep it open and let the OS close it (and free
   // the lock) when ncdc is closed, was killed or has crashed.
-  if(dir_ver[0] > 2)
-    g_error("Incompatible data directory. Please upgrade ncdc or use a different directory.");
 
   return (((int)dir_ver[0])<<8) + (int)dir_ver[1];
 }
 
 
-void db_init() {
-  db_dir_init();
+static void db_init_schema() {
+  // Get user_version
+  GAsyncQueue *a = g_async_queue_new_full(g_free);
+  db_queue_push(DBF_SINGLE, "PRAGMA user_version", DBQ_RES, a, DBQ_INT, DBQ_END);
 
-  // TODO: should look at the version file instead. This check is simply for debugging purposes.
-  char *dbfn = g_build_filename(db_dir, "db.sqlite3", NULL);
-  gboolean newdb = !g_file_test(dbfn, G_FILE_TEST_EXISTS);
-  if(newdb)
-    g_error("No db.sqlite3 file present yet. Please run ncdc-db-upgrade.");
+  char *r = g_async_queue_pop(a);
+  int ver;
+  if(darray_get_int32(r) == SQLITE_ROW)
+    ver = darray_get_int32(r);
+  else
+    g_error("Unable to get database version.");
+  g_free(r);
+  g_async_queue_unref(a);
+
+  // New database? Initialize schema.
+  if(ver == 0) {
+    // TODO: These query don't have to get into the prepared statement cache
+    db_queue_push(DBF_NEXT, "PRAGMA user_version = 1", DBQ_END);
+    db_queue_push(DBF_NEXT,
+      "CREATE TABLE hashdata ("
+      "  root TEXT NOT NULL PRIMARY KEY,"
+      "  size INTEGER NOT NULL,"
+      "  tthl BLOB NOT NULL"
+      ")", DBQ_END);
+    db_queue_push(DBF_NEXT,
+      "CREATE TABLE hashfiles ("
+      "  id INTEGER PRIMARY KEY,"
+      "  filename TEXT NOT NULL UNIQUE,"
+      "  tth TEXT NOT NULL,"
+      "  lastmod INTEGER NOT NULL"
+      ")", DBQ_END);
+    db_queue_push(DBF_NEXT,
+      "CREATE TABLE dl ("
+      "  tth TEXT NOT NULL PRIMARY KEY,"
+      "  size INTEGER NOT NULL,"
+      "  dest TEXT NOT NULL,"
+      "  priority INTEGER NOT NULL DEFAULT 0,"
+      "  error INTEGER NOT NULL DEFAULT 0,"
+      "  error_msg TEXT,"
+      "  tthl BLOB"
+      ")", DBQ_END);
+    db_queue_push(DBF_NEXT,
+      "CREATE TABLE dl_users ("
+      "  tth TEXT NOT NULL,"
+      "  uid INTEGER NOT NULL,"
+      "  error INTEGER NOT NULL DEFAULT 0,"
+      "  error_msg TEXT,"
+      "  PRIMARY KEY(tth, uid)"
+      ")", DBQ_END);
+    db_queue_push(DBF_NEXT,
+      "CREATE TABLE share ("
+      "  name TEXT NOT NULL PRIMARY KEY,"
+      "  path TEXT NOT NULL"
+      ")", DBQ_END);
+    // Get a result from the last one, to make sure the above queries were successful.
+    GAsyncQueue *a = g_async_queue_new_full(g_free);
+    db_queue_push(DBF_LAST,
+      "CREATE TABLE vars ("
+      "  name TEXT NOT NULL,"
+      "  hub INTEGER NOT NULL DEFAULT 0,"
+      "  value TEXT NOT NULL,"
+      "  PRIMARY KEY(name, hub)"
+      ")", DBQ_RES, a, DBQ_END);
+    char *r = g_async_queue_pop(a);
+    if(darray_get_int32(r) != SQLITE_DONE)
+      g_error("Error creating database schema.");
+    g_free(r);
+    g_async_queue_unref(a);
+  }
+}
+
+
+void db_init() {
+  int ver = db_dir_init();
+
+  if(ver>>8 < 2)
+    g_error("Database version too old. Please run the ncdc-db-upgrade utility.");
+  if(ver>>8 > 2)
+    g_error("Incompatible database version. You may want to upgrade ncdc.");
 
   // start database thread
   db_queue = g_async_queue_new();
-  db_thread = g_thread_create(db_thread_func, dbfn, TRUE, NULL);
+  db_thread = g_thread_create(db_thread_func, g_build_filename(db_dir, "db.sqlite3", NULL), TRUE, NULL);
 
-  // TODO: create SQL schema, if it doesn't exist yet
+  db_init_schema();
 
   // load db_pid and db_cid
   if(!db_vars_get(0, "pid"))

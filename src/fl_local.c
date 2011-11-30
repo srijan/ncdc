@@ -987,6 +987,13 @@ void fl_init() {
     // Force a refresh when we're not sharing anything. This makes sure that we
     // at least have a files.xml.bz2
     dorefresh = TRUE;
+  ui_m(NULL, UIM_NOLOG, NULL);
+
+  // Always make sure we at least have an fl_local_list
+  if(!fl_local_list) {
+    fl_local_list = fl_list_create("", FALSE);
+    fl_local_list->sub = g_ptr_array_new_with_free_func(fl_list_free);
+  }
 
   // If ncdc was previously closed while hashing, make sure to force a refresh
   // this time to continue the hash progress.

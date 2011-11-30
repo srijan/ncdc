@@ -880,7 +880,7 @@ char *ratecalc_eta(struct ratecalc *rc, guint64 left) {
 #if INTERFACE
 
 struct logfile {
-  FILE *file;
+  int file;
   char *path;
   struct stat st;
 };
@@ -894,32 +894,32 @@ static GSList *logfile_instances = NULL;
 // (Re-)opens the log file and checks for inode and file size changes.
 static void logfile_checkfile(struct logfile *l) {
   // stat
-  gboolean restat = !l->file;
+  gboolean restat = l->file < 0;
   struct stat st;
-  if(l->file && stat(l->path, &st) < 0) {
+  if(l->file >= 0 && stat(l->path, &st) < 0) {
     g_warning("Unable to stat log file '%s': %s. Attempting to re-create it.", l->path, g_strerror(errno));
-    fclose(l->file);
-    l->file = NULL;
+    close(l->file);
+    l->file = -1;
     restat = TRUE;
   }
 
   // if we have the log open, compare inode & size
-  if(l->file && (l->st.st_ino != st.st_ino || l->st.st_size > st.st_size)) {
-    fclose(l->file);
-    l->file = NULL;
+  if(l->file >= 0 && (l->st.st_ino != st.st_ino || l->st.st_size > st.st_size)) {
+    close(l->file);
+    l->file = -1;
   }
 
   // if the log hadn't been opened or has been closed earlier, try to open it again
-  if(!l->file)
-    l->file = fopen(l->path, "a");
-  if(!l->file)
+  if(l->file < 0)
+    l->file = open(l->path, O_WRONLY|O_APPEND);
+  if(l->file < 0)
     g_warning("Unable to open log file '%s' for writing: %s", l->path, g_strerror(errno));
 
   // stat again if we need to
-  if(l->file && restat && stat(l->path, &st) < 0) {
+  if(l->file >= 0 && restat && stat(l->path, &st) < 0) {
     g_warning("Unable to stat log file '%s': %s. Closing.", l->path, g_strerror(errno));
-    fclose(l->file);
-    l->file = NULL;
+    close(l->file);
+    l->file = -1;
   }
 
   memcpy(&l->st, &st, sizeof(struct stat));
@@ -929,6 +929,7 @@ static void logfile_checkfile(struct logfile *l) {
 struct logfile *logfile_create(const char *name) {
   struct logfile *l = g_slice_new0(struct logfile);
 
+  l->file = -1;
   char *n = g_strconcat(name, ".log", NULL);
   l->path = g_build_filename(db_dir, "logs", n, NULL);
   g_free(n);
@@ -943,20 +944,31 @@ void logfile_free(struct logfile *l) {
   if(!l)
     return;
   logfile_instances = g_slist_remove(logfile_instances, l);
-  if(l->file)
-    fclose(l->file);
+  if(l->file >= 0)
+    close(l->file);
   g_free(l->path);
   g_slice_free(struct logfile, l);
 }
 
 
 void logfile_add(struct logfile *l, const char *msg) {
+  logfile_checkfile(l);
+  if(l->file < 0)
+    return;
+
   time_t tm = time(NULL);
   char ts[50];
-
-  logfile_checkfile(l);
   strftime(ts, 49, "[%F %H:%M:%S %Z]", localtime(&tm));
-  if(l->file && fprintf(l->file, "%s %s\n", ts, msg) < 0 && !strstr(msg, " (LOGERR)"))
+  char *line = g_strdup_printf("%s %s\n", ts, msg);
+
+  int len = strlen(line);
+  int wr = 0;
+  int r;
+  while(wr < len && (r = write(l->file, line+wr, len-wr)) > 0)
+    wr += r;
+
+  g_free(line);
+  if(r <= 0 && !strstr(msg, " (LOGERR)"))
     g_warning("Error writing to log file: %s (LOGERR)", g_strerror(errno));
 }
 
@@ -966,10 +978,9 @@ void logfile_global_reopen() {
   GSList *n = logfile_instances;
   for(; n; n=n->next) {
     struct logfile *l = n->data;
-    if(l->file) {
-      fflush(l->file);
-      fclose(l->file);
-      l->file = NULL;
+    if(l->file >= 0) {
+      close(l->file);
+      l->file = -1;
     }
     logfile_checkfile(l);
   }

@@ -49,6 +49,7 @@ static struct fl_list *fl_hash_cur = NULL;   // most recent file initiated for h
 static int             fl_hash_reset = 0;    // increased when fl_hash_cur is removed from the queue
 struct ratecalc        fl_hash_rate;
 
+#define TTH_BUFSIZE (512*1024)
 
 
 // Utility functions
@@ -480,8 +481,8 @@ static gboolean fl_hash_done(gpointer dat);
 static void fl_hash_thread(gpointer data, gpointer udata) {
   struct fl_hash_args *args = data;
   // static, since only one hash thread is allowed and this saves stack space
-  static struct tth_ctx tth;
-  static char buf[10240];
+  struct tth_ctx tth;
+  char *buf = g_malloc(TTH_BUFSIZE);
   char *blocks = NULL;
   int f = -1;
   char *real = NULL;
@@ -519,7 +520,7 @@ static void fl_hash_thread(gpointer data, gpointer udata) {
   int block_cur = 0;
   guint64 block_len = 0;
 
-  while((r = read(f, buf, 10240)) > 0) {
+  while((r = read(f, buf, TTH_BUFSIZE)) > 0) {
     rd += r;
     fadv_purge(&adv, r);
     // no need to hash any further? quit!
@@ -574,6 +575,7 @@ finish:
     fadv_close(&adv);
     close(f);
   }
+  g_free(buf);
   g_free(real);
   g_free(blocks);
   args->time = g_timer_elapsed(tm, NULL);

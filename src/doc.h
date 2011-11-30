@@ -75,7 +75,7 @@ static const struct doc_cmd {
 { "gc", NULL, "Perform some garbage collection.",
   "Cleans up unused data and reorganizes existing data to allow more efficient"
   " storage and usage. Currently, this commands removes unused hash data, does"
-  " a VACUUM on db.sqlite3, removes unused files in inc/ and old files in
+  " a VACUUM on db.sqlite3, removes unused files in inc/ and old files in"
   " fl/.\n\n"
   "This command may take some time to complete, and will fully block ncdc while"
   " it is running. It is recommended to run this command every once in a while."

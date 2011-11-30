@@ -2254,7 +2254,9 @@ static void ui_search_key(struct ui_tab *tab, guint64 key) {
     GHashTable *uids = g_hash_table_new(g_int64_hash, g_int64_equal);
     for(; !g_sequence_iter_is_end(i); i=g_sequence_iter_next(i)) {
       struct search_r *r = g_sequence_get(i);
-      if(dl_queue_matchfile(r->uid, r->tth) >= 0)
+      // In the case that this wasn't a TTH search, check whether this search
+      // result matches the queue before checking the file list.
+      if(tab->search_q->type == 9 || dl_queue_matchfile(r->uid, r->tth) >= 0)
         g_hash_table_insert(uids, &r->uid, (void *)1);
     }
     GHashTableIter iter;

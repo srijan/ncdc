@@ -194,7 +194,7 @@ static gboolean db_queue_process_one(sqlite3 *db, char *q, gboolean transaction,
   GAsyncQueue *res = NULL;
   gboolean wantlastid = FALSE;
   char columns[20]; // 20 should be enough for everyone
-  gint64 lastid;
+  gint64 lastid = 0;
   n = 0;
   if(t == DBQ_RES) {
     res = darray_get_ptr(q);

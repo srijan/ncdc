@@ -451,7 +451,7 @@ static gboolean dl_queue_start_do(gpointer dat) {
   // - calculate freeslots
   GPtrArray *targets = g_ptr_array_new();
   struct dl_user *du, *target = NULL;
-  int target_i;
+  int target_i = 0;
   GHashTableIter iter;
   g_hash_table_iter_init(&iter, queue_users);
   while(g_hash_table_iter_next(&iter, NULL, (gpointer *)&du)) {

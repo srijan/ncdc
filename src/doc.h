@@ -33,7 +33,7 @@ static const struct doc_cmd {
 { "accept", NULL, "Accept the TLS certificate of a hub.",
   "Use this command to accept the TLS certificate of a hub. This command is"
   " used only in the case the keyprint of the TLS certificate of a hub does not"
-  " match the keyprint stored in the configuration file."
+  " match the keyprint stored in the database."
 },
 { "browse", "[[-f] <user>]", "Download and browse someone's file list.",
   "Without arguments, this opens a new tab where you can browse your own file list."
@@ -75,11 +75,13 @@ static const struct doc_cmd {
 { "gc", NULL, "Perform some garbage collection.",
   "Cleans up unused data and reorganizes existing data to allow more efficient"
   " storage and usage. Currently, this commands removes unused hash data, does"
-  " a VACUUM on db.sqlite3, cleans up dl.dat, removes unused files in inc/ and"
-  " old files in fl/.\n\n"
+  " a VACUUM on db.sqlite3, removes unused files in inc/ and old files in
+  " fl/.\n\n"
   "This command may take some time to complete, and will fully block ncdc while"
   " it is running. It is recommended to run this command every once in a while."
-  " Every month is a good interval."
+  " Every month is a good interval. Note that when ncdc says that it has"
+  " completed this command, it's lying to you. Ncdc will still run a few large"
+  " queries on the background, which may take up to a minute to complete."
 },
 { "grant", "[-list|<user>]", "Grant someone a slot.",
   "Grant someone a slot. This allows the user to download from you even if you"
@@ -128,7 +130,7 @@ static const struct doc_cmd {
 },
 { "password", "<password>", "Send your password to the hub.",
   "This command can be used to send a password to the hub without saving it to"
-  " the config file. If you wish to login automatically without having to type"
+  " the database. If you wish to login automatically without having to type"
   " /password every time, use '/set password <password>'. Be warned, however,"
   " that your password will be saved unencrypted in that case."
 },
@@ -211,8 +213,10 @@ static const struct doc_cmd {
 { "unshare", "[<name>]", "Remove a directory from your share.",
   "To remove a single directory from your share, use `/unshare <name>', to"
   " remove all directories from your share, use `/unshare /'.\n\n"
-  "Note that all hash data for the removed directories will be thrown away. All"
-  " files will have to be re-hashed again when the directory is later re-added."
+  "Note that the hash data associated with the removed files will remain in the"
+  " database. This allows you to re-add the files to your share without needing"
+  " to re-hash them. The downside is that the database file may grow fairly large"
+  " with unneeded information. See the `/gc' command to clean that up."
 },
 { "userlist", NULL, "Open the user list.",
   "Opens the user list of the currently selected hub. Can also be accessed using Alt+u."

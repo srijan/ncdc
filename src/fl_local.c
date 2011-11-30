@@ -818,7 +818,7 @@ static void fl_refresh_process() {
     args->file = g_new0(struct fl_list *, len+1);
     args->res  = g_new0(struct fl_list *, len+1);
     args->path = g_new0(char *, len+1);
-    for(i=0,l=db_share_list(); l->name; l++) {
+    for(i=0,l=db_share_list(); l->name; i++,l++) {
       args->file[i] = fl_refresh_getroot(l->name);
       args->path[i] = g_strdup(l->path);
     }

@@ -357,9 +357,10 @@ static void user_nmdc_nfo(struct hub *hub, struct hub_user *u, char *str) {
 static void user_adc_nfo(struct hub *hub, struct hub_user *u, struct adc_cmd *cmd) {
   u->hasinfo = TRUE;
   // sid
-  if(!u->sid)
+  if(!u->sid) {
     g_hash_table_insert(hub->sessions, GINT_TO_POINTER(cmd->source), u);
-  u->sid = cmd->source;
+    u->sid = cmd->source;
+  }
 
   // This is faster than calling adc_getparam() each time
   char **n;

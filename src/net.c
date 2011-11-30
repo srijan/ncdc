@@ -291,7 +291,7 @@ void net_setconn(struct net *n, GSocketConnection *conn, gboolean tls, gboolean 
     n->tls = TRUE;
     // Create a tls connection and wrap it around a tcp wrapper to make it a socketconnection again
     GIOStream *tls = serv
-      ? g_tls_server_connection_new(G_IO_STREAM(conn), conf_certificate, NULL)
+      ? g_tls_server_connection_new(G_IO_STREAM(conn), db_certificate, NULL)
       : g_tls_client_connection_new(G_IO_STREAM(conn), NULL, NULL);
     g_return_if_fail(tls);
     g_tls_connection_set_use_system_certdb(G_TLS_CONNECTION(tls), FALSE);
@@ -301,8 +301,8 @@ void net_setconn(struct net *n, GSocketConnection *conn, gboolean tls, gboolean 
       else
         g_tls_client_connection_set_validation_flags(G_TLS_CLIENT_CONNECTION(tls), 0);
       // allow the server to fetch our certificate if it wants to
-      if(conf_certificate)
-        g_tls_connection_set_certificate(G_TLS_CONNECTION(tls), conf_certificate);
+      if(db_certificate)
+        g_tls_connection_set_certificate(G_TLS_CONNECTION(tls), db_certificate);
     }
     // wrap
     GSocketConnection *wrap = g_tcp_wrapper_connection_new(tls, g_socket_connection_get_socket(conn));

@@ -74,10 +74,12 @@ static const struct doc_cmd {
 },
 { "gc", NULL, "Perform some garbage collection.",
   "Cleans up unused data and reorganizes existing data to allow more efficient"
-  " storage and usage. Currently, this commands cleans up hashdata.dat and"
-  " dl.dat, removes unused files in inc/ and old files in fl/.\n\n"
+  " storage and usage. Currently, this commands removes unused hash data, does"
+  " a VACUUM on db.sqlite3, cleans up dl.dat, removes unused files in inc/ and"
+  " old files in fl/.\n\n"
   "This command may take some time to complete, and will fully block ncdc while"
-  " it is running. You won't have to perform this command very often."
+  " it is running. It is recommended to run this command every once in a while."
+  " Every month is a good interval."
 },
 { "grant", "[-list|<user>]", "Grant someone a slot.",
   "Grant someone a slot. This allows the user to download from you even if you"
@@ -232,18 +234,20 @@ static const struct doc_cmd {
 #ifdef DOC_SET
 
 static const struct doc_set {
-  char const *name, *type, *desc;
+  char const *name;
+  int hub;
+  char const *type, *desc;
 } doc_sets[] = {
 
-{ "active", "<boolean>",
+{ "active", 0, "<boolean>",
   "Enables or disables active mode. Make sure to set `active_ip' and"
   " `active_port' before enabling active mode."
 },
-{ "active_bind", "<string>",
+{ "active_bind", 0, "<string>",
   "IP address to bind to in active mode. When unset, ncdc will bind to all"
   " interfaces."
 },
-{ "active_ip", "<string>",
+{ "active_ip", 0, "<string>",
   "Your public IP address for use in active mode. It is important that other"
   " clients can reach you using this IP address. If you connect to a hub on the"
   " internet, this should be your internet (WAN) IP. Likewise, if you connect"
@@ -253,7 +257,7 @@ static const struct doc_set {
   " you are not reachable on the same IP with both networks. In that case you can"
   " either use passive mode or run two separate instances of ncdc."
 },
-{ "active_port", "<integer>",
+{ "active_port", 0, "<integer>",
   "The listen port for incoming connections in active mode. Set to `0' to"
   " automatically assign a random port. If TLS support is available, another"
   " TCP port will be opened on the configured port + 1. Ncdc will tell you"
@@ -261,29 +265,30 @@ static const struct doc_set {
   " behind a router or firewall, make sure that you have configured it to"
   " forward and allow these ports."
 },
-{ "autoconnect", "<boolean>",
+{ "autoconnect", 1, "<boolean>",
   "Set to true to automatically connect to the current hub when ncdc starts up."
 },
-{ "autorefresh", "<integer>",
-  "The time between automatic file refreshes, in minutes. Set to 0 to disable"
-  " automatically refreshing the file list. This setting also determines"
-  " whether ncdc will perform a refresh on startup. See the `/refresh' command to"
-  " manually refresh your file list."
+{ "autorefresh", 0, "<interval>",
+  "The time between automatic file refreshes. Recognized suffices are 's' for"
+  " seconds, 'm' for minutes, 'h' for hours and 'd' for days. Set to 0 to"
+  " disable automatically refreshing the file list. This setting also"
+  " determines whether ncdc will perform a refresh on startup. See the"
+  " `/refresh' command to manually refresh your file list."
 },
-{ "backlog", "<integer>",
+{ "backlog", 1, "<integer>",
   "When opening a hub or PM tab, ncdc can load a certain amount of lines from"
   " the log file into the log window. Setting this to a positive value enables"
   " this feature and configures the number of lines to load. Note that, while"
   " this setting can be set on a per-hub basis, PM windows will use the global"
   " value (global.backlog)."
 },
-{ "chat_only", "<boolean>",
+{ "chat_only", 1, "<boolean>",
   "Set to true to indicate that this hub is only used for chatting. That is,"
   " you won't or can't download from it. This setting affects the /search"
   " command when it is given the -all option."
 },
 // Note: the setting list isn't alphabetic here, but in a more intuitive order
-{ "color_*", "<color>",
+{ "color_*", 0, "<color>",
   "The settings starting with the `color_' prefix allow you to change the"
   " interface colors. The following is a list of available color settings:\n"
   "  list_default  - default item in a list\n"
@@ -312,7 +317,7 @@ static const struct doc_set {
   "The actual color values displayed by your terminal may vary. Adding the"
   " `bold' attribute usually makes the foreground color appear brighter as well."
 },
-{ "connection", "<string>",
+{ "connection", 1, "<string>",
   "Set your upload speed. This is just an indication for other users in the hub"
   " so that they know what speed they can expect when downloading from you. The"
   " actual format you can use here may vary, but it is recommended to set it to"
@@ -323,17 +328,17 @@ static const struct doc_set {
   " using old-style connection values (e.g. `DSL' or `Cable') on hubs that"
   " require this."
 },
-{ "description", "<string>",
+{ "description", 1, "<string>",
   "A short public description that will be displayed in the user list of a hub."
 },
-{ "download_dir", "<path>",
+{ "download_dir", 0, "<path>",
   "The directory where finished downloads are moved to. Finished downloads are"
   " by default stored in <session directory>/dl/. It is possible to set this to"
   " a location that is on a different filesystem than the incoming directory,"
   " but doing so is not recommended: ncdc will block when moving the completed"
   " files to their final destination."
 },
-{ "download_exclude", "<regex>",
+{ "download_exclude", 0, "<regex>",
   "When recursively adding a directory to the download queue - by pressing `b'"
   " on a directory in the file list browser - any item in the selected"
   " directory with a name that matches this regular expression will not be"
@@ -341,14 +346,14 @@ static const struct doc_set {
   "This regex is not checked when adding individual files from either the file"
   " list browser or the search results."
 },
-{ "download_slots", "<integer>",
+{ "download_slots", 0, "<integer>",
   "Maximum number of simultaneous downloads."
 },
-{ "email", "<string>",
+{ "email", 1, "<string>",
   "Your email address. This will be displayed in the user list of the hub, so"
   " only set this if you want it to be public."
 },
-{ "encoding", "<string>",
+{ "encoding", 1, "<string>",
   "The character set/encoding to use for hub and PM messages. This setting is"
   " only used on NMDC hubs, ADC always uses UTF-8. Some common values are:\n"
   "  CP1250      (Central Europe)\n"
@@ -358,7 +363,7 @@ static const struct doc_set {
   "  KOI8-R      (Cyrillic)\n"
   "  UTF-8       (International)"
 },
-{ "filelist_maxage", "<interval>",
+{ "filelist_maxage", 0, "<interval>",
   "The maximum age of a downloaded file list. If a file list was downloaded"
   " longer ago than the configured interval, it will be removed from the cache"
   " (the fl/ directory) and subsequent requests to open the file list will"
@@ -366,7 +371,7 @@ static const struct doc_set {
   " suffices are 's' for seconds, 'm' for minutes, 'h' for hours and 'd' for"
   " days. Set to 0 to disable the cache altogether."
 },
-{ "flush_file_cache", "<boolean>",
+{ "flush_file_cache", 0, "<boolean>",
   "Tell the OS to flush the file (disk) cache for file contents read while"
   " hashing and uploading. On one hand, this will avoid trashing your disk"
   " cache with large files and thus improve the overall responsiveness of your"
@@ -376,29 +381,29 @@ static const struct doc_set {
   " ncdc, you share large files (>100MB) and people are not constantly"
   " downloading the same file from you."
 },
-{ "hubname", "<string>",
+{ "hubname", 1, "<string>",
   "The name of the currently opened hub tab. This is a user-assigned name, and"
   " is only used within ncdc itself. This is the same name as given to the"
   " `/open' command."
 },
-{ "incoming_dir", "<path>",
+{ "incoming_dir", 0, "<path>",
   "The directory where incomplete downloads are stored. This setting can only"
   " be changed when the download queue is empty. Also see the download_dir"
   " setting."
 },
-{ "log_debug", "<boolean>",
+{ "log_debug", 0, "<boolean>",
   "Log debug messages to stderr.log in the session directory. It is highly"
   " recommended to enable this setting if you wish to debug or hack ncdc. Be"
   " warned, however, that this may generate a lot of data if you're connected"
   " to a large hub."
 },
-{ "log_downloads", "<boolean>",
+{ "log_downloads", 0, "<boolean>",
   "Log downloaded files to transfers.log."
 },
-{ "log_uploads", "<boolean>",
+{ "log_uploads", 0, "<boolean>",
   "Log file uploads to transfers.log."
 },
-{ "minislots", "<integer>",
+{ "minislots", 0, "<integer>",
   "Set the number of available minislots. A `minislot' is a special slot that"
   " is used when all regular upload slots are in use and someone is requesting"
   " your filelist or a small file. In this case, the other client automatically"
@@ -407,43 +412,43 @@ static const struct doc_set {
   " the `minislot_size' setting. Also see the `slots' configuration setting and"
   " the `/grant' command."
 },
-{ "minislot_size", "<integer>",
+{ "minislot_size", 0, "<integer>",
   "The maximum size of a file that may be downloaded using a `minislot', in"
   " KiB. See the `minislots' setting for more information."
 },
-{ "nick", "<string>",
+{ "nick", 1, "<string>",
   "Your nick. Nick changes are only visible on newly connected hubs, use the "
   " `/reconnect' command to use your new nick immediately. Note that it is"
   " highly discouraged to change your nick on NMDC hubs. This is because"
   " clients downloading from you have no way of knowing that you changed your"
   " nick, and therefore can't immediately continue to download from you."
 },
-{ "password", "<string>",
+{ "password", 1, "<string>",
   "Sets your password for the current hub and enables auto-login on connect. If"
   " you just want to login to a hub without saving your password, use the"
   " `/password' command instead. Passwords are saved unencrypted in the config"
   " file."
 },
-{ "share_exclude", "<regex>",
+{ "share_exclude", 0, "<regex>",
   "Any file or directory with a name that matches this regular expression will"
   " not be shared. A file list refresh is required for this setting to be"
   " effective."
 },
-{ "share_hidden", "<boolean>",
+{ "share_hidden", 0, "<boolean>",
   "Whether to share hidden files and directories. A `hidden' file or directory"
   " is one of which the file name starts with a dot. (e.g. `.bashrc'). A file"
   " list refresh is required for this setting to be effective."
 },
-{ "show_joinquit", "<boolean>",
+{ "show_joinquit", 1, "<boolean>",
   "Whether to display join/quit messages in the hub chat."
 },
-{ "slots", "<integer>",
+{ "slots", 0, "<integer>",
   "The number of upload slots. This determines for the most part how many"
   " people can download from you simultaneously. It is possible that this limit"
   " is exceeded in certain circumstances, see the `minislots' setting and the"
   " `/grant' command."
 },
-{ "tls_policy", "<disabled|allow|prefer>",
+{ "tls_policy", 1, "<disabled|allow|prefer>",
   "Set the policy for secure client-to-client connections. Setting this to"
   " `disabled' disables TLS support for client connections, but still allows"
   " you to connect to TLS-enabled hubs. `allow' will allow the use of TLS if"
@@ -456,7 +461,7 @@ static const struct doc_set {
   " that, even if you set this to `prefer', TLS will only be used if the"
   " connecting party also supports it."
 },
-{ "ui_time_format", "<string>",
+{ "ui_time_format", 0, "<string>",
   "The format of the time displayed in the lower-left of the screen. Set `-' to"
   " not display a time at all. The string is passed to the Glib"
   " g_date_time_format() function, which accepts roughly the same formats as"

@@ -42,10 +42,20 @@ struct fl_list {
   GPtrArray *sub;
   guint64 size;   // including sub-items
   char tth[24];
-  time_t lastmod; // only used for files in own list
   gboolean isfile : 1;
-  gboolean hastth : 1; // only if isfile==TRUE
+  gboolean hastth : 1;  // only if isfile==TRUE
+  gboolean islocal : 1; // only if isfile==TRUE
   char name[1];
+};
+
+
+// Extra attributes for local files. This struct is stored in the same memory
+// region as the fl_list struct itself, but is placed somewhere after the name
+// field. Use the respecive macros to get access to this data.
+
+struct fl_list_local {
+  time_t lastmod;
+  gint64 id;
 };
 
 #endif
@@ -57,11 +67,25 @@ struct fl_list {
 // Utility functions
 
 
-// Calculates the minimum required size for an fl_list allocation.
-static int fl_list_size(const char *name) {
-  static struct fl_list f;
-  return (((char *)f.name) - ((char *)&f)) + strlen(name) + 1;
-}
+#if INTERFACE
+
+// Calculates the minimum required size for a non-local fl_list allocation.
+#define fl_list_minsize(n) (G_STRUCT_OFFSET(struct fl_list, name) + strlen(n) + 1)
+
+// Calculates the offset to the fl_list_local struct, given a name. Padding
+// bytes are added to ensure that the struct is aligned at 8-byte boundary.
+#define fl_list_local_offset(n) ((fl_list_minsize(n) + 7) & ~7)
+
+// Calculates the size required for a local fl_list allocation.
+#define fl_list_localsize(n) (fl_list_local_offset(n) + sizeof(struct fl_list_local))
+
+// Calculates the actual size of a fl_list.
+#define fl_list_size(n, l) (l ? fl_list_localsize(n) : fl_list_minsize(n))
+
+// Get the fl_list_local part of a fl_list struct.
+#define fl_list_getlocal(f) G_STRUCT_MEMBER(struct fl_list_local, f, fl_list_local_offset((f)->name))
+
+#endif
 
 
 // only frees the given item and its childs. leaves the parent(s) untouched
@@ -71,15 +95,16 @@ void fl_list_free(gpointer dat) {
     return;
   if(fl->sub)
     g_ptr_array_unref(fl->sub);
-  g_slice_free1(fl_list_size(fl->name), fl);
+  g_slice_free1(fl_list_size(fl->name, fl->islocal), fl);
 }
 
 
 // Create a new fl_list structure with the given name. Can't be renamed later
 // on due to the way the data is stored in memory.
-struct fl_list *fl_list_create(const char *name) {
-  struct fl_list *fl = g_slice_alloc0(fl_list_size(name));
+struct fl_list *fl_list_create(const char *name, gboolean local) {
+  struct fl_list *fl = g_slice_alloc0(fl_list_size(name, local));
   strcpy(fl->name, name);
+  fl->islocal = local;
   return fl;
 }
 
@@ -174,8 +199,9 @@ void fl_list_remove(struct fl_list *fl) {
 
 
 struct fl_list *fl_list_copy(const struct fl_list *fl) {
-  struct fl_list *cur = g_slice_alloc(fl_list_size(fl->name));
-  memcpy(cur, fl, fl_list_size(fl->name));
+  int size = fl_list_size(fl->name, fl->islocal);
+  struct fl_list *cur = g_slice_alloc(size);
+  memcpy(cur, fl, size);
   cur->parent = NULL;
   if(fl->sub) {
     cur->sub = g_ptr_array_sized_new(fl->sub->len);
@@ -206,11 +232,18 @@ gboolean fl_list_isempty(struct fl_list *fl) {
 }
 
 
-// get a file by name in a directory
+// Get a file by name in a directory. This search is case-insensitive.
 struct fl_list *fl_list_file(const struct fl_list *dir, const char *name) {
-  struct fl_list *cmp = fl_list_create(name);
+  struct fl_list *cmp = fl_list_create(name, FALSE);
   int i = ptr_array_search(dir->sub, cmp, fl_list_cmp);
   fl_list_free(cmp);
+  return i < 0 ? NULL : g_ptr_array_index(dir->sub, i);
+}
+
+
+// Get a file name in a directory with the same name as *fl. This search is case-sensitive.
+struct fl_list *fl_list_file_strict(const struct fl_list *dir, const struct fl_list *fl) {
+  int i = ptr_array_search(dir->sub, fl, fl_list_cmp_strict);
   return i < 0 ? NULL : g_ptr_array_index(dir->sub, i);
 }
 
@@ -476,7 +509,7 @@ static void fl_load_error(void *arg, const char *msg, xmlParserSeverities severi
 }
 
 
-static int fl_load_handle(xmlTextReaderPtr reader, gboolean *havefl, gboolean *newdir, struct fl_list **cur) {
+static int fl_load_handle(xmlTextReaderPtr reader, gboolean *havefl, gboolean *newdir, struct fl_list **cur, gboolean local) {
   struct fl_list *tmp;
   char *attr[3];
   char name[50], *tmpname;
@@ -506,7 +539,7 @@ static int fl_load_handle(xmlTextReaderPtr reader, gboolean *havefl, gboolean *n
         free(attr[0]);
         return -1;
       }
-      tmp = fl_list_create(attr[0]);
+      tmp = fl_list_create(attr[0], FALSE);
       tmp->isfile = FALSE;
       tmp->sub = g_ptr_array_new_with_free_func(fl_list_free);
       fl_list_add(*newdir ? *cur : (*cur)->parent, tmp, -1);
@@ -531,7 +564,7 @@ static int fl_load_handle(xmlTextReaderPtr reader, gboolean *havefl, gboolean *n
         free(attr[1]);
         return -1;
       }
-      tmp = fl_list_create(attr[0]);
+      tmp = fl_list_create(attr[0], local);
       tmp->isfile = TRUE;
       tmp->size = g_ascii_strtoull(attr[1], NULL, 10);
       tmp->hastth = TRUE;
@@ -605,7 +638,7 @@ static xmlTextReaderPtr fl_load_open(const char *file, GError **err) {
 }
 
 
-struct fl_list *fl_load(const char *file, GError **err) {
+struct fl_list *fl_load(const char *file, GError **err, gboolean local) {
   g_return_val_if_fail(err == NULL || *err == NULL, NULL);
 
   // open the file
@@ -618,12 +651,12 @@ struct fl_list *fl_load(const char *file, GError **err) {
   gboolean havefl = FALSE, newdir = TRUE;
   int ret;
 
-  root = fl_list_create("");
+  root = fl_list_create("", FALSE);
   root->sub = g_ptr_array_new_with_free_func(fl_list_free);
   cur = root;
 
   while((ret = xmlTextReaderRead(reader)) == 1)
-    if((ret = fl_load_handle(reader, &havefl, &newdir, &cur)) <= 0)
+    if((ret = fl_load_handle(reader, &havefl, &newdir, &cur, local)) <= 0)
       break;
 
   if(ret < 0 || !havefl) {
@@ -645,7 +678,8 @@ struct fl_list *fl_load(const char *file, GError **err) {
 
 
 
-// Async version of fl_load(). Performs the load in a background thread.
+// Async version of fl_load(). Performs the load in a background thread. Only
+// used for non-local filelists.
 
 static GThreadPool *fl_load_pool = NULL;
 
@@ -669,7 +703,7 @@ static gboolean fl_load_async_d(gpointer dat) {
 
 static void fl_load_async_f(gpointer dat, gpointer udat) {
   struct fl_load_async_dat *arg = dat;
-  arg->fl = fl_load(arg->file, &arg->err);
+  arg->fl = fl_load(arg->file, &arg->err, FALSE);
   g_idle_add(fl_load_async_d, arg);
 }
 
@@ -832,7 +866,7 @@ gboolean fl_save(struct fl_list *fl, const char *file, GString *buf, int level, 
   CHECKFAIL(xmlTextWriterWriteAttribute(writer, (xmlChar *)"Generator", (xmlChar *)PACKAGE_STRING));
 
   char cid[40] = {};
-  base32_encode(conf_cid, cid);
+  base32_encode(db_cid, cid);
   CHECKFAIL(xmlTextWriterWriteAttribute(writer, (xmlChar *)"CID", (xmlChar *)cid));
 
   char *path = fl ? fl_list_path(fl) : g_strdup("/");

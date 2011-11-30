@@ -50,357 +50,6 @@
 
 
 
-
-
-// Configuration handling
-
-
-// global vars
-const char *conf_dir = NULL;
-GKeyFile *conf_file;
-
-char conf_cid[24];
-char conf_pid[24];
-
-#if INTERFACE
-
-#define conf_hub_get(type, name, key) (\
-  g_key_file_has_key(conf_file, name, (key), NULL)\
-    ? g_key_file_get_##type(conf_file, name, (key), NULL)\
-    : g_key_file_get_##type(conf_file, "global", (key), NULL))
-
-#define conf_encoding(hub) (\
-  g_key_file_has_key(conf_file, hub, "encoding", NULL)\
-    ? g_key_file_get_string(conf_file, hub, "encoding", NULL) \
-    : g_key_file_has_key(conf_file, "global", "encoding", NULL) \
-    ? g_key_file_get_string(conf_file, "global", "encoding", NULL) \
-    : g_strdup("UTF-8"))
-
-#define conf_autorefresh() (\
-  !g_key_file_has_key(conf_file, "global", "autorefresh", NULL) ? 60\
-    : g_key_file_get_integer(conf_file, "global", "autorefresh", NULL))
-
-#define conf_slots() (\
-  !g_key_file_has_key(conf_file, "global", "slots", NULL) ? 10\
-    : g_key_file_get_integer(conf_file, "global", "slots", NULL))
-
-#define conf_minislots() (\
-  !g_key_file_has_key(conf_file, "global", "minislots", NULL) ? 3\
-    : g_key_file_get_integer(conf_file, "global", "minislots", NULL))
-
-#define conf_minislot_size() (1024*(\
-  !g_key_file_has_key(conf_file, "global", "minislot_size", NULL) ? 64\
-    : g_key_file_get_integer(conf_file, "global", "minislot_size", NULL)))
-
-#define conf_download_dir() (\
-  !g_key_file_has_key(conf_file, "global", "download_dir", NULL) ? g_build_filename(conf_dir, "dl", NULL)\
-    : g_key_file_get_string(conf_file, "global", "download_dir", NULL))
-
-#define conf_download_slots() (\
-  !g_key_file_has_key(conf_file, "global", "download_slots", NULL) ? 3\
-    : g_key_file_get_integer(conf_file, "global", "download_slots", NULL))
-
-#define conf_incoming_dir() (\
-  !g_key_file_has_key(conf_file, "global", "incoming_dir", NULL) ? g_build_filename(conf_dir, "inc", NULL)\
-    : g_key_file_get_string(conf_file, "global", "incoming_dir", NULL))
-
-// Can be used even before the configuration file is loaded. In which case it
-// returns TRUE. Default is otherwise FALSE.
-#define conf_log_debug() (\
-  !conf_file ? TRUE : !g_key_file_has_key(conf_file, "log", "log_debug", NULL) ? FALSE :\
-    g_key_file_get_boolean(conf_file, "log", "log_debug", NULL))
-
-#define conf_ui_time_format() (\
-  !g_key_file_has_key(conf_file, "global", "ui_time_format", NULL) ? g_strdup("[%H:%M:%S]")\
-    : g_key_file_get_string(conf_file, "global", "ui_time_format", NULL))
-
-#define conf_filelist_maxage() (\
-  !g_key_file_has_key(conf_file, "global", "filelist_maxage", NULL) ? (7*24*3600) \
-    : g_key_file_get_integer(conf_file, "global", "filelist_maxage", NULL))
-
-
-#define CONF_TLSP_DISABLE 0
-#define CONF_TLSP_ALLOW   1
-#define CONF_TLSP_PREFER  2
-
-#define conf_tls_policy(hub) (\
-  !conf_certificate ? CONF_TLSP_DISABLE\
-    : g_key_file_has_key(conf_file, hub, "tls_policy", NULL)\
-    ? g_key_file_get_integer(conf_file, hub, "tls_policy", NULL)\
-    : g_key_file_has_key(conf_file, "global", "tls_policy", NULL)\
-    ? g_key_file_get_integer(conf_file, "global", "tls_policy", NULL)\
-    : CONF_TLSP_ALLOW)
-
-#endif
-
-char *conf_tlsp_list[] = { "disabled", "allow", "prefer" };
-
-
-#if TLS_SUPPORT
-GTlsCertificate *conf_certificate = NULL;
-
-// Fallback, if TLS_SUPPORT is false then no certificates are used and this
-// variable is never dereferenced. It is, however, checked against NULL in some
-// places to detect support for client-to-client TLS.
-#else
-char *conf_certificate = NULL;
-#endif
-
-// Base32-encoded keyprint of our own certificate
-char *conf_certificate_kp = NULL;
-
-
-#if TLS_SUPPORT
-
-// Tries to generate the certificate, returns TRUE on success or FALSE when it
-// failed and the user ignored the error.
-static gboolean conf_gen_cert(char *cert_file, char *key_file) {
-  if(g_file_test(cert_file, G_FILE_TEST_EXISTS) && g_file_test(key_file, G_FILE_TEST_EXISTS))
-    return TRUE;
-
-  printf("Generating certificates...");
-  fflush(stdout);
-
-  // Make sure either both exists or none exists
-  unlink(cert_file);
-  unlink(key_file);
-
-  // Now try to run `ncdc-gen-cert' to create them
-  GError *err = NULL;
-  char *argv[] = { "ncdc-gen-cert", (char *)conf_dir, NULL };
-  int ret;
-  g_spawn_sync(NULL, argv, NULL,
-    G_SPAWN_SEARCH_PATH|G_SPAWN_SEARCH_PATH|G_SPAWN_STDERR_TO_DEV_NULL,
-    NULL, NULL, NULL, NULL, &ret, &err);
-  if(!err) {
-    printf(" Done!\n");
-    return TRUE;
-  }
-
-  printf(" Error!\n\n");
-
-  printf(
-    "ERROR: Could not generate the client certificate files.\n"
-    "  %s\n\n"
-    "This certificate is not required, but client-to-client encryption will be\n"
-    "disabled without it.\n\n"
-    "To diagnose the problem, please run the `ncdc-gen-cert` utility. This\n"
-    "script should have been installed along with ncdc, but is available in the\n"
-    "util/ directory of the ncdc distribution in case it hasn't.\n\n"
-    "Hit Ctrl+c to abort ncdc, or the return key to continue without a certificate.",
-    err->message);
-  g_error_free(err);
-  getchar();
-  return FALSE;
-}
-
-
-static void conf_load_cert() {
-  char *cert_file = g_build_filename(conf_dir, "cert", "client.crt", NULL);
-  char *key_file = g_build_filename(conf_dir, "cert", "client.key", NULL);
-
-  // If they don't exist, try to create them
-  if(!conf_gen_cert(cert_file, key_file)) {
-    g_free(cert_file);
-    g_free(key_file);
-    return;
-  }
-
-  // Try to load them
-  GError *err = NULL;
-  conf_certificate = g_tls_certificate_new_from_files(cert_file, key_file, &err);
-  if(err) {
-    printf(
-      "ERROR: Could not load the client certificate files.\n"
-      "  %s\n\n"
-      "Please check that a valid client certificate is stored in the following two files:\n"
-      "  %s\n  %s\n"
-      "Or remove the files to automatically generate a new certificate.\n",
-      err->message, cert_file, key_file);
-    exit(1);
-    g_error_free(err);
-  } else {
-    conf_certificate_kp = g_malloc0(53);
-    char raw[32];
-    certificate_sha256(conf_certificate, raw);
-    base32_encode_dat(raw, conf_certificate_kp, 32);
-  }
-
-  g_free(cert_file);
-  g_free(key_file);
-}
-
-#endif // TLS_SUPPORT
-
-
-static void generate_pid() {
-  guint64 r = rand_64();
-
-  struct tiger_ctx t;
-  char pid[24];
-  tiger_init(&t);
-  tiger_update(&t, (char *)&r, 8);
-  tiger_final(&t, pid);
-
-  // now hash the PID so we have our CID
-  char cid[24];
-  tiger_init(&t);
-  tiger_update(&t, pid, 24);
-  tiger_final(&t, cid);
-
-  // encode and save
-  char enc[40] = {};
-  base32_encode(pid, enc);
-  g_key_file_set_string(conf_file, "global", "pid", enc);
-  base32_encode(cid, enc);
-  g_key_file_set_string(conf_file, "global", "cid", enc);
-}
-
-
-void conf_init() {
-  // get location of the configuration directory
-  if(!conf_dir && (conf_dir = g_getenv("NCDC_DIR")))
-    conf_dir = g_strdup(conf_dir);
-  if(!conf_dir)
-    conf_dir = g_build_filename(g_get_home_dir(), ".ncdc", NULL);
-
-  // try to create it (ignoring errors if it already exists)
-  g_mkdir(conf_dir, 0700);
-  if(g_access(conf_dir, F_OK | R_OK | X_OK | W_OK) < 0)
-    g_error("Directory '%s' does not exist or is not writable.", conf_dir);
-
-  // Make sure it's an absolute path (yes, after mkdir'ing it, realpath() may
-  // return an error if it doesn't exist). Just stick with the relative path if
-  // realpath() fails, it's not critical anyway.
-  char *real = realpath(conf_dir, NULL);
-  if(real) {
-    g_free((char *)conf_dir);
-    conf_dir = g_strdup(real);
-    free(real);
-  }
-
-  // make sure some subdirectories exist and are writable
-#define cdir(d) do {\
-    char *tmp = g_build_filename(conf_dir, d, NULL);\
-    g_mkdir(tmp, 0777);\
-    if(g_access(conf_dir, F_OK | R_OK | X_OK | W_OK) < 0)\
-      g_error("Directory '%s' does not exist or is not writable.", tmp);\
-    g_free(tmp);\
-  } while(0)
-  cdir("logs");
-  cdir("inc");
-  cdir("fl");
-  cdir("dl");
-  cdir("cert");
-#undef cdir
-
-  // make sure that there is no other ncdc instance working with the same config directory
-  char *ver_file = g_build_filename(conf_dir, "version", NULL);
-  int ver_fd = g_open(ver_file, O_RDWR|O_CREAT, 0600);
-  struct flock lck;
-  lck.l_type = F_WRLCK;
-  lck.l_whence = SEEK_SET;
-  lck.l_start = 0;
-  lck.l_len = 0;
-  if(ver_fd < 0 || fcntl(ver_fd, F_SETLK, &lck) == -1)
-    g_error("Unable to open lock file. Is another instance of ncdc running with the same configuration directory?");
-
-  // check data directory version
-  // version = major, minor
-  //   minor = forward & backward compatible, major only backward.
-  char dir_ver[2] = {1, 0};
-  if(read(ver_fd, dir_ver, 2) < 2)
-    if(write(ver_fd, dir_ver, 2) < 2)
-      g_error("Could not write to '%s': %s", ver_file, g_strerror(errno));
-  g_free(ver_file);
-  // Don't close the above file. Keep it open and let the OS close it (and free
-  // the lock) when ncdc is closed, was killed or has crashed.
-  if(dir_ver[0] > 1)
-    g_error("Incompatible data directory. Please upgrade ncdc or use a different directory.");
-
-  // load config file (or create it)
-  conf_file = g_key_file_new();
-  char *cf = g_build_filename(conf_dir, "config.ini", NULL);
-  GError *err = NULL;
-  if(g_file_test(cf, G_FILE_TEST_EXISTS)) {
-    if(!g_key_file_load_from_file(conf_file, cf, G_KEY_FILE_KEEP_COMMENTS, &err))
-      g_error("Could not load '%s': %s", cf, err->message);
-  }
-  g_free(cf);
-  // always set the initial comment
-  g_key_file_set_comment(conf_file, NULL, NULL,
-    "This file is automatically managed by ncdc.\n"
-    "While you could edit it yourself, doing so is highly discouraged.\n"
-    "It is better to use the respective commands to change something.\n"
-    "Warning: Editing this file while ncdc is running may result in your changes getting lost!", NULL);
-  // make sure a nick is set
-  if(!g_key_file_has_key(conf_file, "global", "nick", NULL)) {
-    char *nick = g_strdup_printf("ncdc_%d", g_random_int_range(1, 9999));
-    g_key_file_set_string(conf_file, "global", "nick", nick);
-    g_free(nick);
-  }
-  // make sure we have a PID and CID
-  if(!g_key_file_has_key(conf_file, "global", "pid", NULL))
-    generate_pid();
-  conf_save();
-
-  // load conf_pid and conf_cid
-  char *tmp = g_key_file_get_string(conf_file, "global", "pid", NULL);
-  base32_decode(tmp, conf_pid);
-  g_free(tmp);
-  tmp = g_key_file_get_string(conf_file, "global", "cid", NULL);
-  base32_decode(tmp, conf_cid);
-  g_free(tmp);
-
-  // load client certificate
-#if TLS_SUPPORT
-  if(have_tls_support)
-    conf_load_cert();
-#endif
-
-  // load fadv_enabled
-  g_atomic_int_set(&fadv_enabled, g_key_file_get_boolean(conf_file, "global", "flush_file_cache", NULL));
-}
-
-
-void conf_save() {
-  char *cf = g_build_filename(conf_dir, "config.ini", NULL);
-  char *tmpf = g_strdup_printf("%s.tmp", cf);
-  char *dat = g_key_file_to_data(conf_file, NULL, NULL);
-  FILE *f = fopen(tmpf, "w");
-  if(!f || fputs(dat, f) < 0 || fclose(f) || rename(tmpf, cf) < 0)
-    g_critical("Cannot save config file '%s': %s", cf, g_strerror(errno));
-  g_free(dat);
-  g_free(tmpf);
-  g_free(cf);
-}
-
-
-void conf_group_rename(const char *from, const char *to) {
-  g_return_if_fail(!g_key_file_has_group(conf_file, to));
-  char **keys = g_key_file_get_keys(conf_file, from, NULL, NULL);
-  char **key = keys;
-  for(; key&&*key; key++) {
-    char *v = g_key_file_get_value(conf_file, from, *key, NULL);
-    g_key_file_set_value(conf_file, to, *key, v);
-    g_free(v);
-    v = g_key_file_get_comment(conf_file, from, *key, NULL);
-    if(v)
-      g_key_file_set_comment(conf_file, to, *key, v, NULL);
-    g_free(v);
-  }
-  g_strfreev(keys);
-  char *c = g_key_file_get_comment(conf_file, from, NULL, NULL);
-  if(c)
-    g_key_file_set_comment(conf_file, to, NULL, c, NULL);
-  g_free(c);
-  g_key_file_remove_group(conf_file, from, NULL);
-}
-
-
-
-
-
 /* A best-effort character conversion function.
  *
  * If, for whatever reason, a character could not be converted, a question mark
@@ -715,7 +364,7 @@ void str_arg2_split(char *str, char **first, char **second) {
 // Perform a binary search on a GPtrArray, returning the index of the found
 // item. The result is undefined if the array is not sorted according to `cmp'.
 // Returns -1 when nothing is found.
-int ptr_array_search(GPtrArray *a, gpointer v, GCompareFunc cmp) {
+int ptr_array_search(GPtrArray *a, gconstpointer v, GCompareFunc cmp) {
   if(!a->len)
     return -1;
   int b = 0;
@@ -1085,6 +734,68 @@ char *ip4_unpack(guint32 ip) {
 
 
 
+// Handy functions to create and read arbitrary data to/from byte arrays. Data
+// is written to and read from a byte array sequentially. The data is stored as
+// efficient as possible, bit still adds padding to correctly align some values.
+
+// Usage:
+//   GByteArray *a = g_byte_array_new();
+//   darray_init(a);
+//   darray_add_int32(a, 43);
+//   darray_add_string(a, "blah");
+//   char *v = g_byte_array_free(a, FALSE);
+// ...later:
+//   int number = darray_get_int32(v);
+//   char *thestring = darray_get_string(v);
+//   g_free(v);
+//
+// So it's basically a method to efficiently pass around variable arguments to
+// functions without the restrictions imposed by stdarg.h.
+
+#if INTERFACE
+
+// For internal use
+#define darray_append_pad(v, a)\
+  int pad = (((v)->len + (a)) & ~(a)) - (v)->len;\
+  gint64 zero = 0;\
+  if(pad)\
+    g_byte_array_append(v, (guint8 *)&zero, pad)
+
+// All values (not necessarily the v thing itself) are always evaluated once.
+#define darray_add_int32(v, i)   do { guint32 p=i; darray_append_pad(v, 3); g_byte_array_append(v, (guint8 *)&p, 4); } while(0)
+#define darray_add_int64(v, i)   do { guint64 p=i; darray_append_pad(v, 7); g_byte_array_append(v, (guint8 *)&p, 8); } while(0)
+#define darray_add_ptr(v, p)     do { const void *t=p; darray_append_pad(v, sizeof(void *)-1); g_byte_array_append(v, (guint8 *)&t, sizeof(void *)); } while(0)
+#define darray_add_dat(v, b, l)  do { int i=l; darray_add_int32(v, i); g_byte_array_append(v, (guint8 *)(b), i); } while(0)
+#define darray_add_string(v, s)  do { const char *t=s; darray_add_dat(v, t, strlen(t)+1); } while(0)
+#define darray_init(v)           darray_add_int32(v, 4)
+
+#define darray_get_int32(v)      *((gint32 *)darray_get_raw(v, 4, 3))
+#define darray_get_int64(v)      *((gint64 *)darray_get_raw(v, 8, 7))
+#define darray_get_ptr(v)        *((void **)darray_get_raw(v, sizeof(void *), sizeof(void *)-1))
+#define darray_get_string(v)     darray_get_raw(v, darray_get_int32(v), 0)
+#endif
+
+
+// For use by the macros
+char *darray_get_raw(char *v, int i, int a) {
+  int *d = (int *)v;
+  d[0] += a;
+  d[0] &= ~a;
+  char *r = v + d[0];
+  d[0] += i;
+  return r;
+}
+
+
+char *darray_get_dat(char *v, int *l) {
+  int n = darray_get_int32(v);
+  if(l)
+    *l = n;
+  return darray_get_raw(v, n, 0);
+}
+
+
+
 
 // Transfer / hashing rate calculation
 
@@ -1219,7 +930,7 @@ struct logfile *logfile_create(const char *name) {
   struct logfile *l = g_slice_new0(struct logfile);
 
   char *n = g_strconcat(name, ".log", NULL);
-  l->path = g_build_filename(conf_dir, "logs", n, NULL);
+  l->path = g_build_filename(db_dir, "logs", n, NULL);
   g_free(n);
 
   logfile_checkfile(l);

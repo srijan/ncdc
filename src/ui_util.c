@@ -200,13 +200,12 @@ void ui_colors_update() {
   struct ui_color *c = ui_colors;
   for(; *c->name; c++) {
     strcpy(confname+6, c->name);
-    char *conf = g_key_file_get_string(conf_file, "color", confname, NULL);
+    char *conf = db_vars_get(0, confname);
     if(!conf || !ui_color_str_parse(conf, &c->fg, &c->bg, &c->x, NULL)) {
       c->fg = c->d_fg;
       c->bg = c->d_bg;
       c->x = c->d_x;
     }
-    g_free(conf);
     init_pair(++pair, c->fg, c->bg);
     c->a = c->x | COLOR_PAIR(pair);
   }
@@ -668,7 +667,7 @@ void ui_cmdhist_init(const char *file) {
   static char buf[CMDHIST_MAXCMD+2]; // + \n and \0
   cmdhist = g_new0(struct ui_cmdhist, 1);
 
-  cmdhist->fn = g_build_filename(conf_dir, file, NULL);
+  cmdhist->fn = g_build_filename(db_dir, file, NULL);
   FILE *f = fopen(cmdhist->fn, "r");
   if(f) {
     while(fgets(buf, CMDHIST_MAXCMD+2, f)) {

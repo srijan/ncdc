@@ -257,20 +257,18 @@ static gboolean c_connect_set_hubaddr(char *addr) {
   g_match_info_free(nfo);
 
   struct ui_tab *tab = ui_tab_cur->data;
-  char *old = g_key_file_get_string(conf_file, tab->name, "hubaddr", NULL);
+  char *old = g_strdup(db_vars_get(tab->hub->id, "hubaddr"));
 
   // Reconstruct (without the kp) and save
   GString *a = g_string_new("");
   g_string_printf(a, "%s://%s:%s/", !proto || !*proto ? "dchub" : proto, host, !port || !*port ? "411" : port);
-  g_key_file_set_string(conf_file, tab->name, "hubaddr", a->str);
+  db_vars_set(tab->hub->id, "hubaddr", a->str);
 
   // Save kp if specified, or throw it away if the URL changed
   if(kp && *kp)
-    g_key_file_set_string(conf_file, tab->name, "hubkp", kp);
+    db_vars_set(tab->hub->id, "hubkp", kp);
   else if(old && strcmp(old, a->str) != 0)
-    g_key_file_remove_key(conf_file, tab->name, "hubkp", NULL);
-
-  conf_save();
+    db_vars_rm(tab->hub->id, "hubkp");
 
   g_string_free(a, TRUE);
   g_free(old);
@@ -291,7 +289,7 @@ static void c_connect(char *args) {
   else {
     if(args[0] && !c_connect_set_hubaddr(args))
       ;
-    else if(!g_key_file_has_key(conf_file, tab->name, "hubaddr", NULL))
+    else if(!conf_exists(tab->hub->id, "hubaddr"))
       ui_m(NULL, 0, "No hub address configured. Use '/connect <address>' to do so.");
     else
       hub_connect(tab->hub);
@@ -305,7 +303,7 @@ static void c_connect_sug(char *args, char **sug) {
   if(t->type != UIT_HUB)
     return;
   int i = 0, len = strlen(args);
-  char *addr = g_key_file_get_string(conf_file, t->name, "hubaddr", NULL);
+  char *addr = db_vars_get(t->hub->id, "hubaddr");
   if(addr && strncmp(addr, args, len) == 0)
     sug[i++] = g_strdup(addr);
   else if(addr) {
@@ -317,7 +315,6 @@ static void c_connect_sug(char *args, char **sug) {
   }
   if(strncmp("dchub://", args, len) == 0)
     sug[i++] = g_strdup("dchub://");
-  g_free(addr);
 }
 
 
@@ -381,8 +378,7 @@ static void c_accept(char *args) {
   else {
     char enc[53] = {};
     base32_encode_dat(tab->hub->kp, enc, 32);
-    g_key_file_set_string(conf_file, tab->name, "hubkp", enc);
-    conf_save();
+    db_vars_set(tab->hub->id, "hubkp", enc);
     g_slice_free1(32, tab->hub->kp);
     tab->hub->kp = NULL;
     hub_connect(tab->hub);
@@ -442,11 +438,11 @@ static void c_open(char *args) {
 static void c_open_sug(char *args, char **sug) {
   int len = strlen(args);
   int i = 0;
-  char **group, **groups = g_key_file_get_groups(conf_file, NULL);
-  for(group=groups; i<20 && *group; group++)
-    if(**group == '#' && (strncmp(args, *group, len) == 0 || strncmp(args, *group+1, len) == 0) && strlen(*group) != len)
-      sug[i++] = g_strdup(*group);
-  g_strfreev(groups);
+  char **hub, **hubs = db_vars_hubs();
+  for(hub=hubs; i<20 && *hub; hub++)
+    if((strncmp(args, *hub, len) == 0 || strncmp(args, *hub+1, len) == 0) && strlen(*hub) != len)
+      sug[i++] = g_strdup(*hub);
+  g_strfreev(hubs);
 }
 
 
@@ -492,23 +488,17 @@ static void c_userlist(char *args) {
 
 
 static void listshares() {
-  gsize len;
-  char **dirs = g_key_file_get_keys(conf_file, "share", &len, NULL);
-  if(!dirs || len == 0)
+  struct db_share_item *l = db_share_list();
+  if(!l->name)
     ui_m(NULL, 0, "Nothing shared.");
   else {
     ui_m(NULL, 0, "");
-    char **cur;
-    for(cur=dirs; *cur; cur++) {
-      char *d = g_key_file_get_string(conf_file, "share", *cur, NULL);
-      struct fl_list *fl = fl_list_file(fl_local_list, *cur);
-      ui_mf(NULL, 0, " /%s -> %s (%s)", *cur, d, str_formatsize(fl->size));
-      g_free(d);
+    for(; l->name; l++) {
+      struct fl_list *fl = fl_local_list ? fl_list_file(fl_local_list, l->name) : NULL;
+      ui_mf(NULL, 0, " /%s -> %s (%s)", l->name, l->path, fl ? str_formatsize(fl->size) : "-");
     }
     ui_m(NULL, 0, "");
   }
-  if(dirs)
-    g_strfreev(dirs);
 }
 
 
@@ -522,7 +512,7 @@ static void c_share(char *args) {
   str_arg2_split(args, &first, &second);
   if(!first || !first[0] || !second || !second[0])
     ui_m(NULL, 0, "Error parsing arguments. See \"/help share\" for details.");
-  else if(g_key_file_has_key(conf_file, "share", first, NULL))
+  else if(db_share_path(first))
     ui_m(NULL, 0, "You have already shared a directory with that name.");
   else {
     char *path = path_expand(second);
@@ -532,28 +522,20 @@ static void c_share(char *args) {
       ui_m(NULL, 0, "Not a directory.");
     else {
       // Check whether it (or a subdirectory) is already shared
-      char **dirs = g_key_file_get_keys(conf_file, "share", NULL, NULL);
-      char **dir;
-      for(dir=dirs; dirs && *dir; dir++) {
-        char *d = g_key_file_get_string(conf_file, "share", *dir, NULL);
-        if(strncmp(d, path, MIN(strlen(d), strlen(path))) == 0) {
-          g_free(d);
+      struct db_share_item *l = db_share_list();
+      for(; l->name; l++)
+        if(strncmp(l->path, path, MIN(strlen(l->path), strlen(path))) == 0)
           break;
-        }
-        g_free(d);
-      }
-      if(dirs && *dir)
-        ui_mf(NULL, 0, "Directory already (partly) shared in /%s", *dir);
+      if(l->name)
+        ui_mf(NULL, 0, "Directory already (partly) shared in /%s", l->name);
       else {
-        g_key_file_set_string(conf_file, "share", first, path);
-        conf_save();
+        db_share_add(first, path);
         fl_share(first);
         ui_mf(NULL, 0, "Added to share: /%s -> %s", first, path);
       }
-      if(dirs)
-        g_strfreev(dirs);
-      free(path);
     }
+    if(path)
+      free(path);
   }
   g_free(first);
 }
@@ -574,29 +556,34 @@ static void c_share_sug(char *args, char **sug) {
 
 
 static void c_unshare(char *args) {
-  if(!args[0])
+  if(!args[0]) {
     listshares();
+    return;
   // otherwise we may crash
-  else if(fl_refresh_queue && fl_refresh_queue->head)
+  } else if(fl_refresh_queue && fl_refresh_queue->head) {
     ui_m(NULL, 0, "Sorry, can't remove directories from the share while refreshing.");
-  else {
-    while(args[0] == '/')
-      args++;
-    char *path = g_key_file_get_string(conf_file, "share", args, NULL);
-    if(!args[0]) {
-      g_key_file_remove_group(conf_file, "share", NULL);
-      conf_save();
-      fl_unshare(NULL);
-      ui_m(NULL, 0, "Removed all directories from share.");
-    } else if(!path)
+    return;
+  }
+
+  while(args[0] == '/')
+    args++;
+
+  // Remove everything
+  if(!args[0]) {
+    db_share_rm(NULL);
+    fl_unshare(NULL);
+    ui_m(NULL, 0, "Removed all directories from share.");
+
+  // Remove a single dir
+  } else {
+    const char *path = db_share_path(args);
+    if(!path)
       ui_m(NULL, 0, "No shared directory with that name.");
     else {
-      g_key_file_remove_key(conf_file, "share", args, NULL);
-      conf_save();
-      fl_unshare(args);
       ui_mf(NULL, 0, "Directory /%s (%s) removed from share.", args, path);
+      db_share_rm(args);
+      fl_unshare(args);
     }
-    g_free(path);
   }
 }
 
@@ -605,11 +592,10 @@ static void c_unshare_sug(char *args, char **sug) {
   int len = strlen(args), i = 0;
   if(args[0] == '/')
     args++;
-  char **dir, **dirs = g_key_file_get_keys(conf_file, "share", NULL, NULL);
-  for(dir=dirs; dir && *dir && i<20; dir++)
-    if(strncmp(args, *dir, len) == 0 && strlen(*dir) != len)
-      sug[i++] = g_strdup(*dir);
-  g_strfreev(dirs);
+  struct db_share_item *l = db_share_list();
+  for(; l->name; l++)
+    if(strncmp(args, l->name, len) == 0 && strlen(l->name) != len)
+      sug[i++] = g_strdup(l->name);
 }
 
 
@@ -697,8 +683,12 @@ static void c_gc(char *args) {
   else {
     ui_m(NULL, UIM_NOLOG, "Collecting garbage...");
     ui_draw();
-    fl_hashdat_gc();
-    dl_gc();
+    if(!fl_gc())
+      ui_m(NULL, 0, "Not checking for unused hash data: File list refresh in progress or not performed yet.");
+    db_fl_purgedata();
+    dl_fl_clean(NULL);
+    dl_inc_clean();
+    db_vacuum();
     ui_m(NULL, UIM_NOLOG, NULL);
     ui_m(NULL, 0, "Garbage-collection done.");
   }

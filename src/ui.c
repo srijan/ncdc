@@ -122,7 +122,7 @@ static struct ui_tab *ui_main_create() {
   ui_m(ui_main, 0,
     "Check out the manual page for a general introduction to ncdc.\n"
     "Make sure you always run the latest version available from http://dev.yorhel.nl/ncdc\n");
-  ui_mf(ui_main, 0, "Using working directory: %s", conf_dir);
+  ui_mf(ui_main, 0, "Using working directory: %s", db_dir);
 
   return ui_main;
 }
@@ -173,7 +173,7 @@ struct ui_tab *ui_msg_create(struct hub *hub, struct hub_user *user) {
   tab->hub = hub;
   tab->uid = user->uid;
   tab->name = g_strdup_printf("~%s", user->name);
-  tab->log = ui_logwindow_create(tab->name, g_key_file_get_integer(conf_file, "global", "backlog", NULL));
+  tab->log = ui_logwindow_create(tab->name, conf_get_int(0, "backlog"));
   tab->log->handle = tab;
   tab->log->checkchat = ui_hub_log_checkchat;
 
@@ -304,25 +304,13 @@ struct ui_tab *ui_hub_create(const char *name, gboolean conn) {
   // NOTE: tab name is also used as configuration group
   tab->name = g_strdup_printf("#%s", name);
   tab->type = UIT_HUB;
-  tab->log = ui_logwindow_create(tab->name, conf_hub_get(integer, tab->name, "backlog"));
+  tab->hub = hub_create(tab);
+  tab->log = ui_logwindow_create(tab->name,
+      conf_get_int(conf_exists(tab->hub->id, "backlog") ? tab->hub->id : 0, "backlog"));
   tab->log->handle = tab;
   tab->log->checkchat = ui_hub_log_checkchat;
-  // Every hub tab should have a unique ID. The name of the tab (which is the
-  // group name in the config file) is changable, but internally we'd want a
-  // more stable ID for user CID creation on NMDC hubs, so let's create one.
-  if(!g_key_file_has_key(conf_file, tab->name, "hubid", NULL)) {
-#if GLIB_CHECK_VERSION(2, 26, 0)
-    g_key_file_set_uint64(conf_file, tab->name, "hubid", rand_64());
-#else
-    char *tmp = g_strdup_printf("%016"G_GINT64_FORMAT, rand_64());
-    g_key_file_set_string(conf_file, tab->name, "hubid", tmp);
-    g_free(tmp);
-#endif
-    conf_save();
-  }
-  tab->hub = hub_create(tab);
   // already used this name before? open connection again
-  if(conn && g_key_file_has_key(conf_file, tab->name, "hubaddr", NULL))
+  if(conn && conf_exists(tab->hub->id, "hubaddr"))
     hub_connect(tab->hub);
   return tab;
 }
@@ -369,11 +357,10 @@ static void ui_hub_draw(struct ui_tab *tab) {
   else if(!tab->hub->nick_valid)
     mvaddstr(winrows-4, wincols-15, "Logging in...");
   else {
-    char *addr = conf_hub_get(string, tab->name, "hubaddr");
+    char *addr = conf_hub_get(tab->hub->id, "hubaddr");
     char *tmp = g_strdup_printf("%s @ %s%s", tab->hub->nick, addr,
       tab->hub->isop ? " (operator)" : tab->hub->isreg ? " (registered)" : "");
     mvaddstr(winrows-4, 0, tmp);
-    g_free(addr);
     g_free(tmp);
     int count = g_hash_table_size(tab->hub->users);
     tmp = g_strdup_printf("%6d users  %10s%c", count,
@@ -421,7 +408,7 @@ void ui_hub_userchange(struct ui_tab *tab, int change, struct hub_user *user) {
     ui_msg_userchange(mt, change, user);
 
   // display the join/quit, when requested
-  gboolean log = conf_hub_get(boolean, tab->name, "show_joinquit");
+  gboolean log = conf_get_bool(conf_exists(tab->hub->id, "show_joinquit") ? tab->hub->id : 0, "show_joinquit");
   if(change == UIHUB_UC_NFO && !user->isjoined) {
     user->isjoined = TRUE;
     if(log && tab->hub->joincomplete && (!tab->hub->nick_valid
@@ -1294,7 +1281,7 @@ void ui_fl_queue(guint64 uid, gboolean force, const char *sel, struct ui_tab *pa
 
   // check for cached file list, otherwise queue it
   char *tmp = g_strdup_printf("%016"G_GINT64_MODIFIER"x.xml.bz2", uid);
-  char *fn = g_build_filename(conf_dir, "fl", tmp, NULL);
+  char *fn = g_build_filename(db_dir, "fl", tmp, NULL);
   g_free(tmp);
 
   gboolean e = !force;
@@ -1368,7 +1355,7 @@ struct ui_tab *ui_fl_create(guint64 uid, const char *sel) {
       ui_fl_setdir(tab, fl, NULL);
   } else {
     char *tmp = g_strdup_printf("%016"G_GINT64_MODIFIER"x.xml.bz2", uid);
-    char *fn = g_build_filename(conf_dir, "fl", tmp, NULL);
+    char *fn = g_build_filename(db_dir, "fl", tmp, NULL);
     fl_load_async(fn, ui_fl_loaddone, tab);
     g_free(tmp);
     g_free(fn);
@@ -1529,9 +1516,8 @@ static void ui_fl_key(struct ui_tab *tab, guint64 key) {
       ui_m(NULL, 0, "Directory empty.");
     else {
       g_return_if_fail(!sel->isfile || sel->hastth);
-      char *excl = g_key_file_get_string(conf_file, "global", "download_exclude", NULL);
+      char *excl = db_vars_get(0, "download_exclude");
       GRegex *r = excl ? g_regex_new(excl, 0, 0, NULL) : NULL;
-      g_free(excl);
       dl_queue_add_fl(tab->uid, sel, NULL, r);
       if(r)
         g_regex_unref(r);
@@ -1784,7 +1770,7 @@ static void ui_dl_dud_draw_row(struct ui_listing *list, GSequenceIter *iter, int
     mvprintw(row, 2, "ID:%016"G_GINT64_MODIFIER"x (offline)", dud->u->uid);
 
   if(dud->error)
-    mvprintw(row, 36, "Error: %s", dl_strerror(dud->error, dud->error_sub));
+    mvprintw(row, 36, "Error: %s", dl_strerror(dud->error, dud->error_msg));
   else if(dud->u->active == dud)
     mvaddstr(row, 36, "Downloading.");
   else if(dud->u->state == DLU_ACT)
@@ -1827,7 +1813,7 @@ static void ui_dl_draw() {
 
   // error info
   if(sel && sel->prio == DLP_ERR)
-    mvprintw(++bottom, 0, "Error: %s", dl_strerror(sel->error, sel->error_sub));
+    mvprintw(++bottom, 0, "Error: %s", dl_strerror(sel->error, sel->error_msg));
 
   // user list
   if(sel && ui_dl->details) {
@@ -2683,7 +2669,6 @@ void ui_draw() {
     xoffset = 2 + str_columns(ts);
 #endif
   }
-  g_free(tfmt);
   // tabs
   ui_draw_tablist(xoffset);
 

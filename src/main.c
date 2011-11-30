@@ -32,8 +32,8 @@
 #include <errno.h>
 #include <stdio.h>
 #include <unistd.h>
-#include <gdbm.h>
 #include <libxml/xmlversion.h>
+#include <sqlite3.h>
 
 
 
@@ -41,6 +41,7 @@
 GMainLoop *main_loop;
 
 gboolean have_tls_support;
+gboolean log_debug = TRUE;
 
 
 // input handling declarations
@@ -206,11 +207,11 @@ char *ncdc_version() {
 #endif
     "Libraries:\n"
     "  GLib %d.%d.%d (%d.%d.%d)\n"
-    "  Libxml2 %s\n"
+    "  SQLite %s (%s)\n"
 #ifdef NCURSES_VERSION
     "  ncurses %s\n"
 #endif
-    "  %s"; // GDBM
+    "  Libxml2 %s";
   if(ver)
     return ver->str;
   ver = g_string_new("");
@@ -222,18 +223,20 @@ char *ncdc_version() {
     "BSD",
 #endif
     GLIB_MAJOR_VERSION, GLIB_MINOR_VERSION, GLIB_MICRO_VERSION, glib_major_version, glib_minor_version, glib_micro_version,
-    LIBXML_DOTTED_VERSION,
+    SQLITE_VERSION, sqlite3_libversion(),
 #ifdef NCURSES_VERSION
     NCURSES_VERSION,
 #endif
-    gdbm_version);
+    LIBXML_DOTTED_VERSION);
   return ver->str;
 }
 
 
+static gboolean stderr_redir = FALSE;
+
 // redirect all non-fatal errors to stderr (NOT stdout!)
 static void log_redirect(const gchar *dom, GLogLevelFlags level, const gchar *msg, gpointer dat) {
-  if(!(level & (G_LOG_LEVEL_INFO|G_LOG_LEVEL_DEBUG)) || conf_log_debug()) {
+  if(!(level & (G_LOG_LEVEL_INFO|G_LOG_LEVEL_DEBUG)) || (stderr_redir && log_debug)) {
     time_t tm = time(NULL);
     char ts[50];
     strftime(ts, 49, "[%F %H:%M:%S %Z]", localtime(&tm));
@@ -247,20 +250,22 @@ static void log_redirect(const gchar *dom, GLogLevelFlags level, const gchar *ms
 static void log_fatal(const gchar *dom, GLogLevelFlags level, const gchar *msg, gpointer dat) {
   endwin();
   // print to both stderr (log file) and stdout
-  fprintf(stderr, "\n\n*%s* %s\n", loglevel_to_str(level), msg);
-  fflush(stderr);
+  if(stderr_redir) {
+    fprintf(stderr, "\n\n*%s* %s\n", loglevel_to_str(level), msg);
+    fflush(stderr);
+  }
   printf("\n\n*%s* %s\n", loglevel_to_str(level), msg);
 }
 
 
 static void open_autoconnect() {
-  char **groups = g_key_file_get_groups(conf_file, NULL);
-  char **group;
+  char **hubs = db_vars_hubs();
+  char **hub;
   // TODO: make sure the tabs are opened in the same order as they were in the last run?
-  for(group=groups; *group; group++)
-    if(**group == '#' && g_key_file_get_boolean(conf_file, *group, "autoconnect", NULL))
-      ui_tab_open(ui_hub_create(*group+1, TRUE), FALSE, NULL);
-  g_strfreev(groups);
+  for(hub=hubs; *hub; hub++)
+    if(conf_exists(db_vars_hubid(*hub), "autoconnect"))
+      ui_tab_open(ui_hub_create(*hub+1, TRUE), FALSE, NULL);
+  g_strfreev(hubs);
 }
 
 
@@ -350,7 +355,7 @@ static gboolean auto_open = TRUE;
 static GOptionEntry cli_options[] = {
   { "version", 'v', G_OPTION_FLAG_NO_ARG, G_OPTION_ARG_CALLBACK, print_version,
       "Print version and compilation information.", NULL },
-  { "session-dir", 'c', 0, G_OPTION_ARG_FILENAME, &conf_dir,
+  { "session-dir", 'c', 0, G_OPTION_ARG_FILENAME, &db_dir,
       "Use a different session directory. Default: `$NCDC_DIR' or `$HOME/.ncdc'.", "<dir>" },
   { "no-autoconnect", 'n', G_OPTION_FLAG_REVERSE, G_OPTION_ARG_NONE, &auto_open,
       "Don't automatically connect to hubs with the `autoconnect' option set.", NULL },
@@ -390,21 +395,25 @@ int main(int argc, char **argv) {
   have_tls_support = FALSE;
 #endif
 
-  conf_init();
-  hub_init_global();
-  net_init_global();
-
   // setup logging
-  char *errlog = g_build_filename(conf_dir, "stderr.log", NULL);
+  g_log_set_handler(NULL, G_LOG_FATAL_MASK | G_LOG_FLAG_FATAL | G_LOG_LEVEL_ERROR, log_fatal, NULL);
+  g_log_set_default_handler(log_redirect, NULL);
+
+  // Init database
+  db_init();
+
+  // redirect stderr to a log file
+  char *errlog = g_build_filename(db_dir, "stderr.log", NULL);
   if(!freopen(errlog, "w", stderr)) {
     fprintf(stderr, "ERROR: Couldn't open %s for writing: %s\n", errlog, strerror(errno));
     exit(1);
   }
   g_free(errlog);
-  g_log_set_handler(NULL, G_LOG_FATAL_MASK | G_LOG_FLAG_FATAL | G_LOG_LEVEL_ERROR, log_fatal, NULL);
-  g_log_set_default_handler(log_redirect, NULL);
+  stderr_redir = TRUE;
 
-  // init more stuff
+  // Init more stuff
+  hub_init_global();
+  net_init_global();
   cc_init_global();
   dl_init_global();
   ui_cmdhist_init("history");
@@ -466,8 +475,9 @@ int main(int argc, char **argv) {
   }
   ui_cmdhist_close();
   cc_close_global();
-  fl_close();
+  fl_flush(NULL);
   dl_close_global();
+  db_close();
   if(!main_noterm)
     printf(" Done!\n");
 

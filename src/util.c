@@ -756,17 +756,17 @@ char *ip4_unpack(guint32 ip) {
 
 // For internal use
 #define darray_append_pad(v, a)\
-  int pad = (((v)->len + (a)) & ~(a)) - (v)->len;\
-  gint64 zero = 0;\
-  if(pad)\
-    g_byte_array_append(v, (guint8 *)&zero, pad)
+  int darray_pad = (((v)->len + (a)) & ~(a)) - (v)->len;\
+  gint64 darray_zero = 0;\
+  if(darray_pad)\
+    g_byte_array_append(v, (guint8 *)&darray_zero, darray_pad)
 
 // All values (not necessarily the v thing itself) are always evaluated once.
-#define darray_add_int32(v, i)   do { guint32 p=i; darray_append_pad(v, 3); g_byte_array_append(v, (guint8 *)&p, 4); } while(0)
-#define darray_add_int64(v, i)   do { guint64 p=i; darray_append_pad(v, 7); g_byte_array_append(v, (guint8 *)&p, 8); } while(0)
-#define darray_add_ptr(v, p)     do { const void *t=p; darray_append_pad(v, sizeof(void *)-1); g_byte_array_append(v, (guint8 *)&t, sizeof(void *)); } while(0)
-#define darray_add_dat(v, b, l)  do { int i=l; darray_add_int32(v, i); g_byte_array_append(v, (guint8 *)(b), i); } while(0)
-#define darray_add_string(v, s)  do { const char *t=s; darray_add_dat(v, t, strlen(t)+1); } while(0)
+#define darray_add_int32(v, i)   do { guint32 darray_p=i; darray_append_pad(v, 3); g_byte_array_append(v, (guint8 *)&darray_p, 4); } while(0)
+#define darray_add_int64(v, i)   do { guint64 darray_p=i; darray_append_pad(v, 7); g_byte_array_append(v, (guint8 *)&darray_p, 8); } while(0)
+#define darray_add_ptr(v, p)     do { const void *darray_t=p; darray_append_pad(v, sizeof(void *)-1); g_byte_array_append(v, (guint8 *)&darray_t, sizeof(void *)); } while(0)
+#define darray_add_dat(v, b, l)  do { int darray_i=l; darray_add_int32(v, darray_i); g_byte_array_append(v, (guint8 *)(b), darray_i); } while(0)
+#define darray_add_string(v, s)  do { const char *darray_t=s; darray_add_dat(v, darray_t, strlen(darray_t)+1); } while(0)
 #define darray_init(v)           darray_add_int32(v, 4)
 
 #define darray_get_int32(v)      *((gint32 *)darray_get_raw(v, 4, 3))

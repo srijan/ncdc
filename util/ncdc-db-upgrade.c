@@ -45,6 +45,7 @@
 
 static const char *db_dir = NULL;
 static int db_verfd = -1;
+static gboolean backup = FALSE;
 
 
 
@@ -178,6 +179,8 @@ static void u20_revert(const char *msg, ...) {
 
   // clean up
   unlink(u20_sql_fn);
+  char *ver_new = g_build_filename(db_dir, "version.new", NULL);
+  unlink(ver_new);
 
   puts(" done.");
   exit(1);
@@ -785,7 +788,42 @@ static void u20_final() {
   if(sqlite3_close(u20_sql))
     u20_revert("%s", sqlite3_errmsg(u20_sql));
 
-  // TODO: update version and unlink old files
+  // Create new version file
+  char *ver_new = g_build_filename(db_dir, "version.new", NULL);
+  char *ver_old = g_build_filename(db_dir, "version.old", NULL);
+  char *ver_file = g_build_filename(db_dir, "version", NULL);
+  char newver[2] = {2,0};
+  int fd;
+  if((fd = g_open(ver_new, O_WRONLY|O_CREAT|O_EXCL, 0600)) < 0
+      || write(fd, newver, 2) != 2
+      || close(fd) < 0)
+    u20_revert("Creating %s: %s", ver_new, g_strerror(errno));
+
+  // Backup version, if requested
+  if(backup && rename(ver_file, ver_old) < 0)
+    u20_revert("Backing up %s: %s", ver_file);
+
+  // Overwrite version file
+  if(rename(ver_new, ver_file) < 0)
+    u20_revert("Moving %s: %s", ver_new, g_strerror(errno));
+
+  g_free(ver_new);
+  g_free(ver_old);
+  g_free(ver_file);
+
+  // When we're here, a revert makes little sense anymore, everything has been updated successfully.
+
+  // Remove the old files if we don't need a backup
+  char *tmp;
+#define rmfile(f) \
+  tmp = g_build_filename(db_dir, f, NULL);\
+  if(!backup && unlink(tmp) < 0)\
+    printf("Warning: Couldn't remove %s: %s\n", tmp, g_strerror(errno));\
+  g_free(tmp);
+  rmfile("hashdata.dat");
+  rmfile("dl.dat");
+  rmfile("config.ini");
+#undef rmfile
 
   puts(" done.");
 }
@@ -842,6 +880,8 @@ static GOptionEntry cli_options[] = {
       "Print version and compilation information.", NULL },
   { "session-dir", 'c', 0, G_OPTION_ARG_FILENAME, &db_dir,
       "Use a different session directory. Default: `$NCDC_DIR' or `$HOME/.ncdc'.", "<dir>" },
+  { "backup", 0, 0, G_OPTION_ARG_NONE, &backup,
+      "Keep a backup of the old files." },
   { NULL }
 };
 
@@ -858,13 +898,6 @@ int main(int argc, char **argv) {
     exit(1);
   }
   g_option_context_free(optx);
-
-  // not finished...
-  confirm(
-    "*WARNING*: This utility is not finished yet! You WILL screw up your\n"
-    "session directory if you run this program now. Don't do this unless\n"
-    "you know what you're doing!"
-  );
 
   // get version
   int ver = db_getversion();
@@ -884,13 +917,36 @@ int main(int argc, char **argv) {
   }
 
   // We've now determined that we have a version 1 directory, ask whether we can upgrade this.
+  if(!backup) {
+    printf("\n"
+      "The directory will be upgraded for use with ncdc 1.6 or later. This\n"
+      "action is NOT reversible! You are encouraged to make a backup of the\n"
+      "of the following files if you want to be able to revert back:\n"
+      "  %s/{config.ini,hashdata.dat,dl.dat,version}\n"
+      "Or run this tool with --backup to do this automatically.\n",
+      db_dir);
+  } else {
+    printf("\n"
+      "The directory will be upgraded for use with ncdc 1.6 or later. Backup\n"
+      "files will be created so this action can be reverted.\n");
+  }
   confirm("\n"
-    "The directory will be upgraded for use with ncdc 1.6 or later. This\n"
-    "action is NOT reversible! You are encouraged to make a backup of the\n"
-    "directory, so that you can revert back to an older version in case\n"
-    "something goes wrong."
+    "This utility will do a full filelist refresh, so please make sure any\n"
+    "shared directories are mounted. Files that can not be found on your\n"
+    "filesystem will have their hash data deleted.\n"
   );
   u20();
+  if(backup) {
+    printf("\n"
+      "The following backup files have been created:\n"
+      "  %s/{config.ini,hashdata.dat,dl.dat,version.old}\n"
+      "To make the changes permanent and free some disk space, you can safely\n"
+      "delete these files.\n\n"
+      "To revert back to the old version, run:\n"
+      "  rm '%s/db.sqlite3'\n"
+      "  mv '%s/version.old' '%s/version'\n\n",
+      db_dir, db_dir, db_dir, db_dir);
+  }
 
   return 0;
 }

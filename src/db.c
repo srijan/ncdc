@@ -1348,14 +1348,14 @@ static int db_dir_init() {
   // check data directory version
   // version = major, minor
   //   minor = forward & backward compatible, major only backward.
-  char dir_ver[2] = {1, 0};
+  char dir_ver[2] = {2, 0};
   if(read(ver_fd, dir_ver, 2) < 2)
     if(write(ver_fd, dir_ver, 2) < 2)
       g_error("Could not write to '%s': %s", ver_file, g_strerror(errno));
   g_free(ver_file);
   // Don't close the above file. Keep it open and let the OS close it (and free
   // the lock) when ncdc is closed, was killed or has crashed.
-  if(dir_ver[0] > 1)
+  if(dir_ver[0] > 2)
     g_error("Incompatible data directory. Please upgrade ncdc or use a different directory.");
 
   return (((int)dir_ver[0])<<8) + (int)dir_ver[1];

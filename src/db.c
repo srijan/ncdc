@@ -1376,7 +1376,7 @@ static void db_init_schema() {
 
   // New database? Initialize schema.
   if(ver == 0) {
-    // TODO: These query don't have to get into the prepared statement cache
+    // TODO: These queries don't have to get into the prepared statement cache
     db_queue_push(DBF_NEXT, "PRAGMA user_version = 1", DBQ_END);
     db_queue_push(DBF_NEXT,
       "CREATE TABLE hashdata ("

@@ -80,8 +80,8 @@ struct dl_user {
 
 
 
-// Note: The following numbers are also stored in dl.dat. Keep this in mind
-// when changing or extending. (Both DLP_ and DLE_)
+// Note: The following numbers are also stored in the database. Keep this in
+// mind when changing or extending. (Both DLP_ and DLE_)
 
 #define DLP_ERR   -65 // disabled due to (permanent) error
 #define DLP_OFF   -64 // disabled by user
@@ -736,8 +736,8 @@ static void dl_queue_checkrm(struct dl *dl, gboolean justfin) {
     return;
 
   if(justfin) {
-    // If the download just finished, we might as well remove it from dl.dat
-    // immediately. Makes sure we won't load it on the next startup.
+    // If the download just finished, we might as well remove it from the
+    // database immediately. Makes sure we won't load it on the next startup.
     if(!dl->islist)
       db_dl_rm(dl->hash);
 
@@ -1055,8 +1055,8 @@ gboolean dl_received(guint64 uid, char *tth, char *buf, int length) {
 }
 
 
-// Called when we've received TTHL data. For now we'll just store it dl.dat
-// without modifications.
+// Called when we've received TTHL data. For now we'll just store it in the
+// database without modifications.
 // TODO: combine hashes to remove uneeded granularity? (512kB is probably enough)
 void dl_settthl(guint64 uid, char *tth, char *tthl, int len) {
   struct dl *dl = g_hash_table_lookup(dl_queue, tth);

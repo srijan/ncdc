@@ -704,6 +704,15 @@ static void u20_config_group(const char *group, sqlite3_stmt *s) {
       continue;
     // Get value and convert
     char *v = g_key_file_get_string(u20_conf, group, *key, NULL);
+    // value of 'autorefresh' changed from minutes to seconds
+    if(strcmp(*key, "autorefresh") == 0) {
+      gint64 ar = g_ascii_strtoll(v, NULL, 0);
+      if(ar) {
+        g_free(v);
+        v = g_strdup_printf("%d", (int)ar*60);
+      }
+    }
+    // Save
     sqlite3_bind_text(s, 1, *key, -1, SQLITE_STATIC);
     sqlite3_bind_text(s, 3, v, -1, SQLITE_STATIC);
     if(sqlite3_step(s) != SQLITE_DONE || sqlite3_reset(s))

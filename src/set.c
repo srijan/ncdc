@@ -284,7 +284,7 @@ static void set_active_bind(guint64 hub, char *key, char *val) {
 
 static void get_autorefresh(guint64 hub, char *key) {
   int a = conf_autorefresh();
-  ui_mf(NULL, 0, "global.%s = %d%s", key, a, !a ? " (disabled)" : "");
+  ui_mf(NULL, 0, "global.%s = %s%s", key, str_formatinterval(a), !a ? " (disabled)" : "");
 }
 
 
@@ -295,10 +295,10 @@ static void set_autorefresh(guint64 hub, char *key, char *val) {
     return;
   }
 
-  long v = strtol(val, NULL, 10);
-  if((!v && errno == EINVAL) || v < INT_MIN || v > INT_MAX || v < 0)
+  int v = str_parseinterval(val);
+  if(v < 0)
     ui_m(NULL, 0, "Invalid number.");
-  else if(v > 0 && v < 10)
+  else if(v > 0 && v < 600)
     ui_m(NULL, 0, "Interval between automatic refreshes should be at least 10 minutes.");
   else {
     conf_set_int(0, key, v);

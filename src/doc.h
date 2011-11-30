@@ -268,11 +268,12 @@ static const struct doc_set {
 { "autoconnect", 1, "<boolean>",
   "Set to true to automatically connect to the current hub when ncdc starts up."
 },
-{ "autorefresh", 0, "<integer>",
-  "The time between automatic file refreshes, in minutes. Set to 0 to disable"
-  " automatically refreshing the file list. This setting also determines"
-  " whether ncdc will perform a refresh on startup. See the `/refresh' command to"
-  " manually refresh your file list."
+{ "autorefresh", 0, "<interval>",
+  "The time between automatic file refreshes. Recognized suffices are 's' for"
+  " seconds, 'm' for minutes, 'h' for hours and 'd' for days. Set to 0 to"
+  " disable automatically refreshing the file list. This setting also"
+  " determines whether ncdc will perform a refresh on startup. See the"
+  " `/refresh' command to manually refresh your file list."
 },
 { "backlog", 1, "<integer>",
   "When opening a hub or PM tab, ncdc can load a certain amount of lines from"

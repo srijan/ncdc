@@ -712,6 +712,14 @@ static void u20_config_group(const char *group, sqlite3_stmt *s) {
         v = g_strdup_printf("%d", (int)ar*60);
       }
     }
+    // value of 'minislot_size' changed from KiB to bytes
+    if(strcmp(*key, "minislot_size") == 0) {
+      gint64 ms = g_ascii_strtoll(v, NULL, 0);
+      if(ms) {
+        g_free(v);
+        v = g_strdup_printf("%d", (int)ms*1024);
+      }
+    }
     // Save
     sqlite3_bind_text(s, 1, *key, -1, SQLITE_STATIC);
     sqlite3_bind_text(s, 3, v, -1, SQLITE_STATIC);

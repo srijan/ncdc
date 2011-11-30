@@ -1131,7 +1131,7 @@ char **db_vars_hubs() {
 
 #define conf_minislots() (!conf_exists(0, "minislots") ? 3 : conf_get_int(0, "minislots"))
 
-#define conf_minislot_size() (1024*(!conf_exists(0, "minislot_size") ? 64 : conf_get_int(0, "minislot_size")))
+#define conf_minislot_size() (!conf_exists(0, "minislot_size") ? 64*1024 : conf_get_int(0, "minislot_size"))
 
 #define conf_slots() (!conf_exists(0, "slots") ? 10 : conf_get_int(0, "slots"))
 

@@ -348,7 +348,7 @@ static void set_minislot_size(guint64 hub, char *key, char *val) {
   else if(v < 64)
     ui_m(NULL, 0, "Minislot size must be at least 64 KiB.");
   else {
-    conf_set_int(0, key, v);
+    conf_set_int(0, key, v*1024);
     get_minislot_size(0, key);
   }
 }

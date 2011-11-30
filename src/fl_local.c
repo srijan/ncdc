@@ -951,7 +951,7 @@ void fl_init() {
 
   // init stuff
   fl_local_list = NULL;
-  fl_local_list_file = g_build_filename(conf_dir, "files.xml.bz2", NULL);
+  fl_local_list_file = g_build_filename(db_dir, "files.xml.bz2", NULL);
   fl_refresh_queue = g_queue_new();
   fl_scan_pool = g_thread_pool_new(fl_scan_thread, NULL, 1, FALSE, NULL);
   fl_hash_pool = g_thread_pool_new(fl_hash_thread, NULL, 1, FALSE, NULL);

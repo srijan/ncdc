@@ -467,7 +467,7 @@ static void set_dl_inc_dir(guint64 hub, char *key, char *val) {
     return;
   }
 
-  char *nval = val ? g_strdup(val) : g_build_filename(conf_dir, dl ? "dl" : "inc", NULL);
+  char *nval = val ? g_strdup(val) : g_build_filename(db_dir, dl ? "dl" : "inc", NULL);
   gboolean cont = FALSE, warn = FALSE;
   // check if it exists
   if(g_file_test(nval, G_FILE_TEST_EXISTS)) {

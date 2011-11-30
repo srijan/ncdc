@@ -578,7 +578,7 @@ void dl_queue_addlist(struct hub_user *u, const char *sel, struct ui_tab *parent
   }
   // figure out dl->dest
   char *fn = g_strdup_printf("%016"G_GINT64_MODIFIER"x.xml.bz2", u->uid);
-  dl->dest = g_build_filename(conf_dir, "fl", fn, NULL);
+  dl->dest = g_build_filename(db_dir, "fl", fn, NULL);
   g_free(fn);
   // insert & start
   g_debug("dl:%016"G_GINT64_MODIFIER"x: queueing files.xml.bz2", u->uid);
@@ -1211,7 +1211,7 @@ void dl_close_global() {
 
 // Removes old filelists from /fl/. Can be run from a timer.
 gboolean dl_fl_clean(gpointer dat) {
-  char *dir = g_build_filename(conf_dir, "fl", NULL);
+  char *dir = g_build_filename(db_dir, "fl", NULL);
   GDir *d = g_dir_open(dir, 0, NULL);
   if(!d) {
     g_free(dir);

@@ -50,81 +50,6 @@
 
 
 
-
-
-// Configuration handling
-
-
-// global vars
-const char *conf_dir = NULL;
-
-
-void conf_init() {
-  // get location of the configuration directory
-  if(!conf_dir && (conf_dir = g_getenv("NCDC_DIR")))
-    conf_dir = g_strdup(conf_dir);
-  if(!conf_dir)
-    conf_dir = g_build_filename(g_get_home_dir(), ".ncdc", NULL);
-
-  // try to create it (ignoring errors if it already exists)
-  g_mkdir(conf_dir, 0700);
-  if(g_access(conf_dir, F_OK | R_OK | X_OK | W_OK) < 0)
-    g_error("Directory '%s' does not exist or is not writable.", conf_dir);
-
-  // Make sure it's an absolute path (yes, after mkdir'ing it, realpath() may
-  // return an error if it doesn't exist). Just stick with the relative path if
-  // realpath() fails, it's not critical anyway.
-  char *real = realpath(conf_dir, NULL);
-  if(real) {
-    g_free((char *)conf_dir);
-    conf_dir = g_strdup(real);
-    free(real);
-  }
-
-  // make sure some subdirectories exist and are writable
-#define cdir(d) do {\
-    char *tmp = g_build_filename(conf_dir, d, NULL);\
-    g_mkdir(tmp, 0777);\
-    if(g_access(conf_dir, F_OK | R_OK | X_OK | W_OK) < 0)\
-      g_error("Directory '%s' does not exist or is not writable.", tmp);\
-    g_free(tmp);\
-  } while(0)
-  cdir("logs");
-  cdir("inc");
-  cdir("fl");
-  cdir("dl");
-  cdir("cert");
-#undef cdir
-
-  // make sure that there is no other ncdc instance working with the same config directory
-  char *ver_file = g_build_filename(conf_dir, "version", NULL);
-  int ver_fd = g_open(ver_file, O_RDWR|O_CREAT, 0600);
-  struct flock lck;
-  lck.l_type = F_WRLCK;
-  lck.l_whence = SEEK_SET;
-  lck.l_start = 0;
-  lck.l_len = 0;
-  if(ver_fd < 0 || fcntl(ver_fd, F_SETLK, &lck) == -1)
-    g_error("Unable to open lock file. Is another instance of ncdc running with the same configuration directory?");
-
-  // check data directory version
-  // version = major, minor
-  //   minor = forward & backward compatible, major only backward.
-  char dir_ver[2] = {1, 0};
-  if(read(ver_fd, dir_ver, 2) < 2)
-    if(write(ver_fd, dir_ver, 2) < 2)
-      g_error("Could not write to '%s': %s", ver_file, g_strerror(errno));
-  g_free(ver_file);
-  // Don't close the above file. Keep it open and let the OS close it (and free
-  // the lock) when ncdc is closed, was killed or has crashed.
-  if(dir_ver[0] > 1)
-    g_error("Incompatible data directory. Please upgrade ncdc or use a different directory.");
-}
-
-
-
-
-
 /* A best-effort character conversion function.
  *
  * If, for whatever reason, a character could not be converted, a question mark
@@ -1005,7 +930,7 @@ struct logfile *logfile_create(const char *name) {
   struct logfile *l = g_slice_new0(struct logfile);
 
   char *n = g_strconcat(name, ".log", NULL);
-  l->path = g_build_filename(conf_dir, "logs", n, NULL);
+  l->path = g_build_filename(db_dir, "logs", n, NULL);
   g_free(n);
 
   logfile_checkfile(l);

@@ -667,7 +667,7 @@ void ui_cmdhist_init(const char *file) {
   static char buf[CMDHIST_MAXCMD+2]; // + \n and \0
   cmdhist = g_new0(struct ui_cmdhist, 1);
 
-  cmdhist->fn = g_build_filename(conf_dir, file, NULL);
+  cmdhist->fn = g_build_filename(db_dir, file, NULL);
   FILE *f = fopen(cmdhist->fn, "r");
   if(f) {
     while(fgets(buf, CMDHIST_MAXCMD+2, f)) {

@@ -25,12 +25,14 @@
 
 
 #include "ncdc.h"
-#include <sqlite3.h>
 #include <stdarg.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <errno.h>
 
-// TODO: The conf_* stuff in util.c should eventually be merged into this file as well.
+#include <sqlite3.h>
+#include <glib/gstdio.h>
 
 // Most of the db_* functions can be used from multiple threads. The database
 // is only accessed from within the database thread (db_thread_func()). All
@@ -1112,7 +1114,7 @@ char **db_vars_hubs() {
 #define conf_autorefresh() (!conf_exists(0, "autorefresh") ? 60 : conf_get_int(0, "autorefresh"))
 
 #define conf_download_dir() (\
-  !conf_exists(0, "download_dir") ? g_build_filename(conf_dir, "dl", NULL)\
+  !conf_exists(0, "download_dir") ? g_build_filename(db_dir, "dl", NULL)\
     : g_strdup(db_vars_get(0, "download_dir")))
 
 #define conf_download_slots() (!conf_exists(0, "download_slots") ? 3 : conf_get_int(0, "download_slots"))
@@ -1124,7 +1126,7 @@ char **db_vars_hubs() {
 #define conf_filelist_maxage() (!conf_exists(0, "filelist_maxage") ? (7*24*3600) : conf_get_int(0, "filelist_maxage"))
 
 #define conf_incoming_dir() (\
-  !conf_exists(0, "incoming_dir") ? g_build_filename(conf_dir, "inc", NULL)\
+  !conf_exists(0, "incoming_dir") ? g_build_filename(db_dir, "inc", NULL)\
     : g_strdup(db_vars_get(0, "incoming_dir")))
 
 #define conf_minislots() (!conf_exists(0, "minislots") ? 3 : conf_get_int(0, "minislots"))
@@ -1166,20 +1168,23 @@ int conf_get_int(guint64 hub, const char *name) {
 
 
 
-// Initialize the database
+// Initialize the database directory and other stuff
 
-#if TLS_SUPPORT
-GTlsCertificate *db_certificate = NULL;
-
-// Fallback, if TLS_SUPPORT is false then no certificates are used and this
-// variable is never dereferenced. It is, however, checked against NULL in some
-// places to detect support for client-to-client TLS.
-#else
-char *db_certificate = NULL;
-#endif
+char db_cid[24];
+char db_pid[24];
+const char *db_dir = NULL;
 
 // Base32-encoded keyprint of our own certificate
 char *db_certificate_kp = NULL;
+
+// The char * is a fallback, if TLS_SUPPORT is false then no certificates are
+// used and this variable is never dereferenced. It is, however, checked
+// against NULL in some places to detect support for client-to-client TLS.
+#if TLS_SUPPORT
+GTlsCertificate *db_certificate = NULL;
+#else
+char *db_certificate = NULL;
+#endif
 
 
 #if TLS_SUPPORT
@@ -1199,7 +1204,7 @@ static gboolean db_gen_cert(char *cert_file, char *key_file) {
 
   // Now try to run `ncdc-gen-cert' to create them
   GError *err = NULL;
-  char *argv[] = { "ncdc-gen-cert", (char *)conf_dir, NULL };
+  char *argv[] = { "ncdc-gen-cert", (char *)db_dir, NULL };
   int ret;
   g_spawn_sync(NULL, argv, NULL,
     G_SPAWN_SEARCH_PATH|G_SPAWN_SEARCH_PATH|G_SPAWN_STDERR_TO_DEV_NULL,
@@ -1228,8 +1233,8 @@ static gboolean db_gen_cert(char *cert_file, char *key_file) {
 
 
 static void db_load_cert() {
-  char *cert_file = g_build_filename(conf_dir, "cert", "client.crt", NULL);
-  char *key_file = g_build_filename(conf_dir, "cert", "client.key", NULL);
+  char *cert_file = g_build_filename(db_dir, "cert", "client.crt", NULL);
+  char *key_file = g_build_filename(db_dir, "cert", "client.key", NULL);
 
   // If they don't exist, try to create them
   if(!db_gen_cert(cert_file, key_file)) {
@@ -1265,10 +1270,7 @@ static void db_load_cert() {
 #endif // TLS_SUPPORT
 
 
-
-char db_cid[24];
-char db_pid[24];
-
+// Generates a PID/CID pair and stores it in the database.
 static void generate_pid() {
   guint64 r = rand_64();
 
@@ -1293,10 +1295,78 @@ static void generate_pid() {
 }
 
 
+// Checks or creates the initial session directory, including subdirectories
+// and the version/lock file. Returns the database version. (major<<8 + minor)
+static int db_dir_init() {
+  // Get location of the session directory. It may already have been set in main.c
+  if(!db_dir && (db_dir = g_getenv("NCDC_DIR")))
+    db_dir = g_strdup(db_dir);
+  if(!db_dir)
+    db_dir = g_build_filename(g_get_home_dir(), ".ncdc", NULL);
+
+  // try to create it (ignoring errors if it already exists)
+  g_mkdir(db_dir, 0700);
+  if(g_access(db_dir, F_OK | R_OK | X_OK | W_OK) < 0)
+    g_error("Directory '%s' does not exist or is not writable.", db_dir);
+
+  // Make sure it's an absolute path (yes, after mkdir'ing it, realpath() may
+  // return an error if it doesn't exist). Just stick with the relative path if
+  // realpath() fails, it's not critical anyway.
+  char *real = realpath(db_dir, NULL);
+  if(real) {
+    g_free((char *)db_dir);
+    db_dir = g_strdup(real);
+    free(real);
+  }
+
+  // make sure some subdirectories exist and are writable
+#define cdir(d) do {\
+    char *tmp = g_build_filename(db_dir, d, NULL);\
+    g_mkdir(tmp, 0777);\
+    if(g_access(db_dir, F_OK | R_OK | X_OK | W_OK) < 0)\
+      g_error("Directory '%s' does not exist or is not writable.", tmp);\
+    g_free(tmp);\
+  } while(0)
+  cdir("logs");
+  cdir("inc");
+  cdir("fl");
+  cdir("dl");
+  cdir("cert");
+#undef cdir
+
+  // make sure that there is no other ncdc instance working with the same config directory
+  char *ver_file = g_build_filename(db_dir, "version", NULL);
+  int ver_fd = g_open(ver_file, O_RDWR|O_CREAT, 0600);
+  struct flock lck;
+  lck.l_type = F_WRLCK;
+  lck.l_whence = SEEK_SET;
+  lck.l_start = 0;
+  lck.l_len = 0;
+  if(ver_fd < 0 || fcntl(ver_fd, F_SETLK, &lck) == -1)
+    g_error("Unable to open lock file. Is another instance of ncdc running with the same configuration directory?");
+
+  // check data directory version
+  // version = major, minor
+  //   minor = forward & backward compatible, major only backward.
+  char dir_ver[2] = {1, 0};
+  if(read(ver_fd, dir_ver, 2) < 2)
+    if(write(ver_fd, dir_ver, 2) < 2)
+      g_error("Could not write to '%s': %s", ver_file, g_strerror(errno));
+  g_free(ver_file);
+  // Don't close the above file. Keep it open and let the OS close it (and free
+  // the lock) when ncdc is closed, was killed or has crashed.
+  if(dir_ver[0] > 1)
+    g_error("Incompatible data directory. Please upgrade ncdc or use a different directory.");
+
+  return (((int)dir_ver[0])<<8) + (int)dir_ver[1];
+}
+
+
 void db_init() {
-  char *dbfn = g_build_filename(conf_dir, "db.sqlite3", NULL);
+  db_dir_init();
 
   // TODO: should look at the version file instead. This check is simply for debugging purposes.
+  char *dbfn = g_build_filename(db_dir, "db.sqlite3", NULL);
   gboolean newdb = !g_file_test(dbfn, G_FILE_TEST_EXISTS);
   if(newdb)
     g_error("No db.sqlite3 file present yet. Please run ncdc-db-upgrade.");

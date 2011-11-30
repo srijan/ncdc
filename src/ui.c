@@ -122,7 +122,7 @@ static struct ui_tab *ui_main_create() {
   ui_m(ui_main, 0,
     "Check out the manual page for a general introduction to ncdc.\n"
     "Make sure you always run the latest version available from http://dev.yorhel.nl/ncdc\n");
-  ui_mf(ui_main, 0, "Using working directory: %s", conf_dir);
+  ui_mf(ui_main, 0, "Using working directory: %s", db_dir);
 
   return ui_main;
 }
@@ -1262,7 +1262,7 @@ void ui_fl_queue(guint64 uid, gboolean force, const char *sel, struct ui_tab *pa
 
   // check for cached file list, otherwise queue it
   char *tmp = g_strdup_printf("%016"G_GINT64_MODIFIER"x.xml.bz2", uid);
-  char *fn = g_build_filename(conf_dir, "fl", tmp, NULL);
+  char *fn = g_build_filename(db_dir, "fl", tmp, NULL);
   g_free(tmp);
 
   gboolean e = !force;
@@ -1336,7 +1336,7 @@ struct ui_tab *ui_fl_create(guint64 uid, const char *sel) {
       ui_fl_setdir(tab, fl, NULL);
   } else {
     char *tmp = g_strdup_printf("%016"G_GINT64_MODIFIER"x.xml.bz2", uid);
-    char *fn = g_build_filename(conf_dir, "fl", tmp, NULL);
+    char *fn = g_build_filename(db_dir, "fl", tmp, NULL);
     fl_load_async(fn, ui_fl_loaddone, tab);
     g_free(tmp);
     g_free(fn);

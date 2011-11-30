@@ -351,7 +351,7 @@ static gboolean auto_open = TRUE;
 static GOptionEntry cli_options[] = {
   { "version", 'v', G_OPTION_FLAG_NO_ARG, G_OPTION_ARG_CALLBACK, print_version,
       "Print version and compilation information.", NULL },
-  { "session-dir", 'c', 0, G_OPTION_ARG_FILENAME, &conf_dir,
+  { "session-dir", 'c', 0, G_OPTION_ARG_FILENAME, &db_dir,
       "Use a different session directory. Default: `$NCDC_DIR' or `$HOME/.ncdc'.", "<dir>" },
   { "no-autoconnect", 'n', G_OPTION_FLAG_REVERSE, G_OPTION_ARG_NONE, &auto_open,
       "Don't automatically connect to hubs with the `autoconnect' option set.", NULL },
@@ -391,13 +391,12 @@ int main(int argc, char **argv) {
   have_tls_support = FALSE;
 #endif
 
-  conf_init();
   db_init();
   hub_init_global();
   net_init_global();
 
   // setup logging
-  char *errlog = g_build_filename(conf_dir, "stderr.log", NULL);
+  char *errlog = g_build_filename(db_dir, "stderr.log", NULL);
   if(!freopen(errlog, "w", stderr)) {
     fprintf(stderr, "ERROR: Couldn't open %s for writing: %s\n", errlog, strerror(errno));
     exit(1);

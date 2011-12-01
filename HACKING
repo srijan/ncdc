@@ -22,7 +22,7 @@ file is emptied every time ncdc starts up, so be sure to either make backups or
 check the contents of the log file before this happens!
 
 Messages starting with C<CRITICAL> almost always indicate a bug. If you find
-one, please report it! Messages with starting with C<WARNING> can happen both
+one, please report it! Messages starting with C<WARNING> can happen both
 because something unexpected happened or because of a bug. If you see such a
 message along the lines of "assertion failure" or "line should not be reached",
 then this always indicates a bug.
@@ -131,7 +131,9 @@ The following is an attempt at a simple valgrind suppression file, save this to
 a file and add the C<--suppressions=$file> argument to the valgrind command in
 order to use it. These suppressions don't cover everything, but will
 significantly reduce the amount of problems reported. Hopefully they aren't so
-general that they might masquerade actual bugs.
+general that they might masquerade actual bugs. Note that these suppressions
+may require that your glib library has also been compiled with debugging
+symbols.
 
   {
     init keeps memory around

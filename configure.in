@@ -29,7 +29,7 @@ AM_CONDITIONAL([USE_MH], [test "x$have_mh" = "xyes"])
 
 # Check for header files.
 AC_CHECK_HEADERS(
-  [wchar.h locale.h signal.h fcntl.h bzlib.h gdbm.h sys/types.h sys/stat.h],[],
+  [wchar.h locale.h signal.h fcntl.h bzlib.h sys/types.h sys/stat.h],[],
   AC_MSG_ERROR([Required header file not found]))
 
 have_nch=no
@@ -123,10 +123,13 @@ AC_CHECK_LIB([bz2],
              [AC_MSG_ERROR(bzip2 library is required)])
 
 # Check for gdbm
+have_gdbm=no
 AC_CHECK_LIB([gdbm],
              [gdbm_open],
-             [AC_SUBST([GDBM_LIBS],[-lgdbm])],
-             [AC_MSG_ERROR(gdbm library is required)])
+             [AC_CHECK_HEADERS([gdbm.h], [have_gdbm=yes])])
+test "x$have_gdbm" = "xyes" && AC_SUBST([GDBM_LIBS],[-lgdbm])
+AM_CONDITIONAL([HAVE_GDBM], [test "x$have_gdbm" = "xyes"])
+
 
 # Check for SQLite3
 PKG_CHECK_EXISTS([sqlite3],[
@@ -184,13 +187,20 @@ if test "x$have_mh" = "xno"; then
 fi
 
 
-# Information about TLS support
+# Information about TLS or GDBM support
 echo ""
+if test "x$have_gdbm" = "xyes"; then
+  echo "GDBM support: enabled."
+else
+  echo "GDBM support: disabled."
+  echo "  The ncdc-db-upgrade utility will not be built."
+fi
+
 if test "x$have_tls" = "xyes"; then
-  echo "TLS support: enabled."
+  echo "TLS support : enabled."
   echo "  Install glib-networking to make use of it."
 else
-  echo "TLS support: disabled (too old glib version)."
+  echo "TLS support : disabled (too old glib version)."
 fi
 echo ""
 

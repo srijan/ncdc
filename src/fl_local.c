@@ -908,12 +908,15 @@ void fl_unshare(const char *dir) {
   if(dir) {
     struct fl_list *fl = fl_list_file(fl_local_list, dir);
     g_return_if_fail(fl);
+    fl_hash_queue_delrec(fl);
     fl_refresh_delhash(fl);
     fl_list_remove(fl);
   } else if(fl_local_list) {
+    fl_hash_queue_delrec(fl_local_list);
     fl_refresh_delhash(fl_local_list);
     fl_list_free(fl_local_list);
-    fl_local_list = NULL;
+    fl_local_list = fl_list_create("", FALSE);
+    fl_local_list->sub = g_ptr_array_new_with_free_func(fl_list_free);
   }
   // force a refresh, people may be in a hurry with removing stuff
   fl_needflush = TRUE;

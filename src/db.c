@@ -566,7 +566,7 @@ char *db_fl_gettthl(const char *root, int *len) {
   char *r = g_async_queue_pop(a);
   int n = 0;
   char *res = darray_get_int32(r) == SQLITE_ROW ? darray_get_dat(r, &n) : NULL;
-  res = n ? g_strdup(res) : NULL;
+  res = n ? g_memdup(res, n) : NULL;
   if(len)
     *len = n;
 

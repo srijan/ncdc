@@ -860,16 +860,17 @@ static gboolean parsesetting(char *name, guint64 *hub, char **key, struct settin
     ui_mf(NULL, 0, "No configuration variable with the name '%s'.", *key);
     return FALSE;
   }
-  if(group && strcmp(group, "global") != 0)
+  if(group && strcmp(group, "global") != 0) {
     *hub = db_vars_hubid(group);
-  if(group && strcmp(group, "global") != 0 && (!getdoc(*s)->hub || !*hub)) {
-    ui_m(NULL, 0, "Wrong configuration group.");
-    return FALSE;
+    if(!getdoc(*s)->hub || !*hub) {
+      ui_m(NULL, 0, "Wrong configuration group.");
+      return FALSE;
+    }
   }
 
   if(!group) {
     struct ui_tab *tab = ui_tab_cur->data;
-    if(tab->type == UIT_HUB) {
+    if(getdoc(*s)->hub && tab->type == UIT_HUB) {
       *checkalt = TRUE;
       *hub = tab->hub->id;
     }

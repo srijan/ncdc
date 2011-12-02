@@ -1442,6 +1442,12 @@ void db_init() {
   if(ver>>8 > 2)
     g_error("Incompatible database version. You may want to upgrade ncdc.");
 
+  // load client certificate
+#if TLS_SUPPORT
+  if(have_tls_support)
+    db_load_cert();
+#endif
+
   // start database thread
   db_queue = g_async_queue_new();
   db_thread = g_thread_create(db_thread_func, g_build_filename(db_dir, "db.sqlite3", NULL), TRUE, NULL);
@@ -1460,12 +1466,6 @@ void db_init() {
     db_vars_set(0, "nick", nick);
     g_free(nick);
   }
-
-  // load client certificate
-#if TLS_SUPPORT
-  if(have_tls_support)
-    db_load_cert();
-#endif
 
   // load fadv_enabled
   g_atomic_int_set(&fadv_enabled, conf_get_bool(0, "flush_file_cache"));

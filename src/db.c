@@ -1376,22 +1376,23 @@ static void db_init_schema() {
 
   // New database? Initialize schema.
   if(ver == 0) {
+    db_queue_lock();
     // TODO: These queries don't have to get into the prepared statement cache
-    db_queue_push(DBF_NEXT, "PRAGMA user_version = 1", DBQ_END);
-    db_queue_push(DBF_NEXT,
+    db_queue_push_unlocked(DBF_NEXT, "PRAGMA user_version = 1", DBQ_END);
+    db_queue_push_unlocked(DBF_NEXT,
       "CREATE TABLE hashdata ("
       "  root TEXT NOT NULL PRIMARY KEY,"
       "  size INTEGER NOT NULL,"
       "  tthl BLOB NOT NULL"
       ")", DBQ_END);
-    db_queue_push(DBF_NEXT,
+    db_queue_push_unlocked(DBF_NEXT,
       "CREATE TABLE hashfiles ("
       "  id INTEGER PRIMARY KEY,"
       "  filename TEXT NOT NULL UNIQUE,"
       "  tth TEXT NOT NULL,"
       "  lastmod INTEGER NOT NULL"
       ")", DBQ_END);
-    db_queue_push(DBF_NEXT,
+    db_queue_push_unlocked(DBF_NEXT,
       "CREATE TABLE dl ("
       "  tth TEXT NOT NULL PRIMARY KEY,"
       "  size INTEGER NOT NULL,"
@@ -1401,7 +1402,7 @@ static void db_init_schema() {
       "  error_msg TEXT,"
       "  tthl BLOB"
       ")", DBQ_END);
-    db_queue_push(DBF_NEXT,
+    db_queue_push_unlocked(DBF_NEXT,
       "CREATE TABLE dl_users ("
       "  tth TEXT NOT NULL,"
       "  uid INTEGER NOT NULL,"
@@ -1409,20 +1410,21 @@ static void db_init_schema() {
       "  error_msg TEXT,"
       "  PRIMARY KEY(tth, uid)"
       ")", DBQ_END);
-    db_queue_push(DBF_NEXT,
+    db_queue_push_unlocked(DBF_NEXT,
       "CREATE TABLE share ("
       "  name TEXT NOT NULL PRIMARY KEY,"
       "  path TEXT NOT NULL"
       ")", DBQ_END);
     // Get a result from the last one, to make sure the above queries were successful.
     GAsyncQueue *a = g_async_queue_new_full(g_free);
-    db_queue_push(DBF_LAST,
+    db_queue_push_unlocked(DBF_LAST,
       "CREATE TABLE vars ("
       "  name TEXT NOT NULL,"
       "  hub INTEGER NOT NULL DEFAULT 0,"
       "  value TEXT NOT NULL,"
       "  PRIMARY KEY(name, hub)"
       ")", DBQ_RES, a, DBQ_END);
+    db_queue_unlock();
     char *r = g_async_queue_pop(a);
     if(darray_get_int32(r) != SQLITE_DONE)
       g_error("Error creating database schema.");

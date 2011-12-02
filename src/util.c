@@ -214,15 +214,50 @@ char *str_fullsize(guint64 size) {
 }
 
 
-// case-insensitive substring match
+
+// UTF-8 aware case-insensitive string comparison.
+// This should be somewhat equivalent to
+//   strcmp(g_utf8_casefold(a), g_utf8_casefold(b)),
+// but hopefully faster by avoiding the memory allocations.
+// Note that g_utf8_collate() is not suitable for case-insensitive filename
+// comparison. For example, g_utf8_collate('a', 'A') != 0.
+int str_casecmp(const char *a, const char *b) {
+  int d;
+  while(*a && *b) {
+    d = g_unichar_tolower(g_utf8_get_char(a)) - g_unichar_tolower(g_utf8_get_char(b));
+    if(d)
+      return d;
+    a = g_utf8_next_char(a);
+    b = g_utf8_next_char(b);
+  }
+  return *a ? 1 : *b ? -1 : 0;
+}
+
+
+// UTF-8 aware case-insensitive substring match.
+// This should be somewhat equivalent to
+//   strstr(g_utf8_casefold(haystack), g_utf8_casefold(needle))
 char *str_casestr(const char *haystack, const char *needle) {
-  gsize hlen = strlen(haystack);
-  gsize nlen = strlen(needle);
+  gsize hlen = g_utf8_strlen(haystack, -1);
+  gsize nlen = g_utf8_strlen(needle, -1);
+  int d, l;
+  const char *a, *b;
 
   while(hlen-- >= nlen) {
-    if(!g_strncasecmp(haystack, needle, nlen))
-      return (char*)haystack;
-    haystack++;
+    a = haystack;
+    b = needle;
+    l = nlen;
+    d = 0;
+    while(l-- > 0 && *b) {
+      d = g_unichar_tolower(g_utf8_get_char(a)) - g_unichar_tolower(g_utf8_get_char(b));
+      if(d)
+        break;
+      a = g_utf8_next_char(a);
+      b = g_utf8_next_char(b);
+    }
+    if(!d)
+      return (char *)haystack;
+    haystack = g_utf8_next_char(haystack);
   }
   return NULL;
 }

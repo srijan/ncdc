@@ -109,29 +109,11 @@ struct fl_list *fl_list_create(const char *name, gboolean local) {
 }
 
 
-// This should be somewhat equivalent to
-//   strcmp(g_utf8_casefold(a), g_utf8_casefold(b)),
-// but hopefully faster by avoiding the memory allocations.
-// Note that g_utf8_collate() is not suitable for case-insensitive filename
-// comparison. For example, g_utf8_collate('a', 'A') != 0.
-int fl_list_cmp_name(const char *a, const char *b) {
-  int d;
-  while(*a && *b) {
-    d = g_unichar_tolower(g_utf8_get_char(a)) - g_unichar_tolower(g_utf8_get_char(b));
-    if(d)
-      return d;
-    a = g_utf8_next_char(a);
-    b = g_utf8_next_char(b);
-  }
-  return *a ? 1 : *b ? -1 : 0;
-}
-
-
 // Used for sorting and determining whether two files in the same directory are
 // equivalent (that is, have the same name). File names are case-insensitive,
 // as required by the ADC protocol.
 gint fl_list_cmp_strict(gconstpointer a, gconstpointer b) {
-  return fl_list_cmp_name(((struct fl_list *)a)->name, ((struct fl_list *)b)->name);
+  return str_casecmp(((struct fl_list *)a)->name, ((struct fl_list *)b)->name);
 }
 
 // A more lenient comparison function, equivalent to fl_list_cmp_strict() in
@@ -140,7 +122,7 @@ gint fl_list_cmp_strict(gconstpointer a, gconstpointer b) {
 gint fl_list_cmp(gconstpointer a, gconstpointer b) {
   const struct fl_list *la = a;
   const struct fl_list *lb = b;
-  gint r = fl_list_cmp_name(la->name, lb->name);
+  gint r = str_casecmp(la->name, lb->name);
   if(!r)
     r = strcmp(la->name, lb->name);
   return r;

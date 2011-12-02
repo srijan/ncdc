@@ -1111,7 +1111,7 @@ char **db_vars_hubs() {
 
 #define conf_exists(h, n) (db_vars_get(h, n) ? TRUE : FALSE)
 
-#define conf_autorefresh() (!conf_exists(0, "autorefresh") ? 60 : conf_get_int(0, "autorefresh"))
+#define conf_autorefresh() (!conf_exists(0, "autorefresh") ? 3600 : conf_get_int(0, "autorefresh"))
 
 #define conf_download_dir() (\
   !conf_exists(0, "download_dir") ? g_build_filename(db_dir, "dl", NULL)\

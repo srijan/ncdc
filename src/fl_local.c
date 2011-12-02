@@ -944,7 +944,7 @@ static void fl_init_list(struct fl_list *fl) {
 static gboolean fl_init_autorefresh(gpointer dat) {
   int r = conf_autorefresh();
   time_t t = time(NULL);
-  if(r && fl_refresh_last+(r*60) < t)
+  if(r && fl_refresh_last+r < t)
     fl_refresh(NULL);
   return TRUE;
 }

@@ -946,7 +946,7 @@ static void logfile_checkfile(struct logfile *l) {
 
   // if the log hadn't been opened or has been closed earlier, try to open it again
   if(l->file < 0)
-    l->file = open(l->path, O_WRONLY|O_APPEND|O_CREAT);
+    l->file = open(l->path, O_WRONLY|O_APPEND|O_CREAT, 0666);
   if(l->file < 0)
     g_warning("Unable to open log file '%s' for writing: %s", l->path, g_strerror(errno));
 

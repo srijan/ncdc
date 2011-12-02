@@ -668,8 +668,12 @@ void hub_send_nfo(struct hub *hub) {
         g_string_append_printf(cmd, " U4%d", port);
       else
         g_string_append(cmd, " U4");
-    } if(f || !eq(share))
-      g_string_append_printf(cmd, " SS%"G_GUINT64_FORMAT, share);
+    }
+    // Separating the SS and SF fields isn't very important. It is relatively
+    // safe to assume that if SS changes (which we look at), then SF will most
+    // likely have changed as well. And vice versa.
+    if(f || !eq(share))
+      g_string_append_printf(cmd, " SS%"G_GUINT64_FORMAT" SF%d", share, fl_local_list_length);
     if(f || !eq(slots))
       g_string_append_printf(cmd, " SL%d", slots);
     if(f || !eq(h_norm))

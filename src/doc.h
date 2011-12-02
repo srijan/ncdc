@@ -251,15 +251,13 @@ static const struct doc_set {
   "IP address to bind to in active mode. When unset, ncdc will bind to all"
   " interfaces."
 },
-{ "active_ip", 0, "<string>",
+{ "active_ip", 1, "<string>",
   "Your public IP address for use in active mode. It is important that other"
   " clients can reach you using this IP address. If you connect to a hub on the"
   " internet, this should be your internet (WAN) IP. Likewise, if you connect"
   " to a hub on your LAN, this should be your LAN IP.\n\n"
-  "Note that this setting is global for ncdc: it is currently not possible to"
-  " use a single instance of ncdc to connect to both internet and LAN hubs, if"
-  " you are not reachable on the same IP with both networks. In that case you can"
-  " either use passive mode or run two separate instances of ncdc."
+  "Unlike the other connection-related settings, this can be changed on a"
+  " per-hub basis, allowing you to have a different public IP address per hub."
 },
 { "active_port", 0, "<integer>",
   "The listen port for incoming connections in active mode. Set to `0' to"

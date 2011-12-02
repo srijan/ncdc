@@ -1508,7 +1508,6 @@ void cc_free(struct cc *cc) {
 
 GSocketListener *cc_listen = NULL;     // TCP and TLS listen object. NULL if we aren't active.
 GSocket         *cc_listen_udp = NULL; // UDP listen socket.
-char            *cc_listen_ip = NULL;  // human-readable string. This is the remote IP, not the one we bind to.
 guint16          cc_listen_port = 0;   // Port used for both UDP and TCP
 
 static GCancellable *cc_listen_tcp_can = NULL;
@@ -1518,8 +1517,6 @@ static int cc_listen_udp_src = 0;
 static void cc_listen_stop() {
   if(!cc_listen)
     return;
-  g_free(cc_listen_ip);
-  cc_listen_ip = NULL;
 
   g_cancellable_cancel(cc_listen_tcp_can);
   g_object_unref(cc_listen_tcp_can);
@@ -1749,12 +1746,11 @@ gboolean cc_listen_start() {
   cc_listen = tcp;
   cc_listen_udp = udp;
   cc_listen_port = port;
-  cc_listen_ip = g_strdup(db_vars_get(0, "active_ip"));
 
   if(db_certificate)
-    ui_mf(ui_main, 0, "Listening on TCP+UDP port %d and TCP port %d, remote IP is %s.", cc_listen_port, cc_listen_port+1, cc_listen_ip);
+    ui_mf(ui_main, 0, "Listening on TCP+UDP port %d and TCP port %d, remote IP is %s.", cc_listen_port, cc_listen_port+1, db_vars_get(0, "active_ip"));
   else
-    ui_mf(ui_main, 0, "Listening on TCP+UDP port %d, remote IP is %s.", cc_listen_port, cc_listen_ip);
+    ui_mf(ui_main, 0, "Listening on TCP+UDP port %d, remote IP is %s.", cc_listen_port, db_vars_get(0, "active_ip"));
   hub_global_nfochange();
   return TRUE;
 }

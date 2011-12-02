@@ -516,7 +516,7 @@ void hub_opencc(struct hub *hub, struct hub_user *u) {
       net_send(hub->net, c->str);
       g_string_free(c, TRUE);
     } else
-      net_sendf(hub->net, "$ConnectToMe %s %s:%d%s", u->name_hub, cc_listen_ip, port, cantls ? "S" : "");
+      net_sendf(hub->net, "$ConnectToMe %s %s:%d%s", u->name_hub, conf_hub_get(hub->id, "active_ip"), port, cantls ? "S" : "");
 
   // we're passive, send RCM
   } else {
@@ -566,7 +566,7 @@ void hub_search(struct hub *hub, struct search_q *q) {
   // NMDC
   } else {
     char *dest = cc_listen
-      ? g_strdup_printf("%s:%d", cc_listen_ip, cc_listen_port)
+      ? g_strdup_printf("%s:%d", conf_hub_get(hub->id, "active_ip"), cc_listen_port)
       : g_strdup_printf("Hub:%s", hub->nick_hub);
     if(q->type == 9) {
       char tth[40] = {};
@@ -628,7 +628,7 @@ void hub_send_nfo(struct hub *hub) {
       h_norm++;
   }
   slots = conf_slots();
-  ip4 = cc_listen ? ip4_pack(cc_listen_ip) : 0;
+  ip4 = cc_listen ? ip4_pack(conf_hub_get(hub->id, "active_ip")) : 0;
   port = cc_listen ? cc_listen_port : 0;
   share = fl_local_list_size;
   sup_tls = conf_tls_policy(hub->id) == CONF_TLSP_DISABLE ? FALSE : TRUE;
@@ -1468,7 +1468,7 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
       // wants to use TLS or not, so the decision is with us. Let's require
       // tls_policy to be PREFER here.
       int usetls = u->hastls && conf_tls_policy(hub->id) == CONF_TLSP_PREFER;
-      net_sendf(hub->net, "$ConnectToMe %s %s:%d%s", other, cc_listen_ip,
+      net_sendf(hub->net, "$ConnectToMe %s %s:%d%s", other, conf_hub_get(hub->id, "active_ip"),
         usetls ? cc_listen_port+1 : cc_listen_port, usetls ? "S" : "");
       cc_expect_add(hub, u, NULL, FALSE);
     } else
@@ -1488,7 +1488,7 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
     char *query = g_match_info_fetch(nfo, 6);
     char test[40] = {};
     if(cc_listen)
-      g_snprintf(test, 40, "%s:%d", cc_listen_ip, cc_listen_port);
+      g_snprintf(test, 40, "%s:%d", conf_hub_get(hub->id, "active_ip"), cc_listen_port);
     if(strncmp(from, "Hub:", 4) == 0 ? strcmp(from+4, hub->nick_hub) != 0 : strcmp(from, test) != 0)
       nmdc_search(hub, from, sizerestrict[0] == 'F' ? -2 : ismax[0] == 'T' ? -1 : 1, g_ascii_strtoull(size, NULL, 10), type[0]-'0', query);
     g_free(from);

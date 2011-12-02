@@ -220,7 +220,7 @@ static void set_active(guint64 hub, char *key, char *val) {
     db_vars_rm(0, key);
     ui_mf(NULL, 0, "global.%s reset.", key);
   } else if(bool_var(val) && !conf_exists(0, "active_ip")) {
-    ui_m(NULL, 0, "ERROR: No IP address set. Please use `/set active_ip <your_ip>' first.");
+    ui_m(NULL, 0, "ERROR: No IP address set. Please use `/set active_ip <your_ip>' first (on a non-hub tab).");
     return;
   }
   set_bool_f(0, key, val);
@@ -230,9 +230,12 @@ static void set_active(guint64 hub, char *key, char *val) {
 
 static void set_active_ip(guint64 hub, char *key, char *val) {
   if(!val) {
-    db_vars_rm(0, key);
-    ui_mf(NULL, 0, "global.%s reset.", key);
-    set_active(hub, key, NULL);
+    db_vars_rm(hub, key);
+    ui_mf(NULL, 0, "%s.%s reset.", hubname(hub), key);
+    if(!hub)
+      set_active(0, "active", NULL);
+    else
+      hub_global_nfochange();
     return;
   }
   // TODO: IPv6?
@@ -243,7 +246,10 @@ static void set_active_ip(guint64 hub, char *key, char *val) {
   }
   db_vars_set(hub, key, val);
   get_string(hub, key);
-  cc_listen_start();
+  if(!hub)
+    cc_listen_start();
+  else
+    hub_global_nfochange();
 }
 
 

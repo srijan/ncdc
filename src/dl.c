@@ -128,7 +128,10 @@ struct dl {
 
 // Minimum filesize for which we request TTHL data. If a file is smaller than
 // this, the TTHL data would simply add more overhead than it is worth.
-#define DL_MINTTHLSIZE (512*1024)
+#define DL_MINTTHLSIZE (2048*1024)
+// Minimum TTHL block size we're interested in. If we get better granularity
+// than this, blocks will be combined to reduce the TTHL data.
+#define DL_MINBLOCKSIZE (1024*1024)
 
 // Download queue.
 // Key = dl->hash, Value = struct dl
@@ -1055,9 +1058,8 @@ gboolean dl_received(guint64 uid, char *tth, char *buf, int length) {
 }
 
 
-// Called when we've received TTHL data. For now we'll just store it in the
-// database without modifications.
-// TODO: combine hashes to remove uneeded granularity? (512kB is probably enough)
+// Called when we've received TTHL data. The *tthl data may be modified
+// in-place.
 void dl_settthl(guint64 uid, char *tth, char *tthl, int len) {
   struct dl *dl = g_hash_table_lookup(dl_queue, tth);
   struct dl_user *du = g_hash_table_lookup(queue_users, &uid);
@@ -1081,9 +1083,24 @@ void dl_settthl(guint64 uid, char *tth, char *tthl, int len) {
     return;
   }
 
-  db_dl_settthl(tth, tthl, len);
+  // If the blocksize is smaller than MINBLOCKSIZE, combine blocks.
+  guint64 bs = tth_blocksize(dl->size, len/24);
+  unsigned int cl = 1; // number of blocks to combine into a single block
+  while(bs < DL_MINBLOCKSIZE) {
+    bs <<= 2;
+    cl <<= 2;
+  }
+  int newlen = tth_num_blocks(dl->size, bs)*24;
+  int i;
+  // Shrink the TTHL data in-place.
+  for(i=0; cl>1 && i<newlen/24; i++)
+    tth_root(tthl+(i*cl*24), MIN(cl, (len/24)-(i*cl)), tthl+(i*24));
+  if(len != newlen)
+    g_debug("dl:%016"G_GINT64_MODIFIER"x: Shrunk TTHL data for %s (len = %d, bs = %"G_GUINT64_FORMAT")", uid, dl->dest, newlen, bs);
+
+  db_dl_settthl(tth, tthl, newlen);
   dl->hastthl = TRUE;
-  dl->hash_block = tth_blocksize(dl->size, len/24);
+  dl->hash_block = bs;
 }
 
 

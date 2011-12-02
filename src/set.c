@@ -567,6 +567,7 @@ static void set_backlog(guint64 hub, char *key, char *val) {
     return;
   }
 
+  errno = 0;
   long v = strtol(val, NULL, 10);
   if((!v && errno == EINVAL) || v < INT_MIN || v > INT_MAX || v < 0)
     ui_m(NULL, 0, "Invalid number.");

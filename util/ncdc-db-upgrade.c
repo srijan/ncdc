@@ -231,8 +231,8 @@ static void u20_loadfiles_handle(xmlTextReaderPtr reader, char **root, char **pa
 
   switch(xmlTextReaderNodeType(reader)) {
   case XML_READER_TYPE_ELEMENT:
-    // <Directory ..>
-    if(strcmp(name, "Directory") == 0) {
+    // <Directory ..> (ignore self-closing directory tags, they're not relevant)
+    if(strcmp(name, "Directory") == 0 && !xmlTextReaderIsEmptyElement(reader)) {
       if(!(tmp = (char *)xmlTextReaderGetAttribute(reader, (xmlChar *)"Name")))
         u20_revert("<Directory> element found without `Name' attribute.");
       if(!*root) {

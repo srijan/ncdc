@@ -237,6 +237,9 @@ int str_casecmp(const char *a, const char *b) {
 // UTF-8 aware case-insensitive substring match.
 // This should be somewhat equivalent to
 //   strstr(g_utf8_casefold(haystack), g_utf8_casefold(needle))
+// If the same needle is used to match against many haystacks, it will be far
+// more efficient to use regular expressions instead. Those tend to be around 4
+// times faster.
 char *str_casestr(const char *haystack, const char *needle) {
   gsize hlen = g_utf8_strlen(haystack, -1);
   gsize nlen = g_utf8_strlen(needle, -1);

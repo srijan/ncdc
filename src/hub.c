@@ -807,8 +807,12 @@ static void adc_sch(struct hub *hub, struct adc_cmd *cmd) {
   s.sizem = eq ? 0 : le ? -1 : ge ? 1 : -2;
   s.size = s.sizem == -2 ? 0 : g_ascii_strtoull(eq ? eq : le ? le : ge, NULL, 10);
   s.filedir = !ty ? 3 : ty[0] == '1' ? 1 : 2;
-  s.and = adc_getparams(cmd->argv, "AN");
-  s.not = adc_getparams(cmd->argv, "NO");
+  char **tmp = adc_getparams(cmd->argv, "AN");
+  s.and = fl_search_create_and(tmp);
+  g_free(tmp);
+  tmp = adc_getparams(cmd->argv, "NO");
+  s.not = fl_search_create_not(tmp);
+  g_free(tmp);
   s.ext = adc_getparams(cmd->argv, "EX");
 
   int i = 0;
@@ -876,8 +880,9 @@ static void adc_sch(struct hub *hub, struct adc_cmd *cmd) {
   g_free(dest);
 
 adc_search_cleanup:
-  g_free(s.and);
-  g_free(s.not);
+  fl_search_free_and(s.and);
+  if(s.not)
+    g_regex_unref(s.not);
   g_free(s.ext);
 }
 
@@ -1178,10 +1183,12 @@ static void nmdc_search(struct hub *hub, char *from, int size_m, guint64 size, i
       if(*tmp == '$')
         *tmp = ' ';
     tmp = nmdc_unescape_and_decode(hub, query);
-    s.and = g_strsplit(tmp, " ", 0);
+    char **args = g_strsplit(tmp, " ", 0);
     g_free(tmp);
+    s.and = fl_search_create_and(args);
+    g_strfreev(args);
     i = fl_search_rec(fl_local_list, &s, res, max);
-    g_strfreev(s.and);
+    fl_search_free_and(s.and);
   }
 
   // reply

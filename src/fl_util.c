@@ -323,8 +323,8 @@ struct fl_search {
   char filedir; // 1 = file, 2 = dir, 3 = any
   guint64 size;
   char **ext;   // extension list
-  char **and;   // keywords that must all be present
-  char **not;   // keywords that may not be present
+  GRegex **and; // keywords that must all be present {/\Qstring\E/i, .., NULL}
+  GRegex *not;  // keywords that may not be present /\Qstring1\E|\Qstring2\E|../i
 };
 
 
@@ -338,19 +338,73 @@ struct fl_search {
 #endif
 
 
+// Create fl_search.and from a NULL-terminated string array.
+// Free with fl_search_free_and().
+GRegex **fl_search_create_and(char **a) {
+  if(!a || !*a)
+    return NULL;
+  int len = g_strv_length(a);
+  GRegex **res = g_new(GRegex *, len+1);
+  int i;
+  for(i=0; *a; a++) {
+    char *tmp = g_regex_escape_string(*a, -1);
+    res[i++] = g_regex_new(tmp, G_REGEX_CASELESS|G_REGEX_OPTIMIZE, 0, NULL);
+    g_free(tmp);
+  }
+  res[i] = NULL;
+  return res;
+}
+
+
+// Create a fl_search.not regex from a NULL-terminated string array.
+// Free with g_regex_unref().
+GRegex *fl_search_create_not(char **a) {
+  if(!a || !*a)
+    return NULL;
+  GString *reg = g_string_new("(?:");
+  int first = 0;
+  for(; *a; a++) {
+    if(first++)
+      g_string_append_c(reg, '|');
+    char *tmp = g_regex_escape_string(*a, -1);
+    g_string_append(reg, tmp);
+    g_free(tmp);
+  }
+  g_string_append_c(reg, ')');
+  GRegex *res = g_regex_new(reg->str, G_REGEX_CASELESS|G_REGEX_OPTIMIZE, 0, NULL);
+  g_string_free(reg, TRUE);
+  return res;
+}
+
+
+void fl_search_free_and(GRegex **l) {
+  GRegex **i = l;
+  for(; i&&*i; i++)
+    g_regex_unref(*i);
+  g_free(l);
+}
+
+
+static int fl_search_and_len(GRegex **l) {
+  int i = 0;
+  for(; l&&*l; l++)
+    i++;
+  return i;
+}
+
+
 // Only matches against fl->name itself, not the path to it (AND keywords
 // matched in the path are assumed to be removed already)
 gboolean fl_search_match_name(struct fl_list *fl, struct fl_search *s) {
+  GRegex **tmpr;
+  for(tmpr=s->and; tmpr&&*tmpr; tmpr++)
+    if(G_LIKELY(!g_regex_match(*tmpr, fl->name, 0, NULL)))
+      return FALSE;
+
+  if(s->not && g_regex_match(s->not, fl->name, 0, NULL))
+    return FALSE;
+
   char **tmp;
-
-  for(tmp=s->and; tmp&&*tmp; tmp++)
-    if(G_LIKELY(!str_casestr(fl->name, *tmp)))
-      return FALSE;
-
-  for(tmp=s->not; tmp&&*tmp; tmp++)
-    if(str_casestr(fl->name, *tmp))
-      return FALSE;
-
   tmp = s->ext;
   if(!tmp || !*tmp)
     return TRUE;
@@ -373,11 +427,11 @@ int fl_search_rec(struct fl_list *parent, struct fl_search *s, struct fl_list **
     return 0;
   // weed out stuff from 'and' if it's already matched in parent (I'm assuming
   // that stuff matching the parent of parent has already been removed)
-  char **o = s->and;
-  char *nand[o ? g_strv_length(o) : 0];
+  GRegex **o = s->and;
+  GRegex *nand[fl_search_and_len(o)];
   int i = 0;
   for(; o&&*o; o++)
-    if(G_LIKELY(!parent->parent || !str_casestr(parent->name, *o)))
+    if(G_LIKELY(!parent->parent || !g_regex_match(*o, parent->name, 0, NULL)))
       nand[i++] = *o;
   nand[i] = NULL;
   o = s->and;
@@ -399,17 +453,17 @@ int fl_search_rec(struct fl_list *parent, struct fl_search *s, struct fl_list **
 // Similar to fl_search_match(), but also matches the name of the parents.
 gboolean fl_search_match_full(struct fl_list *fl, struct fl_search *s) {
   // weed out stuff from 'and' if it's already matched in any of its parents.
-  char **oand = s->and;
-  int len = s->and ? g_strv_length(s->and) : 0;
-  char *nand[len];
+  GRegex **oand = s->and;
+  int len = fl_search_and_len(s->and);
+  GRegex *nand[len];
   struct fl_list *p = fl->parent;
   int i;
-  memcpy(nand, s->and, len*sizeof(char *));
+  memcpy(nand, s->and, len*sizeof(GRegex *));
   for(; p && p->parent; p=p->parent)
     for(i=0; i<len; i++)
-      if(G_UNLIKELY(nand[i] && str_casestr(p->name, nand[i])))
+      if(G_UNLIKELY(nand[i] && g_regex_match(nand[i], p->name, 0, NULL)))
         nand[i] = NULL;
-  char *and[len];
+  GRegex *and[len];
   int j=0;
   for(i=0; i<len; i++)
     if(nand[i])

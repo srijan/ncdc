@@ -51,7 +51,11 @@ TMP=`mktemp /tmp/ncdc.XXXXX`
 
 
 # gnutls / certtool
-if which certtool >/dev/null 2>&1; then
+# Explicitely check that `certtool -v` contains GnuTLS. Mac OS X also has a
+# 'certtool' utility, which in no way looks like the one that comes with
+# GnuTLS.
+which certtool >/dev/null 2>&1
+if [ "$?" -eq 0 -a `certtool -v 2>&1 | grep -c GnuTLS` -ne 0 ]; then
   echo "
 expiration_days = $DAYS
 cn=Unknown

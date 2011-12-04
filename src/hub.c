@@ -1116,7 +1116,6 @@ static void adc_handle(struct hub *hub, char *msg) {
       g_warning("Invalid message from %s: %s", net_remoteaddr(hub->net), msg);
     else {
       g_free(hub->gpa_salt);
-      hub->gpa_salt = NULL;
       hub->state = ADC_S_VERIFY;
       hub->gpa_salt_len = (strlen(cmd.argv[0])*5)/8;
       hub->gpa_salt = g_new(char, hub->gpa_salt_len);

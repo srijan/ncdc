@@ -723,7 +723,7 @@ void base32_decode(const char *from, char *to) {
   while(*from) {
     value = (value << 5) | (*from <= '9' ? (26+(*from-'2')) : *from-'A');
     bits += 5;
-    while(bits > 8) {
+    while(bits >= 8) {
       to[idx++] = (value >> (bits-8)) & 0xFF;
       bits -= 8;
     }

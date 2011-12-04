@@ -85,7 +85,7 @@ static GHashTable *db_stmt_cache = NULL;
 // Query flags
 #define DBF_NEXT    1 // Current query must be in the same transaction as next query in the queue.
 #define DBF_LAST    2 // Current query must be the last in a transaction (forces a flush)
-#define DBF_SINGLE  4 // Query must not be executed in a transaction (e.g. SELECT, VACUUM)
+#define DBF_SINGLE  4 // Query must not be executed in a transaction (e.g. VACUUM)
 #define DBF_END   128 // Signal the database thread to close
 
 // Column types
@@ -99,6 +99,24 @@ static GHashTable *db_stmt_cache = NULL;
 #define DBQ_LASTID 7 // To indicate that the query wants the last inserted row id as result
 
 
+// How long to keep a transaction active before flushing. In microseconds.
+#define DB_FLUSH_TIMEOUT (5000000)
+
+
+// Give back a final response and unref the queue.
+static void db_queue_item_final(GAsyncQueue *res, int code, gint64 lastid) {
+  if(!res)
+    return;
+  GByteArray *r = g_byte_array_new();
+  darray_init(r);
+  darray_add_int32(r, code);
+  if(code == SQLITE_DONE)
+    darray_add_int64(r, lastid);
+  g_async_queue_push(res, g_byte_array_free(r, FALSE));
+  g_async_queue_unref(res);
+}
+
+
 // Give back an error result and decrement the reference counter of the
 // response queue. Assumes the `flags' has already been read.
 static void db_queue_item_error(char *q) {
@@ -107,14 +125,8 @@ static void db_queue_item_error(char *q) {
   int t;
   while((t = darray_get_int32(q)) != DBQ_END && t != DBQ_RES)
     ;
-  if(t == DBQ_RES) {
-    GByteArray *r = g_byte_array_new();
-    darray_init(r);
-    darray_add_int32(r, SQLITE_ERROR);
-    GAsyncQueue *a = darray_get_ptr(q);
-    g_async_queue_push(a, g_byte_array_free(r, FALSE));
-    g_async_queue_unref(a);
-  }
+  if(t == DBQ_RES)
+    db_queue_item_final(darray_get_ptr(q), SQLITE_ERROR, 0);
 }
 
 
@@ -126,7 +138,7 @@ static void db_queue_item_error(char *q) {
 // Note: db_stmt_cache is assumed to be used only for the given *db pointer.
 // Important: DON'T run sqlite3_finalize() on queries returned by this
 // function! Use sqlite3_reset() instead.
-static int db_stmt_prepare(sqlite3 *db, const char *query, sqlite3_stmt **s) {
+static int db_queue_process_prepare(sqlite3 *db, const char *query, sqlite3_stmt **s) {
   *s = g_hash_table_lookup(db_stmt_cache, query);
   if(*s)
     return SQLITE_OK;
@@ -140,24 +152,24 @@ static int db_stmt_prepare(sqlite3 *db, const char *query, sqlite3_stmt **s) {
 // Executes a single query.
 // If transaction = TRUE, the query is assumed to be executed in a transaction
 //   (which has already been initiated)
-// If commit = TRUE, the current transaction will be committed. This allows for
-//   returning error responses if the queries themself execute fine, but the
-//   final COMMIT doesn't.
-// If this function returns FALSE, the query has failed and the transaction (if
-//   any) will have been rolled back. The query in question is given an error
-//   response.
+// The return path (if any) and lastid (0 if not requested) are stored in *res
+// and *lastid. The caller of this function is responsible for sending back the
+// final response. If this function returns anything other than SQLITE_DONE,
+// the query has failed.
 // It is assumed that the first `flags' part of the queue item has already been
 // fetched.
-static gboolean db_queue_process_one(sqlite3 *db, char *q, gboolean transaction, gboolean commit) {
+static int db_queue_process_one(sqlite3 *db, char *q, gboolean transaction, GAsyncQueue **res, gint64 *lastid) {
   char *query = darray_get_ptr(q);
+  *res = NULL;
+  *lastid = 0;
 
   // Would be nice to have the parameters logged
-  g_debug("db: Executing \"%s\" (%s transaction)", query, transaction ? "inside" : "outside");
+  g_debug("db: Executing \"%s\"", query);
 
   // Get statement handler
   int r = SQLITE_ROW;
   sqlite3_stmt *s;
-  if(db_stmt_prepare(db, query, &s)) {
+  if(db_queue_process_prepare(db, query, &s)) {
     g_critical("SQLite3 error preparing `%s': %s", query, sqlite3_errmsg(db));
     r = SQLITE_ERROR;
   }
@@ -191,13 +203,11 @@ static gboolean db_queue_process_one(sqlite3 *db, char *q, gboolean transaction,
   }
 
   // Fetch information about what results we need to send back
-  GAsyncQueue *res = NULL;
   gboolean wantlastid = FALSE;
   char columns[20]; // 20 should be enough for everyone
-  gint64 lastid = 0;
   n = 0;
   if(t == DBQ_RES) {
-    res = darray_get_ptr(q);
+    *res = darray_get_ptr(q);
     while((t = darray_get_int32(q)) != DBQ_END) {
       if(t == DBQ_LASTID)
         wantlastid = TRUE;
@@ -217,7 +227,7 @@ static gboolean db_queue_process_one(sqlite3 *db, char *q, gboolean transaction,
     if(r != SQLITE_DONE && r != SQLITE_ROW)
       g_critical("SQLite3 error on step() of `%s': %s", query, sqlite3_errmsg(db));
     // continue with the next step() if we're not going to do anything with the results
-    if(r != SQLITE_ROW || !res || !n)
+    if(r != SQLITE_ROW || !*res || !n)
       continue;
     // send back a response
     GByteArray *rc = g_byte_array_new();
@@ -232,158 +242,163 @@ static gboolean db_queue_process_one(sqlite3 *db, char *q, gboolean transaction,
       default: g_warn_if_reached();
       }
     }
-    g_async_queue_push(res, g_byte_array_free(rc, FALSE));
+    g_async_queue_push(*res, g_byte_array_free(rc, FALSE));
   }
 
   // Fetch last id, if requested
   if(r == SQLITE_DONE && wantlastid)
-    lastid = sqlite3_last_insert_rowid(db);
+    *lastid = sqlite3_last_insert_rowid(db);
   sqlite3_reset(s);
 
-  // Commit, if requested
-  if(r == SQLITE_DONE && commit) {
-    if(db_stmt_prepare(db, "COMMIT", &s))
-      r = SQLITE_ERROR;
-    else
-      while((r = sqlite3_step(s)) == SQLITE_BUSY)
-        ;
-    if(r != SQLITE_DONE)
-      g_critical("SQLite3 error committing transaction: %s", sqlite3_errmsg(db));
-    sqlite3_reset(s);
-  }
-
-  // Rollback, if we're in a transaction and the query/commit failed
-  if(r != SQLITE_DONE && transaction) {
-    char *err = NULL;
-    if(sqlite3_exec(db, "ROLLBACK", NULL, NULL, &err) && err)
-      sqlite3_free(err);
-  }
-
-  // send back final result and unref
-  if(res) {
-    GByteArray *rc = g_byte_array_new();
-    darray_init(rc);
-    darray_add_int32(rc, r);
-    if(wantlastid && r == SQLITE_DONE)
-      darray_add_int64(rc, lastid);
-    g_async_queue_push(res, g_byte_array_free(rc, FALSE));
-    g_async_queue_unref(res);
-  }
-
-  return r == SQLITE_DONE ? TRUE : FALSE;
+  return r;
 }
 
 
-static void db_queue_process_flush(sqlite3 *db, GPtrArray *q) {
-  if(q->len < 1)
-    return;
-
-  // Bypass the transactions if there's only a single query.
-  if(q->len == 1) {
-    db_queue_process_one(db, g_ptr_array_index(q, 0), FALSE, FALSE);
-    g_ptr_array_set_size(q, 0);
-    return;
-  }
-
-  // start transaction
-  char *err = NULL;
-  if(sqlite3_exec(db, "BEGIN", NULL, NULL, &err)) {
-    g_critical("SQLite3 error starting transaction: %s", err?err:sqlite3_errmsg(db));
-    g_ptr_array_set_size(q, 0);
-    if(err)
-      sqlite3_free(err);
-    return;
-  }
-
-  // execute queries
-  int i;
-  for(i=0; i<q->len; i++)
-    if(!db_queue_process_one(db, g_ptr_array_index(q, i), TRUE, i == q->len-1 ? TRUE : FALSE))
-      break;
-  for(; i<q->len; i++)
-    db_queue_item_error(g_ptr_array_index(q, i));
-  g_ptr_array_set_size(q, 0);
+static int db_queue_process_commit(sqlite3 *db) {
+  g_debug("db: COMMIT");
+  int r;
+  sqlite3_stmt *s;
+  if(db_queue_process_prepare(db, "COMMIT", &s))
+    r = SQLITE_ERROR;
+  else
+    while((r = sqlite3_step(s)) == SQLITE_BUSY)
+      ;
+  if(r != SQLITE_DONE)
+    g_critical("SQLite3 error committing transaction: %s", sqlite3_errmsg(db));
+  sqlite3_reset(s);
+  return r;
 }
+
+
+static int db_queue_process_begin(sqlite3 *db) {
+  g_debug("db: BEGIN");
+  int r;
+  sqlite3_stmt *s;
+  if(db_queue_process_prepare(db, "BEGIN", &s))
+    r = SQLITE_ERROR;
+  else
+    r = sqlite3_step(s);
+  if(r != SQLITE_DONE)
+    g_critical("SQLite3 error starting transaction: %s", sqlite3_errmsg(db));
+  sqlite3_reset(s);
+  return r;
+}
+
+
+#define db_queue_process_rollback(db) do {\
+    char *rollback_err = NULL;\
+    g_debug("db: ROLLBACK");\
+    if(sqlite3_exec(db, "ROLLBACK", NULL, NULL, &rollback_err) && rollback_err) {\
+      g_debug("SQLite3 error rolling back transaction: %s", rollback_err);\
+      sqlite3_free(rollback_err);\
+    }\
+  } while(0)
 
 
 static void db_queue_process(sqlite3 *db) {
-  GTimeVal queue_end = {}; // tv_sec = 0 if nothing is queued
-  GTimeVal cur_time;
-  GPtrArray *queue = g_ptr_array_new_with_free_func(g_free);
-  gboolean next = FALSE;
+  GTimeVal trans_end = {}; // tv_sec = 0 if no transaction is active
+  gboolean donext = FALSE;
+  gboolean errtrans = FALSE;
+
+  GAsyncQueue *res;
+  gint64 lastid;
+  int r;
 
   while(1) {
-    char *q =     next ? g_async_queue_try_pop(db_queue) :
-      queue_end.tv_sec ? g_async_queue_timed_pop(db_queue, &queue_end) :
+    char *q =   donext ? g_async_queue_try_pop(db_queue) :
+      trans_end.tv_sec ? g_async_queue_timed_pop(db_queue, &trans_end) :
                          g_async_queue_pop(db_queue);
 
-    // Shouldn't happen if items are correctly added to the queue.
-    if(next && !q) {
-      g_warn_if_reached();
-      next = FALSE;
-      continue;
-    }
-    next = FALSE;
+    int flags = q ? darray_get_int32(q) : 0;
 
-    // We had something queued and the timeout has elapsed
-    if(queue_end.tv_sec && !q) {
-      g_debug("db: Flushing after timeout");
-      db_queue_process_flush(db, queue);
-      queue_end.tv_sec = 0;
-      continue;
+    // Commit state if we need to
+    if(!q || flags & DBF_SINGLE || flags & DBF_END) {
+      g_warn_if_fail(!donext);
+      if(trans_end.tv_sec)
+        db_queue_process_commit(db);
+      trans_end.tv_sec = 0;
+      donext = errtrans = FALSE;
     }
 
-    // "handle" the item
-    int flags = darray_get_int32(q);
+    // If this was a timeout, wait for next query
+    if(!q)
+      continue;
 
-    // signal that the database should be closed
-    if(flags == DBF_END) {
-      g_debug("db: Flushing and closing");
-      db_queue_process_flush(db, queue);
+    // if this is an END, quit.
+    if(flags & DBF_END) {
+      g_debug("db: Shutting down.");
       g_free(q);
       break;
     }
 
-    // query must be done outside of a transaction (e.g. SELECT, VACUUM)
+    // handle SINGLE
     if(flags & DBF_SINGLE) {
-      if(queue->len) {
-        g_debug("db: Flushing to process SINGLE query.");
-        db_queue_process_flush(db, queue);
-        queue_end.tv_sec = 0;
-      }
-      db_queue_process_one(db, q, FALSE, FALSE);
+      r = db_queue_process_one(db, q, FALSE, &res, &lastid);
+      db_queue_item_final(res, r, lastid);
       g_free(q);
       continue;
     }
 
-    // Add item to the queue
-    g_ptr_array_add(queue, q);
-
-    // If the item has to be performed in the same transaction as the next one, fetch next
-    if(flags & DBF_NEXT) {
-      next = TRUE;
+    // report error to NEXT-chained queries if the transaction has been aborted.
+    if(errtrans) {
+      g_warn_if_fail(donext);
+      db_queue_item_error(q);
+      donext = flags & DBF_NEXT ? TRUE : FALSE;
+      if(!donext) {
+        errtrans = FALSE;
+        trans_end.tv_sec = 0;
+      }
+      g_free(q);
       continue;
     }
 
-    // If we're here and no queue has started yet, start one
-    g_get_current_time(&cur_time);
-    if(!queue_end.tv_sec) {
-      queue_end = cur_time;
-      g_time_val_add(&queue_end, 1000000); // queue queries for 1 second
+    // handle LAST queries
+    if(flags & DBF_LAST) {
+      r = db_queue_process_one(db, q, trans_end.tv_sec?TRUE:FALSE, &res, &lastid);
+      // Commit first, then send back the final result
+      if(trans_end.tv_sec) {
+        if(r == SQLITE_DONE)
+          r = db_queue_process_commit(db);
+        if(r != SQLITE_DONE)
+          db_queue_process_rollback(db);
+      }
+      trans_end.tv_sec = 0;
+      donext = FALSE;
+      db_queue_item_final(res, r, lastid);
+      g_free(q);
+      continue;
     }
 
-    // - If DBF_LAST is set, flush it
-    // - If the queue has somehow grown beyond 50 items, flush it.
-    // - If the time for receiving the queue has elapsed, flush it.
-    if(flags & DBF_LAST || queue->len > 50 || (cur_time.tv_sec > queue_end.tv_sec
-        || (cur_time.tv_sec == queue_end.tv_sec && cur_time.tv_usec > queue_end.tv_usec))){
-      g_debug("db: Flushing after LAST, timeout or long queue");
-      db_queue_process_flush(db, queue);
-      queue_end.tv_sec = 0;
+    // start a new transaction for normal/NEXT queries
+    if(!trans_end.tv_sec) {
+      g_get_current_time(&trans_end);
+      g_time_val_add(&trans_end, DB_FLUSH_TIMEOUT);
+      r = db_queue_process_begin(db);
+      if(r != SQLITE_DONE) {
+        if(flags & DBF_NEXT)
+          donext = errtrans = TRUE;
+        else
+          trans_end.tv_sec = 0;
+        db_queue_item_error(q);
+        g_free(q);
+        continue;
+      }
+    }
+
+    // handle normal/NEXT queries
+    r = db_queue_process_one(db, q, TRUE, &res, &lastid);
+    db_queue_item_final(res, r, lastid);
+    g_free(q);
+
+    // Rollback and update state on error
+    if(r != SQLITE_DONE) {
+      db_queue_process_rollback(db);
+      if(flags & DBF_NEXT)
+        errtrans = TRUE;
+      else
+        trans_end.tv_sec = 0;
     }
   }
-
-  g_ptr_array_unref(queue);
 }
 
 
@@ -532,7 +547,7 @@ gint64 db_fl_addhash(const char *path, guint64 size, time_t lastmod, const char 
   // the same realpath() (e.g. one is a symlink). In such a case it is safe to
   // just do a REPLACE.
   GAsyncQueue *a = g_async_queue_new_full(g_free);
-  db_queue_push_unlocked(DBF_LAST,
+  db_queue_push_unlocked(0,
     "INSERT OR REPLACE INTO hashfiles (tth, lastmod, filename) VALUES(?, ?, ?)",
     DBQ_TEXT, hash,
     DBQ_INT64, (gint64)lastmod,
@@ -557,7 +572,7 @@ char *db_fl_gettthl(const char *root, int *len) {
   base32_encode(root, hash);
 
   GAsyncQueue *a = g_async_queue_new_full(g_free);
-  db_queue_push(DBF_SINGLE, "SELECT COALESCE(tthl, '') FROM hashdata WHERE root = ?",
+  db_queue_push(0, "SELECT COALESCE(tthl, '') FROM hashdata WHERE root = ?",
     DBQ_TEXT, hash,
     DBQ_RES, a, DBQ_BLOB,
     DBQ_END
@@ -579,7 +594,7 @@ char *db_fl_gettthl(const char *root, int *len) {
 // Get information for a file. Returns 0 if not found or error.
 gint64 db_fl_getfile(const char *path, time_t *lastmod, guint64 *size, char *tth) {
   GAsyncQueue *a = g_async_queue_new_full(g_free);
-  db_queue_push(DBF_SINGLE,
+  db_queue_push(0,
     "SELECT f.id, f.lastmod, f.tth, d.size FROM hashfiles f JOIN hashdata d ON d.root = f.tth WHERE f.filename = ?",
     DBQ_TEXT, path,
     DBQ_RES, a, DBQ_INT64, DBQ_INT64, DBQ_TEXT, DBQ_INT64,
@@ -618,7 +633,7 @@ void db_fl_getids(void (*callback)(gint64)) {
   // This query is fast: `id' is the SQLite rowid, and has an index that is
   // already ordered.
   GAsyncQueue *a = g_async_queue_new_full(g_free);
-  db_queue_push(DBF_SINGLE, "SELECT id FROM hashfiles ORDER BY id ASC",
+  db_queue_push(0, "SELECT id FROM hashfiles ORDER BY id ASC",
     DBQ_RES, a, DBQ_INT64,
     DBQ_END
   );
@@ -655,7 +670,7 @@ void db_dl_getdls(
   void (*callback)(const char *tth, guint64 size, const char *dest, char prio, char error, const char *error_msg, int tthllen)
 ) {
   GAsyncQueue *a = g_async_queue_new_full(g_free);
-  db_queue_push(DBF_SINGLE, "SELECT tth, size, dest, priority, error, COALESCE(error_msg, ''), length(tthl) FROM dl",
+  db_queue_push(0, "SELECT tth, size, dest, priority, error, COALESCE(error_msg, ''), length(tthl) FROM dl",
     DBQ_RES, a, DBQ_TEXT, DBQ_INT64, DBQ_TEXT, DBQ_INT, DBQ_INT, DBQ_TEXT, DBQ_INT,
     DBQ_END
   );
@@ -682,7 +697,7 @@ void db_dl_getdls(
 // callback for each row.
 void db_dl_getdlus(void (*callback)(const char *tth, guint64 uid, char error, const char *error_msg)) {
   GAsyncQueue *a = g_async_queue_new_full(g_free);
-  db_queue_push(DBF_SINGLE, "SELECT tth, uid, error, COALESCE(error_msg, '') FROM dl_users",
+  db_queue_push(0, "SELECT tth, uid, error, COALESCE(error_msg, '') FROM dl_users",
     DBQ_RES, a, DBQ_TEXT, DBQ_INT64, DBQ_INT, DBQ_TEXT,
     DBQ_END
   );
@@ -823,7 +838,7 @@ gboolean db_dl_checkhash(const char *root, int num, const char *hash) {
   char rhash[40] = {};
   base32_encode(root, rhash);
   GAsyncQueue *a = g_async_queue_new_full(g_free);
-  db_queue_push(DBF_SINGLE, "SELECT 1 FROM dl WHERE tth = ? AND substr(tthl, 1+(24*?), 24) = ?",
+  db_queue_push(0, "SELECT 1 FROM dl WHERE tth = ? AND substr(tthl, 1+(24*?), 24) = ?",
     DBQ_TEXT, rhash,
     DBQ_INT, num,
     DBQ_BLOB, 24, hash,
@@ -866,7 +881,7 @@ struct db_share_item *db_share_list() {
   // Otherwise, create the cache
   db_share_cache = g_array_new(TRUE, FALSE, sizeof(struct db_share_item));
   GAsyncQueue *a = g_async_queue_new_full(g_free);
-  db_queue_push(DBF_SINGLE, "SELECT name, path FROM share ORDER BY name",
+  db_queue_push(0, "SELECT name, path FROM share ORDER BY name",
     DBQ_RES, a, DBQ_TEXT, DBQ_TEXT,
     DBQ_END
   );
@@ -994,7 +1009,7 @@ static void db_vars_cacheget() {
 
   db_vars_cache = g_hash_table_new_full(db_vars_cachehash, db_vars_cacheeq, NULL, db_vars_cachefree);
   GAsyncQueue *a = g_async_queue_new_full(g_free);
-  db_queue_push(DBF_SINGLE, "SELECT name, hub, value FROM vars",
+  db_queue_push(0, "SELECT name, hub, value FROM vars",
     DBQ_RES, a, DBQ_TEXT, DBQ_INT64, DBQ_TEXT,
     DBQ_END
   );

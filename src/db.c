@@ -86,6 +86,7 @@ static GHashTable *db_stmt_cache = NULL;
 #define DBF_NEXT    1 // Current query must be in the same transaction as next query in the queue.
 #define DBF_LAST    2 // Current query must be the last in a transaction (forces a flush)
 #define DBF_SINGLE  4 // Query must not be executed in a transaction (e.g. VACUUM)
+#define DBF_NOCACHE 8 // Don't cache this query in the prepared statement cache
 #define DBF_END   128 // Signal the database thread to close
 
 // Column types
@@ -158,7 +159,7 @@ static int db_queue_process_prepare(sqlite3 *db, const char *query, sqlite3_stmt
 // the query has failed.
 // It is assumed that the first `flags' part of the queue item has already been
 // fetched.
-static int db_queue_process_one(sqlite3 *db, char *q, gboolean transaction, GAsyncQueue **res, gint64 *lastid) {
+static int db_queue_process_one(sqlite3 *db, char *q, gboolean nocache, gboolean transaction, GAsyncQueue **res, gint64 *lastid) {
   char *query = darray_get_ptr(q);
   *res = NULL;
   *lastid = 0;
@@ -169,7 +170,7 @@ static int db_queue_process_one(sqlite3 *db, char *q, gboolean transaction, GAsy
   // Get statement handler
   int r = SQLITE_ROW;
   sqlite3_stmt *s;
-  if(db_queue_process_prepare(db, query, &s)) {
+  if(nocache ? sqlite3_prepare_v2(db, query, -1, &s, NULL) : db_queue_process_prepare(db, query, &s)) {
     g_critical("SQLite3 error preparing `%s': %s", query, sqlite3_errmsg(db));
     r = SQLITE_ERROR;
   }
@@ -249,6 +250,8 @@ static int db_queue_process_one(sqlite3 *db, char *q, gboolean transaction, GAsy
   if(r == SQLITE_DONE && wantlastid)
     *lastid = sqlite3_last_insert_rowid(db);
   sqlite3_reset(s);
+  if(nocache)
+    sqlite3_finalize(s);
 
   return r;
 }
@@ -310,6 +313,7 @@ static void db_queue_process(sqlite3 *db) {
                          g_async_queue_pop(db_queue);
 
     int flags = q ? darray_get_int32(q) : 0;
+    gboolean nocache = flags & DBF_NOCACHE ? TRUE : FALSE;
 
     // Commit state if we need to
     if(!q || flags & DBF_SINGLE || flags & DBF_END) {
@@ -333,7 +337,7 @@ static void db_queue_process(sqlite3 *db) {
 
     // handle SINGLE
     if(flags & DBF_SINGLE) {
-      r = db_queue_process_one(db, q, FALSE, &res, &lastid);
+      r = db_queue_process_one(db, q, nocache, FALSE, &res, &lastid);
       db_queue_item_final(res, r, lastid);
       g_free(q);
       continue;
@@ -354,7 +358,7 @@ static void db_queue_process(sqlite3 *db) {
 
     // handle LAST queries
     if(flags & DBF_LAST) {
-      r = db_queue_process_one(db, q, trans_end.tv_sec?TRUE:FALSE, &res, &lastid);
+      r = db_queue_process_one(db, q, nocache, trans_end.tv_sec?TRUE:FALSE, &res, &lastid);
       // Commit first, then send back the final result
       if(trans_end.tv_sec) {
         if(r == SQLITE_DONE)
@@ -386,7 +390,7 @@ static void db_queue_process(sqlite3 *db) {
     }
 
     // handle normal/NEXT queries
-    r = db_queue_process_one(db, q, TRUE, &res, &lastid);
+    r = db_queue_process_one(db, q, nocache, TRUE, &res, &lastid);
     db_queue_item_final(res, r, lastid);
     g_free(q);
 
@@ -670,7 +674,7 @@ void db_dl_getdls(
   void (*callback)(const char *tth, guint64 size, const char *dest, char prio, char error, const char *error_msg, int tthllen)
 ) {
   GAsyncQueue *a = g_async_queue_new_full(g_free);
-  db_queue_push(0, "SELECT tth, size, dest, priority, error, COALESCE(error_msg, ''), length(tthl) FROM dl",
+  db_queue_push(DBF_NOCACHE, "SELECT tth, size, dest, priority, error, COALESCE(error_msg, ''), length(tthl) FROM dl",
     DBQ_RES, a, DBQ_TEXT, DBQ_INT64, DBQ_TEXT, DBQ_INT, DBQ_INT, DBQ_TEXT, DBQ_INT,
     DBQ_END
   );
@@ -697,7 +701,7 @@ void db_dl_getdls(
 // callback for each row.
 void db_dl_getdlus(void (*callback)(const char *tth, guint64 uid, char error, const char *error_msg)) {
   GAsyncQueue *a = g_async_queue_new_full(g_free);
-  db_queue_push(0, "SELECT tth, uid, error, COALESCE(error_msg, '') FROM dl_users",
+  db_queue_push(DBF_NOCACHE, "SELECT tth, uid, error, COALESCE(error_msg, '') FROM dl_users",
     DBQ_RES, a, DBQ_TEXT, DBQ_INT64, DBQ_INT, DBQ_TEXT,
     DBQ_END
   );
@@ -881,7 +885,7 @@ struct db_share_item *db_share_list() {
   // Otherwise, create the cache
   db_share_cache = g_array_new(TRUE, FALSE, sizeof(struct db_share_item));
   GAsyncQueue *a = g_async_queue_new_full(g_free);
-  db_queue_push(0, "SELECT name, path FROM share ORDER BY name",
+  db_queue_push(DBF_NOCACHE, "SELECT name, path FROM share ORDER BY name",
     DBQ_RES, a, DBQ_TEXT, DBQ_TEXT,
     DBQ_END
   );
@@ -1009,7 +1013,7 @@ static void db_vars_cacheget() {
 
   db_vars_cache = g_hash_table_new_full(db_vars_cachehash, db_vars_cacheeq, NULL, db_vars_cachefree);
   GAsyncQueue *a = g_async_queue_new_full(g_free);
-  db_queue_push(0, "SELECT name, hub, value FROM vars",
+  db_queue_push(DBF_NOCACHE, "SELECT name, hub, value FROM vars",
     DBQ_RES, a, DBQ_TEXT, DBQ_INT64, DBQ_TEXT,
     DBQ_END
   );
@@ -1378,7 +1382,7 @@ static int db_dir_init() {
 static void db_init_schema() {
   // Get user_version
   GAsyncQueue *a = g_async_queue_new_full(g_free);
-  db_queue_push(DBF_SINGLE, "PRAGMA user_version", DBQ_RES, a, DBQ_INT, DBQ_END);
+  db_queue_push(DBF_SINGLE|DBF_NOCACHE, "PRAGMA user_version", DBQ_RES, a, DBQ_INT, DBQ_END);
 
   char *r = g_async_queue_pop(a);
   int ver;
@@ -1392,22 +1396,21 @@ static void db_init_schema() {
   // New database? Initialize schema.
   if(ver == 0) {
     db_queue_lock();
-    // TODO: These queries don't have to get into the prepared statement cache
-    db_queue_push_unlocked(DBF_NEXT, "PRAGMA user_version = 1", DBQ_END);
-    db_queue_push_unlocked(DBF_NEXT,
+    db_queue_push_unlocked(DBF_NEXT|DBF_NOCACHE, "PRAGMA user_version = 1", DBQ_END);
+    db_queue_push_unlocked(DBF_NEXT|DBF_NOCACHE,
       "CREATE TABLE hashdata ("
       "  root TEXT NOT NULL PRIMARY KEY,"
       "  size INTEGER NOT NULL,"
       "  tthl BLOB NOT NULL"
       ")", DBQ_END);
-    db_queue_push_unlocked(DBF_NEXT,
+    db_queue_push_unlocked(DBF_NEXT|DBF_NOCACHE,
       "CREATE TABLE hashfiles ("
       "  id INTEGER PRIMARY KEY,"
       "  filename TEXT NOT NULL UNIQUE,"
       "  tth TEXT NOT NULL,"
       "  lastmod INTEGER NOT NULL"
       ")", DBQ_END);
-    db_queue_push_unlocked(DBF_NEXT,
+    db_queue_push_unlocked(DBF_NEXT|DBF_NOCACHE,
       "CREATE TABLE dl ("
       "  tth TEXT NOT NULL PRIMARY KEY,"
       "  size INTEGER NOT NULL,"
@@ -1417,7 +1420,7 @@ static void db_init_schema() {
       "  error_msg TEXT,"
       "  tthl BLOB"
       ")", DBQ_END);
-    db_queue_push_unlocked(DBF_NEXT,
+    db_queue_push_unlocked(DBF_NEXT|DBF_NOCACHE,
       "CREATE TABLE dl_users ("
       "  tth TEXT NOT NULL,"
       "  uid INTEGER NOT NULL,"
@@ -1425,14 +1428,14 @@ static void db_init_schema() {
       "  error_msg TEXT,"
       "  PRIMARY KEY(tth, uid)"
       ")", DBQ_END);
-    db_queue_push_unlocked(DBF_NEXT,
+    db_queue_push_unlocked(DBF_NEXT|DBF_NOCACHE,
       "CREATE TABLE share ("
       "  name TEXT NOT NULL PRIMARY KEY,"
       "  path TEXT NOT NULL"
       ")", DBQ_END);
     // Get a result from the last one, to make sure the above queries were successful.
     GAsyncQueue *a = g_async_queue_new_full(g_free);
-    db_queue_push_unlocked(DBF_LAST,
+    db_queue_push_unlocked(DBF_LAST|DBF_NOCACHE,
       "CREATE TABLE vars ("
       "  name TEXT NOT NULL,"
       "  hub INTEGER NOT NULL DEFAULT 0,"
@@ -1494,5 +1497,5 @@ void db_init() {
 
 // Executes a VACUUM
 void db_vacuum() {
-  db_queue_push(DBF_SINGLE, "VACUUM", DBQ_END);
+  db_queue_push(DBF_SINGLE|DBF_NOCACHE, "VACUUM", DBQ_END);
 }

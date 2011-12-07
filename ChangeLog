@@ -1,3 +1,25 @@
+1.6 - 2011-12-07
+	- Use SQLite3 for storage instead of GDBM
+	- Converted config.ini to SQLite3 database
+	- Added ncdc-db-upgrade utility
+	- Session directory is architecture-independent
+	- All data is safe against crashes and power failures
+	- Added support for removing/adding directories without rehashing
+	- Always match every file list on 'Q' key on TTH search
+	- Immediately flush log entries to the kernel
+	- Faster start-up
+	- Added support for per-hub 'active_ip' settings
+	- Allow interval notation when setting autorefresh
+	- Broadcast SF (number of shared files) on ADC hubs
+	- Combine TTH data for downloaded files to blocks of at least 1MiB
+	- Increased hash buffer size (10KiB -> 512KiB)
+	- Fix case-insensitivity of search results
+	- Fix reporting of user state in pm tabs at hub disconnect
+	- Fix generation of client certificates with openssl
+	- Fix segfault with duplicate users on an ADC hub
+	- Fix segfault when opening of a filelist fails
+	- Fix base32 decoding bug (fixes login sequence on some ADC hubs)
+
 1.5 - 2011-11-03
 	- Added filelist_maxage setting
 	- Added flush_file_cache setting

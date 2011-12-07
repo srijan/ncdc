@@ -1,4 +1,4 @@
-.TH ncdc 1 "November 2011" "@version@"
+.TH ncdc 1 "December 2011" "@version@"
 .SH NAME
 ncdc \- Ncurses Direct Connect Client
 
@@ -185,4 +185,4 @@ Web:
 http://dev.yorhel.nl/ncdc
 
 .SH SEE ALSO
-ncdc-gen-cert(1).
+ncdc-gen-cert(1), ncdc-db-upgrade(1).

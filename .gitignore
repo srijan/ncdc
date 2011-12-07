@@ -19,7 +19,6 @@ stamp-h1
 !src/doc.h
 src/ncdc
 doc/gendoc
-doc/ncdc.1
-doc/ncdc-gen-cert.1
+doc/*.1
 util/ncdc-db-upgrade
 INSTALL

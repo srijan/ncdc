@@ -378,7 +378,9 @@ int main(int argc, char **argv) {
   }
   g_option_context_free(optx);
 
-  // TODO: check that the current locale is UTF-8. Things aren't going to work otherwise
+  // check that the current locale is UTF-8. Things aren't going to work otherwise
+  if(!g_get_charset(NULL))
+    g_error("Please set your locale to UTF-8.");
 
   // init stuff
   g_thread_init(NULL);

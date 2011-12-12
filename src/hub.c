@@ -1285,11 +1285,11 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
       // some hubs send our $Hello twice (like verlihub)
       // just ignore the second one
       if(!hub->nick_valid) {
+        hub->nick_valid = TRUE;
         ui_m(hub->tab, 0, "Nick validated.");
         net_send(hub->net, "$Version 1,0091");
         hub_send_nfo(hub);
         net_send(hub->net, "$GetNickList");
-        hub->nick_valid = TRUE;
         // Most hubs send the user list after our nick has been validated (in
         // contrast to ADC), but it doesn't hurt to call this function at this
         // point anyway.

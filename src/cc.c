@@ -1287,7 +1287,7 @@ static void nmdc_handle(struct cc *cc, char *cmd) {
       cc_disconnect(cc);
     } else {
       char *msg = g_match_info_fetch(nfo, 1);
-      g_set_error(&cc->err, 1, 0, msg);
+      g_set_error_literal(&cc->err, 1, 0, msg);
       // Handle "File Not Available" and ".. no more exists"
       if(str_casestr(msg, "file not available") || str_casestr(msg, "no more exists"))
         dl_queue_setuerr(cc->uid, cc->last_hash, DLE_NOFILE, NULL);

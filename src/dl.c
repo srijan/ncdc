@@ -1039,8 +1039,12 @@ gboolean dl_received(guint64 uid, char *tth, char *buf, int length) {
       // the download after an ncdc restart may result in a corrupted download
       // if the ftruncate() fails. Either way, resuming isn't possible in a
       // reliable fashion, so perhaps we should throw away the entire inc file?
-      lseek(dl->incfd, dl->have, SEEK_SET);
-      ftruncate(dl->incfd, dl->have);
+      off_t rs = lseek(dl->incfd, dl->have, SEEK_SET);
+      int rt = ftruncate(dl->incfd, dl->have);
+      if(rs == (off_t)-1 || rt == -1) {
+        g_warning("Error recovering from hash failure: %s", g_strerror(errno));
+        dl_queue_seterr(dl, DLE_IO_INC, g_strerror(errno));
+      }
       return FALSE;
     }
 

@@ -481,7 +481,7 @@ static void xfer_log_add(struct cc *cc) {
   else
     base32_encode(cc->last_hash, tth);
 
-  int transfer_size = cc->last_length - (cc->dl ? cc->net->recv_raw_left : net_file_left(cc->net));
+  int transfer_size = cc->last_length - (cc->dl ? net_recv_left(cc->net) : net_file_left(cc->net));
 
   char *nick = adc_escape(cc->nick, FALSE);
   char *file = adc_escape(cc->last_file, FALSE);
@@ -590,26 +590,27 @@ void cc_download(struct cc *cc, struct dl *dl) {
 }
 
 
-static void handle_recvfile(struct net *n, char *buf, int read, int left) {
+static gboolean handle_recvfile(struct net *n, char *buf, int read, int left, void *dat) {
   struct cc *cc = n->handle;
   if(!left)
     xfer_log_add(cc);
   if(!dl_received(cc->uid, cc->last_hash, buf, read) && left) {
     g_set_error_literal(&cc->err, 1, 0, "Download error.");
     cc_disconnect(cc);
-    return;
+    return FALSE;
   }
   // check for more stuff to download
   if(!left && n->conn) {
     cc->state = CCS_IDLE;
     dl_user_cc(cc->uid, cc);
   }
+  return TRUE;
 }
 
 
-static void handle_recvtth(struct net *n, char *buf, int read, int left) {
+static gboolean handle_recvtth(struct net *n, char *buf, int read, int left, void *dat) {
   struct cc *cc = n->handle;
-  g_return_if_fail(read + left <= cc->last_length);
+  g_return_val_if_fail(read + left <= cc->last_length, FALSE);
   memcpy(cc->tthl_dat+(cc->last_length-(left+read)), buf, read);
   if(!left) {
     dl_settthl(cc->uid, cc->last_hash, cc->tthl_dat, cc->last_length);
@@ -620,6 +621,7 @@ static void handle_recvtth(struct net *n, char *buf, int read, int left) {
       dl_user_cc(cc->uid, cc);
     }
   }
+  return TRUE;
 }
 
 
@@ -649,11 +651,11 @@ static void handle_adcsnd(struct cc *cc, gboolean tthl, guint64 start, gint64 by
     g_return_if_fail(dl->have == start);
     if(!dl->size)
       cc->last_size = dl->size = bytes;
-    net_recvraw(cc->net, bytes, handle_recvfile);
+    net_recvraw(cc->net, bytes, handle_recvfile, NULL, NULL);
   } else {
     g_return_if_fail(start == 0 && bytes > 0 && (bytes%24) == 0 && bytes < 48*1024);
     cc->tthl_dat = g_malloc(bytes);
-    net_recvraw(cc->net, bytes, handle_recvtth);
+    net_recvraw(cc->net, bytes, handle_recvtth, NULL, NULL);
   }
   time(&cc->last_start);
 }

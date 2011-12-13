@@ -962,7 +962,7 @@ static void ui_conn_draw_row(struct ui_listing *list, GSequenceIter *iter, int r
 
   mvaddstr(row, 33, cc->last_length ? str_formatsize(cc->last_length) : "-");
 
-  guint64 left = cc->dl ? cc->net->recv_raw_left : net_file_left(cc->net);
+  guint64 left = cc->dl ? net_recv_left(cc->net) : net_file_left(cc->net);
   if(cc->last_length && !cc->timeout_src)
     mvprintw(row, 45, "%3d%%", (int)(((cc->last_length-left)*100)/cc->last_length));
   else
@@ -1032,7 +1032,7 @@ static void ui_conn_draw_details(int l) {
   mvaddstr(l+5, 13, cc->last_size ? str_formatsize(cc->last_offset) : "-");
   mvaddstr(l+6, 13, cc->last_length ? str_formatsize(cc->last_length) : "-");
   // progress / eta / idle (line 4/5/6)
-  int left = cc->dl ? cc->net->recv_raw_left : net_file_left(cc->net);
+  int left = cc->dl ? net_recv_left(cc->net) : net_file_left(cc->net);
   if(cc->last_length && !cc->timeout_src)
     mvprintw(l+4, 47, "%3d%%", (int)(((cc->last_length-left)*100)/cc->last_length));
   else

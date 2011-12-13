@@ -78,8 +78,9 @@ struct net {
   GString *in_msg;
   void (*recv_msg_cb)(struct net *, char *);
   // Receiving raw data
-  int recv_raw_left;
-  void (*recv_raw_cb)(struct net *, char *, int, int);
+  int recv_left;
+  gboolean (*recv_raw_cb)(struct net *, char *, int, int, void *);
+  void *recv_raw_dat;
   // special hook that is called when data has arrived but before it is processed.
   void (*recv_datain)(struct net *, char *data, int len);
 
@@ -134,6 +135,7 @@ struct net {
 #define net_ref(n) g_atomic_int_inc(&((n)->ref))
 
 #define net_file_left(n) g_atomic_int_get(&(n)->file_left)
+#define net_recv_left(n) g_atomic_int_get(&(n)->recv_left)
 
 #define net_remoteaddr(n) ((n)->addr)
 
@@ -144,6 +146,7 @@ struct net {
 
 // Receiving data
 
+
 // When len new bytes have been received. We don't have to worry about n->ref
 // dropping to 0 within this function, the caller (that is, handle_read())
 // makes sure to have a reference.
@@ -153,10 +156,16 @@ static void handle_input(struct net *n, char *buf, int len) {
 
   // If we're still receiving raw data, send that to the appropriate callbacks
   // first.
-  if(len > 0 && n->recv_raw_left > 0) {
-    int w = MIN(len, n->recv_raw_left);
-    n->recv_raw_left -= w;
-    n->recv_raw_cb(n, buf, w, n->recv_raw_left);
+  if(len > 0 && n->recv_left > 0) {
+    int w = MIN(len, n->recv_left);
+    n->recv_left -= w;
+    if(!n->recv_raw_cb(n, buf, w, n->recv_left, n->recv_raw_dat)) {
+      n->recv_left = 0;
+      GError *err = NULL;
+      g_set_error_literal(&err, 1, 0, "Operation cancelled.");
+      n->cb_err(n, NETERR_RECV, err);
+      g_error_free(err);
+    }
     len -= w;
     buf += w;
   }
@@ -181,7 +190,7 @@ static void handle_input(struct net *n, char *buf, int len) {
   // Make sure the message is consumed from n->in_msg before the callback is
   // called, otherwise net_recvraw() can't do its job.
   char *sep;
-  while(n->conn && (sep = memchr(n->in_msg->str, n->eom[0], n->in_msg->len))) {
+  while(n->conn && n->in_msg->len && (sep = memchr(n->in_msg->str, n->eom[0], n->in_msg->len))) {
     // The n->in->str+1 is a hack to work around a bug in uHub 0.2.8 (possibly
     // also other versions), where it would prefix some messages with a 0-byte.
     char *msg = !n->in_msg->str[0] && sep > n->in_msg->str+1
@@ -234,19 +243,168 @@ static void handle_read(GObject *src, GAsyncResult *res, gpointer dat) {
 }
 
 
+
+// Background reader for file downloads
+
+static GThreadPool *recv_pool = NULL; // initialized in net_init_global();
+
+struct recv_ctx {
+  struct net *n;          // only for access to rate_in and recv_left (atomic int)
+  GInputStream *in;       // ref of n->in
+  GCancellable *can;      // ref of n->in_can
+  gboolean (*cb)(struct net *, char *, int, int, void *);
+  void (*final)(struct net *, void *);
+  void *dat;
+  char *extra;
+  int extra_len;
+  GError *err;
+};
+
+
+static gboolean recv_done(gpointer dat) {
+  struct recv_ctx *c = dat;
+
+  if(!g_cancellable_is_cancelled(c->can)) {
+    c->n->recv_left = 0;
+    if(c->extra)
+      handle_input(c->n, c->extra, c->extra_len);
+    setup_read(c->n);
+    c->final(c->n, c->dat);
+    if(c->err)
+      c->n->cb_err(c->n, NETERR_RECV, c->err);
+  } else
+    c->final(NULL, c->dat);
+
+  // Cleanup
+  g_free(c->extra);
+  g_object_unref(c->can);
+  g_object_unref(c->in);
+  if(c->err)
+    g_error_free(c->err);
+  net_unref(c->n);
+  g_slice_free(struct recv_ctx, c);
+  return FALSE;
+}
+
+
+static void recv_thread(gpointer dat, gpointer udat) {
+  struct recv_ctx *c = dat;
+  char buf[8192];
+
+  if(g_cancellable_is_cancelled(c->can)) {
+    g_set_error_literal(&c->err, 1, G_IO_ERROR_CANCELLED, "Operation cancelled");
+    goto done;
+  }
+
+  int total = g_atomic_int_get(&c->n->recv_left);
+  int left = total;
+  gboolean res = left > 0 && !c->err;
+  int r = 0, len;
+
+  while(res && left > 0) {
+    r = g_input_stream_read(c->in, buf, MIN(left, sizeof(buf)), c->can, &c->err);
+    if(r < 0)
+      break;
+
+    if(r == 0) {
+      g_set_error_literal(&c->err, 1, 0, "Remote disconnected.");
+      break;
+    }
+
+    len = MIN(r, left);
+    r -= len;
+    left -= len;
+    ratecalc_add(&net_in, len);
+    ratecalc_add(c->n->rate_in, len);
+    g_atomic_int_compare_and_exchange(&c->n->recv_left, left+r, left);
+
+    if(!c->cb(NULL, buf, len, left, c->dat)) {
+      g_set_error_literal(&c->err, 1, 0, "Operation cancelled.");
+      break;
+    }
+  }
+
+  // If we have leftover data, copy it and pass it to the main thread
+  if(r > 0) {
+    c->extra_len = r;
+    c->extra = g_memdup(buf+len, r);
+  }
+
+done:
+  g_idle_add(recv_done, c);
+}
+
+
+static void recv_start(struct net *n, void (*final)(struct net *, void *)) {
+  g_return_if_fail(n->recv_left);
+
+  struct recv_ctx *c = g_slice_new0(struct recv_ctx);
+  c->n = n;
+  net_ref(n);
+  c->can = n->in_can;
+  g_object_ref(c->can);
+  c->in = n->in;
+  g_object_ref(c->in);
+
+  c->cb = n->recv_raw_cb;
+  c->final = final;
+  c->dat = n->recv_raw_dat;
+
+  g_thread_pool_push(recv_pool, c, NULL);
+}
+
+
+
 // Receives `length' bytes from the socket and calls cb() on every read.
-void net_recvraw(struct net *n, int length, void (*cb)(struct net *, char *, int, int)) {
-  n->recv_raw_left = length;
-  n->recv_raw_cb = cb;
+// This function has two forms:
+// 1. Async. cb() is always called from the main thread.
+// 2. Threaded. cb() may be called from any thread.
+// In Async mode, it is guaranteed that cb() will not be called after a
+// net_disconnect(). This is not true for Threaded mode, which is why there is
+// an additional final() callback. It is guaranteed that this callback will
+// eventually be called (either due to network error, disconnect, or just
+// because it finished), and that cb() will not be called anymore after
+// final().
+// In Threaded mode, any data received after the specified length is assumed to
+// be commands, it is not possible to immediately switch to a net_recvraw()
+// again.
+// Async mode is selected when final = NULL, otherwise threaded mode will be
+// used. *dat will be forwarded to cb() and final(). In threaded mode, cb()
+// will be called with first argument = NULL, final() will be called with NULL
+// if the operation was cancelled.
+void net_recvraw(
+    struct net *n, int length,
+    gboolean (*cb)(struct net *, char *, int, int, void *),
+    void (*final)(struct net *, void *),
+    void *dat
+) {
+  g_return_if_fail(!n->recv_left);
+  n->recv_left = length;
+
   // read stuff from the message buffer in case it's not empty.
   if(n->in_msg->len >= 0) {
     int w = MIN(n->in_msg->len, length);
-    n->recv_raw_left -= w;
-    n->recv_raw_cb(n, n->in_msg->str, w, n->recv_raw_left);
+    n->recv_left -= w;
+    cb(n, n->in_msg->str, w, n->recv_left, dat);
     g_string_erase(n->in_msg, 0, w);
   }
-  if(!n->recv_raw_left)
-    n->recv_raw_cb = NULL;
+  // Set state
+  if(!n->recv_left) {
+    if(final)
+      final(n, dat);
+  } else {
+    n->recv_raw_dat = dat;
+    n->recv_raw_cb = cb;
+    // Cancel any async read and create background thread.
+    if(final) {
+      g_cancellable_cancel(n->in_can);
+      g_object_unref(n->in_can);
+      n->in_can = g_cancellable_new();
+      recv_start(n, final);
+    // Otherwise, just make sure an async read is active
+    } else
+      setup_read(n);
+  }
 }
 
 
@@ -480,8 +638,9 @@ void net_disconnect(struct net *n) {
   n->in = NULL;
   n->conn = NULL;
   g_string_truncate(n->in_msg, 0);
-  n->recv_raw_left = 0;
+  n->recv_left = 0;
   n->recv_raw_cb = NULL;
+  n->recv_raw_dat = NULL;
   g_string_truncate(n->out_buf, 0);
   if(n->out_buf_old) {
     g_string_free(n->out_buf_old, TRUE);
@@ -662,7 +821,7 @@ static void file_thread(gpointer dat, gpointer udat) {
       p += w;
       ratecalc_add(&net_out, w);
       ratecalc_add(c->n->rate_out, w);
-      g_atomic_int_set(&c->n->file_left, left);
+      g_atomic_int_compare_and_exchange(&c->n->file_left, left+w, left);
     }
   }
 
@@ -914,6 +1073,7 @@ void net_init_global() {
   ratecalc_register(&net_in);
   ratecalc_register(&net_out);
 
+  recv_pool = g_thread_pool_new(recv_thread, NULL, -1, FALSE, NULL);
   file_pool = g_thread_pool_new(file_thread, NULL, -1, FALSE, NULL);
 
   // TODO: IPv6?

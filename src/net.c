@@ -140,35 +140,9 @@ struct net {
 #endif
 
 
-static gboolean handle_timer(gpointer dat) {
-  struct net *n = dat;
-  time_t t = time(NULL);
 
-  if(!n->conn)
-    return TRUE;
 
-  // if file_left has changed, that means there has been some activity.
-  // (timeout_last isn't updated from the file transfer thread)
-  if(net_file_left(n) != n->timeout_left) {
-    n->timeout_last = t;
-    n->timeout_left = net_file_left(n);
-  }
-
-  // keepalive? send an empty command every 2 minutes of inactivity
-  if(n->keepalive && n->timeout_last < t-120)
-    net_send(n, "");
-
-  // not keepalive? give a timeout after 30 seconds of inactivity
-  else if(!n->keepalive && n->timeout_last < t-30) {
-    GError *err = NULL;
-    g_set_error_literal(&err, 1, G_IO_ERROR_TIMED_OUT, "Idle timeout.");
-    n->cb_err(n, NETERR_RECV, err); // actually not _RECV, but whatever
-    g_error_free(err);
-    return FALSE;
-  }
-  return TRUE;
-}
-
+// Receiving data
 
 // When len new bytes have been received. We don't have to worry about n->ref
 // dropping to 0 within this function, the caller (that is, handle_read())
@@ -205,7 +179,7 @@ static void handle_input(struct net *n, char *buf, int len) {
   g_string_append_len(n->in_msg, buf, len);
 
   // Make sure the message is consumed from n->in_msg before the callback is
-  // called, otherwise net_recvfile() can't do its job.
+  // called, otherwise net_recvraw() can't do its job.
   char *sep;
   while(n->conn && (sep = memchr(n->in_msg->str, n->eom[0], n->in_msg->len))) {
     // The n->in->str+1 is a hack to work around a bug in uHub 0.2.8 (possibly
@@ -257,6 +231,59 @@ static void handle_read(GObject *src, GAsyncResult *res, gpointer dat) {
     setup_read(n);
   }
   net_unref(n);
+}
+
+
+// Receives `length' bytes from the socket and calls cb() on every read.
+void net_recvraw(struct net *n, guint64 length, void (*cb)(struct net *, char *, int, guint64)) {
+  n->recv_raw_left = length;
+  n->recv_raw_cb = cb;
+  // read stuff from the message buffer in case it's not empty.
+  if(n->in_msg->len >= 0) {
+    int w = MIN(n->in_msg->len, length);
+    n->recv_raw_left -= w;
+    n->recv_raw_cb(n, n->in_msg->str, w, n->recv_raw_left);
+    g_string_erase(n->in_msg, 0, w);
+  }
+  if(!n->recv_raw_left)
+    n->recv_raw_cb = NULL;
+}
+
+
+
+
+
+// Connection management
+
+
+static gboolean handle_timer(gpointer dat) {
+  struct net *n = dat;
+  time_t t = time(NULL);
+
+  if(!n->conn)
+    return TRUE;
+
+  // if file_left has changed, that means there has been some activity.
+  // (timeout_last isn't updated from the file transfer thread)
+  int left = net_file_left(n);
+  if(left != n->timeout_left) {
+    n->timeout_last = t;
+    n->timeout_left = left;
+  }
+
+  // keepalive? send an empty command every 2 minutes of inactivity
+  if(n->keepalive && n->timeout_last < t-120 && !left)
+    net_send(n, "");
+
+  // not keepalive? give a timeout after 30 seconds of inactivity
+  else if(!n->keepalive && n->timeout_last < t-30) {
+    GError *err = NULL;
+    g_set_error_literal(&err, 1, G_IO_ERROR_TIMED_OUT, "Idle timeout.");
+    n->cb_err(n, NETERR_RECV, err); // actually not _RECV, but whatever
+    g_error_free(err);
+    return FALSE;
+  }
+  return TRUE;
 }
 
 
@@ -489,23 +516,10 @@ void net_unref(struct net *n) {
 }
 
 
-// Receives `length' bytes from the socket and calls cb() on every read.
-void net_recvraw(struct net *n, guint64 length, void (*cb)(struct net *, char *, int, guint64)) {
-  n->recv_raw_left = length;
-  n->recv_raw_cb = cb;
-  // read stuff from the message buffer in case it's not empty.
-  if(n->in_msg->len >= 0) {
-    int w = MIN(n->in_msg->len, length);
-    n->recv_raw_left -= w;
-    n->recv_raw_cb(n, n->in_msg->str, w, n->recv_raw_left);
-    g_string_erase(n->in_msg, 0, w);
-  }
-  if(!n->recv_raw_left)
-    n->recv_raw_cb = NULL;
-}
 
 
 
+// Sending data
 
 
 // The following functions are somewhat similar to g_output_stream_splice(),
@@ -773,6 +787,7 @@ void net_sendf(struct net *n, const char *fmt, ...) {
 
 
 void net_sendfile(struct net *n, const char *path, guint64 offset, int length, gboolean flush, void (*cb)(struct net *)) {
+  g_return_if_fail(!net_file_left(n));
   if(!length) {
     if(cb)
       cb(n);
@@ -817,9 +832,11 @@ static gboolean udp_handle_out(GSocket *sock, GIOCondition cond, gpointer dat) {
   struct net_udp *m = g_queue_pop_head(net_udp_queue);
   if(!m)
     return FALSE;
-  if(g_socket_send_to(net_udp_sock, m->dest, m->msg, m->msglen, NULL, NULL) != m->msglen)
-    g_warning("Short write for UDP message.");
-  else {
+  GError *err = NULL;
+  if(g_socket_send_to(net_udp_sock, m->dest, m->msg, m->msglen, NULL, &err) != m->msglen) {
+    g_message("Error sending UDP message: %s.", err->message);
+    g_error_free(err);
+  } else {
     ratecalc_add(&net_out, m->msglen);
     char *a = g_inet_address_to_string(g_inet_socket_address_get_address(G_INET_SOCKET_ADDRESS(m->dest)));
     g_debug("UDP:%s:%d> %s", a, g_inet_socket_address_get_port(G_INET_SOCKET_ADDRESS(m->dest)), m->msg);

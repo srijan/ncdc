@@ -48,7 +48,8 @@ struct ratecalc net_in, net_out;
 #define NETERR_RECV 1
 #define NETERR_SEND 2
 
-#define NET_RECV_BUF 8192
+#define NET_RECV_BUF 1024
+#define NET_DL_BUF   32768
 #define NET_MAX_CMD  1048576
 
 struct net {
@@ -297,7 +298,7 @@ static gboolean recv_done(gpointer dat) {
 
 static void recv_thread(gpointer dat, gpointer udat) {
   struct recv_ctx *c = dat;
-  char buf[8192];
+  char buf[NET_DL_BUF];
 
   if(g_cancellable_is_cancelled(c->can)) {
     g_set_error_literal(&c->err, 1, G_IO_ERROR_CANCELLED, "Operation cancelled");
@@ -309,7 +310,7 @@ static void recv_thread(gpointer dat, gpointer udat) {
   int r = 0, len;
 
   while(!c->err && left > 0) {
-    r = g_input_stream_read(c->in, buf, MIN(left, sizeof(buf)), c->can, &c->err);
+    r = g_input_stream_read(c->in, buf, MIN(left, NET_DL_BUF), c->can, &c->err);
     if(r < 0)
       break;
 

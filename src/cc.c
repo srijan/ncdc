@@ -298,8 +298,8 @@ struct cc {
   char *tthl_dat;
   guint64 uid;
   guint64 last_size;
-  guint64 last_length;
   guint64 last_offset;
+  int last_length;
   time_t last_start;
   char last_hash[24];
 #if TLS_SUPPORT
@@ -481,7 +481,7 @@ static void xfer_log_add(struct cc *cc) {
   else
     base32_encode(cc->last_hash, tth);
 
-  guint64 transfer_size = cc->last_length - (cc->dl ? cc->net->recv_raw_left : net_file_left(cc->net));
+  int transfer_size = cc->last_length - (cc->dl ? cc->net->recv_raw_left : net_file_left(cc->net));
 
   char *nick = adc_escape(cc->nick, FALSE);
   char *file = adc_escape(cc->last_file, FALSE);
@@ -490,7 +490,7 @@ static void xfer_log_add(struct cc *cc) {
   if(tmp)
     *tmp = 0;
 
-  char *msg = g_strdup_printf("%s %s %s %s %c %c %s %d %"G_GUINT64_FORMAT" %"G_GUINT64_FORMAT" %"G_GUINT64_FORMAT" %s",
+  char *msg = g_strdup_printf("%s %s %s %s %c %c %s %d %"G_GUINT64_FORMAT" %"G_GUINT64_FORMAT" %d %s",
     cc->hub ? cc->hub->tab->name : cc->hub_name, cid, nick, cc->remoteaddr, cc->dl ? 'd' : 'u',
     transfer_size == cc->last_length ? 'c' : 'i', tth, (int)(time(NULL)-cc->last_start),
     cc->last_size, cc->last_offset, transfer_size, file);
@@ -575,10 +575,11 @@ void cc_download(struct cc *cc, struct dl *dl) {
       net_sendf(cc->net, "$ADCGET tthl %s 0 -1", fn);
   // otherwise, send GET request
   } else {
+    int len = dl->islist ? -1 : MIN(G_MAXINT-1, dl->size-dl->have);
     if(cc->adc)
-      net_sendf(cc->net, "CGET file %s %"G_GUINT64_FORMAT" -1", fn, dl->have);
+      net_sendf(cc->net, "CGET file %s %"G_GUINT64_FORMAT" %d", fn, dl->have, len);
     else
-      net_sendf(cc->net, "$ADCGET file %s %"G_GUINT64_FORMAT" -1", fn, dl->have);
+      net_sendf(cc->net, "$ADCGET file %s %"G_GUINT64_FORMAT" %d", fn, dl->have, len);
   }
   g_free(cc->last_file);
   cc->last_file = g_strdup(dl->islist ? "files.xml.bz2" : dl->dest);
@@ -589,7 +590,7 @@ void cc_download(struct cc *cc, struct dl *dl) {
 }
 
 
-static void handle_recvfile(struct net *n, char *buf, int read, guint64 left) {
+static void handle_recvfile(struct net *n, char *buf, int read, int left) {
   struct cc *cc = n->handle;
   if(!left)
     xfer_log_add(cc);
@@ -606,7 +607,7 @@ static void handle_recvfile(struct net *n, char *buf, int read, guint64 left) {
 }
 
 
-static void handle_recvtth(struct net *n, char *buf, int read, guint64 left) {
+static void handle_recvtth(struct net *n, char *buf, int read, int left) {
   struct cc *cc = n->handle;
   g_return_if_fail(read + left <= cc->last_length);
   memcpy(cc->tthl_dat+(cc->last_length-(left+read)), buf, read);
@@ -639,6 +640,9 @@ static void handle_adcsnd(struct cc *cc, gboolean tthl, guint64 start, gint64 by
     }
     bytes = cc->last_size - cc->last_offset;
   }
+
+  // We shouldn't have requested more than MAXINT bytes.
+  bytes = MIN(bytes, G_MAXINT-1);
 
   cc->last_length = bytes;
   if(!tthl) {

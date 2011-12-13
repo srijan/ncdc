@@ -78,8 +78,8 @@ struct net {
   GString *in_msg;
   void (*recv_msg_cb)(struct net *, char *);
   // Receiving raw data
-  guint64 recv_raw_left;
-  void (*recv_raw_cb)(struct net *, char *, int, guint64);
+  int recv_raw_left;
+  void (*recv_raw_cb)(struct net *, char *, int, int);
   // special hook that is called when data has arrived but before it is processed.
   void (*recv_datain)(struct net *, char *data, int len);
 
@@ -235,7 +235,7 @@ static void handle_read(GObject *src, GAsyncResult *res, gpointer dat) {
 
 
 // Receives `length' bytes from the socket and calls cb() on every read.
-void net_recvraw(struct net *n, guint64 length, void (*cb)(struct net *, char *, int, guint64)) {
+void net_recvraw(struct net *n, int length, void (*cb)(struct net *, char *, int, int)) {
   n->recv_raw_left = length;
   n->recv_raw_cb = cb;
   // read stuff from the message buffer in case it's not empty.

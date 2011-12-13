@@ -590,21 +590,17 @@ void cc_download(struct cc *cc, struct dl *dl) {
 }
 
 
-static gboolean handle_recvfile(struct net *n, char *buf, int read, int left, void *dat) {
-  struct cc *cc = n->handle;
-  if(!left)
+static void handle_recvdone(struct net *n, void *dat) {
+  // Notify dl
+  dl_recv_done(dat);
+  // If the connection is still active, log the transfer and check for more
+  // stuff to download
+  if(n && n->conn) {
+    struct cc *cc = n->handle;
     xfer_log_add(cc);
-  if(!dl_received(cc->uid, cc->last_hash, buf, read) && left) {
-    g_set_error_literal(&cc->err, 1, 0, "Download error.");
-    cc_disconnect(cc);
-    return FALSE;
-  }
-  // check for more stuff to download
-  if(!left && n->conn) {
     cc->state = CCS_IDLE;
     dl_user_cc(cc->uid, cc);
   }
-  return TRUE;
 }
 
 
@@ -651,7 +647,12 @@ static void handle_adcsnd(struct cc *cc, gboolean tthl, guint64 start, gint64 by
     g_return_if_fail(dl->have == start);
     if(!dl->size)
       cc->last_size = dl->size = bytes;
-    net_recvraw(cc->net, bytes, handle_recvfile, NULL, NULL);
+    void *ctx = dl_recv_create(cc->uid, cc->last_hash);
+    if(!ctx) {
+      g_set_error_literal(&cc->err, 1, 0, "Download interrupted.");
+      cc_disconnect(cc);
+    }
+    net_recvraw(cc->net, bytes, dl_recv_data, handle_recvdone, ctx);
   } else {
     g_return_if_fail(start == 0 && bytes > 0 && (bytes%24) == 0 && bytes < 48*1024);
     cc->tthl_dat = g_malloc(bytes);

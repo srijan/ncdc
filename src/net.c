@@ -80,6 +80,7 @@ struct net {
   // Receiving raw data
   int recv_left;
   gboolean (*recv_raw_cb)(struct net *, char *, int, int, void *);
+  void (*recv_raw_final)(struct net *, void *);
   void *recv_raw_dat;
   // special hook that is called when data has arrived but before it is processed.
   void (*recv_datain)(struct net *, char *data, int len);
@@ -123,7 +124,7 @@ struct net {
   // the last successful action.
   guint timeout_src;
   time_t timeout_last;
-  int timeout_left;
+  int timeout_uleft, timeout_dleft;
 
   // some pointer for use by the user
   void *handle;
@@ -146,6 +147,7 @@ struct net {
 
 // Receiving data
 
+static void recv_start(struct net *n);
 
 // When len new bytes have been received. We don't have to worry about n->ref
 // dropping to 0 within this function, the caller (that is, handle_read())
@@ -207,7 +209,7 @@ static void handle_input(struct net *n, char *buf, int len) {
 
 // Activates an asynchronous read, in case there's none active.
 #define setup_read(n) do {\
-    if(n->conn && !g_input_stream_has_pending(n->in)) {\
+    if(n->conn && !n->recv_raw_final && !g_input_stream_has_pending(n->in)) {\
       g_input_stream_read_async(n->in, n->in_buf, NET_RECV_BUF, G_PRIORITY_DEFAULT, n->in_can, handle_read, n);\
       net_ref(n);\
       g_object_ref(n->in);\
@@ -227,6 +229,9 @@ static void handle_read(GObject *src, GAsyncResult *res, gpointer dat) {
   if(r < 0) {
     if(n->conn && err->code != G_IO_ERROR_CANCELLED)
       n->cb_err(n, NETERR_RECV, err);
+    // Async read was cancelled in order to switch to a background thread
+    else if(n->conn && err->code == G_IO_ERROR_CANCELLED && n->recv_raw_final)
+      recv_start(n);
     g_error_free(err);
   } else if(n->conn && r == 0) {
     g_set_error_literal(&err, 1, 0, "Remote disconnected.");
@@ -266,12 +271,15 @@ static gboolean recv_done(gpointer dat) {
 
   if(!g_cancellable_is_cancelled(c->can)) {
     c->n->recv_left = 0;
+    c->n->recv_raw_cb = NULL;
+    c->n->recv_raw_final = NULL;
     if(c->extra)
       handle_input(c->n, c->extra, c->extra_len);
-    setup_read(c->n);
-    c->final(c->n, c->dat);
-    if(c->err)
+    if(c->err && c->n->conn)
       c->n->cb_err(c->n, NETERR_RECV, c->err);
+    if(c->n->conn)
+      setup_read(c->n);
+    c->final(c->n, c->dat);
   } else
     c->final(NULL, c->dat);
 
@@ -298,10 +306,9 @@ static void recv_thread(gpointer dat, gpointer udat) {
 
   int total = g_atomic_int_get(&c->n->recv_left);
   int left = total;
-  gboolean res = left > 0 && !c->err;
   int r = 0, len;
 
-  while(res && left > 0) {
+  while(!c->err && left > 0) {
     r = g_input_stream_read(c->in, buf, MIN(left, sizeof(buf)), c->can, &c->err);
     if(r < 0)
       break;
@@ -316,7 +323,7 @@ static void recv_thread(gpointer dat, gpointer udat) {
     left -= len;
     ratecalc_add(&net_in, len);
     ratecalc_add(c->n->rate_in, len);
-    g_atomic_int_compare_and_exchange(&c->n->recv_left, left+r, left);
+    g_atomic_int_compare_and_exchange(&c->n->recv_left, left+len, left);
 
     if(!c->cb(NULL, buf, len, left, c->dat)) {
       g_set_error_literal(&c->err, 1, 0, "Operation cancelled.");
@@ -335,7 +342,7 @@ done:
 }
 
 
-static void recv_start(struct net *n, void (*final)(struct net *, void *)) {
+static void recv_start(struct net *n) {
   g_return_if_fail(n->recv_left);
 
   struct recv_ctx *c = g_slice_new0(struct recv_ctx);
@@ -347,7 +354,7 @@ static void recv_start(struct net *n, void (*final)(struct net *, void *)) {
   g_object_ref(c->in);
 
   c->cb = n->recv_raw_cb;
-  c->final = final;
+  c->final = n->recv_raw_final;
   c->dat = n->recv_raw_dat;
 
   g_thread_pool_push(recv_pool, c, NULL);
@@ -395,12 +402,15 @@ void net_recvraw(
   } else {
     n->recv_raw_dat = dat;
     n->recv_raw_cb = cb;
+    n->recv_raw_final = final;
     // Cancel any async read and create background thread.
     if(final) {
-      g_cancellable_cancel(n->in_can);
-      g_object_unref(n->in_can);
-      n->in_can = g_cancellable_new();
-      recv_start(n, final);
+      if(g_input_stream_has_pending(n->in)) {
+        g_cancellable_cancel(n->in_can);
+        g_object_unref(n->in_can);
+        n->in_can = g_cancellable_new();
+      } else
+        recv_start(n);
     // Otherwise, just make sure an async read is active
     } else
       setup_read(n);
@@ -421,16 +431,18 @@ static gboolean handle_timer(gpointer dat) {
   if(!n->conn)
     return TRUE;
 
-  // if file_left has changed, that means there has been some activity.
-  // (timeout_last isn't updated from the file transfer thread)
-  int left = net_file_left(n);
-  if(left != n->timeout_left) {
+  // if file_left or recv_left has changed, that means there has been some
+  // activity.  (timeout_last isn't updated from the file transfer thread)
+  int uleft = net_file_left(n);
+  int dleft = net_recv_left(n);
+  if(uleft != n->timeout_uleft || dleft != n->timeout_dleft) {
     n->timeout_last = t;
-    n->timeout_left = left;
+    n->timeout_uleft = uleft;
+    n->timeout_dleft = dleft;
   }
 
   // keepalive? send an empty command every 2 minutes of inactivity
-  if(n->keepalive && n->timeout_last < t-120 && !left)
+  if(n->keepalive && n->timeout_last < t-120 && !uleft && !dleft)
     net_send(n, "");
 
   // not keepalive? give a timeout after 30 seconds of inactivity
@@ -641,6 +653,7 @@ void net_disconnect(struct net *n) {
   n->recv_left = 0;
   n->recv_raw_cb = NULL;
   n->recv_raw_dat = NULL;
+  n->recv_raw_final = NULL;
   g_string_truncate(n->out_buf, 0);
   if(n->out_buf_old) {
     g_string_free(n->out_buf_old, TRUE);

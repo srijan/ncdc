@@ -106,6 +106,8 @@ struct dl {
   gboolean active : 1;      // Whether it is being downloaded by someone
   gboolean flopen : 1;      // For lists: Whether to open a browse tab after completed download
   gboolean flmatch : 1;     // For lists: Whether to match queue after completed download
+  gboolean dlthread : 1;    // Whether a dl thread is active
+  gboolean delete : 1;      // Pending delection
   char prio;                // DLP_*
   char error;               // DLE_*
   int incfd;                // file descriptor for this file in <incoming_dir>
@@ -699,28 +701,41 @@ int dl_queue_match_fl(guint64 uid, struct fl_list *fl, int *added) {
 
 // removes an item from the queue
 void dl_queue_rm(struct dl *dl) {
+  dl->delete = TRUE;
+
+  // remove from the user info (this will also force a disconnect if the item
+  // is being downloaded.)
+  while(dl->u->len > 0)
+    dl_user_rm(dl, 0);
+  // remove from dl list, if it's still in there. (Could have been removed
+  // before, while dlthread was active)
+  if(g_hash_table_lookup(dl_queue, dl->hash)) {
+    if(ui_dl)
+      ui_dl_listchange(dl, UIDL_DEL);
+    g_hash_table_remove(dl_queue, dl->hash);
+  }
+
+  // Don't do anything else if the dlthread is still active. Wait until the
+  // thread stops and calls this function again to actually free and remove the
+  // stuff.
+  if(dl->dlthread)
+    return;
+
+  // remove from the database
+  if(!dl->islist)
+    db_dl_rm(dl->hash);
   // close the incomplete file, in case it's still open
   if(dl->incfd > 0)
     g_warn_if_fail(close(dl->incfd) == 0);
   // remove the incomplete file, in case we still have it
   if(dl->inc && g_file_test(dl->inc, G_FILE_TEST_EXISTS))
     unlink(dl->inc);
-  // free dl->inc while we're at it. this is used as detection by dl_queue_checkrm() to prevent recursion
-  g_free(dl->inc);
-  dl->inc = NULL;
-  // remove from the user info
-  while(dl->u->len > 0)
-    dl_user_rm(dl, 0);
-  // remove from the database
-  if(!dl->islist)
-    db_dl_rm(dl->hash);
   // free and remove dl struct
-  if(ui_dl)
-    ui_dl_listchange(dl, UIDL_DEL);
-  g_hash_table_remove(dl_queue, dl->hash);
+  // and free
   if(dl->hash_tth)
     g_slice_free(struct tth_ctx, dl->hash_tth);
   g_ptr_array_unref(dl->u);
+  g_free(dl->inc);
   g_free(dl->flsel);
   g_free(dl->dest);
   g_free(dl->error_msg);
@@ -734,11 +749,11 @@ void dl_queue_rm(struct dl *dl) {
 // forcibly disconnected in dl_user_rm(). (Which is what you want if you remove
 // it while downloading, not if it's removed after finishing the download).
 static void dl_queue_checkrm(struct dl *dl, gboolean justfin) {
-  // prevent recursion
-  if(!dl->inc)
+  if(dl->delete)
     return;
 
   if(justfin) {
+    g_return_if_fail(!dl->dlthread);
     // If the download just finished, we might as well remove it from the
     // database immediately. Makes sure we won't load it on the next startup.
     if(!dl->islist)
@@ -760,7 +775,7 @@ static void dl_queue_checkrm(struct dl *dl, gboolean justfin) {
       }
     }
   }
-  if(!dl->active && (dl->size || !dl->islist) && dl->have == dl->size)
+  if(!dl->active && !dl->dlthread && (dl->size || !dl->islist) && dl->have == dl->size)
     dl_queue_rm(dl);
 }
 
@@ -784,6 +799,7 @@ void dl_queue_setprio(struct dl *dl, char prio) {
     g_free((dl)->error_msg);\
     (dl)->error_msg = (sub) ? g_strdup(sub) : NULL;\
     dl_queue_setprio(dl, DLP_ERR);\
+    g_debug("Download of `%s' failed: %s", (dl)->dest, dl_strerror(e, sub));\
     ui_mf(ui_main, 0, "Download of `%s' failed: %s", (dl)->dest, dl_strerror(e, sub));\
   } while(0)
 
@@ -795,6 +811,8 @@ void dl_queue_setuerr(guint64 uid, char *tth, char e, const char *emsg) {
   struct dl_user *du = g_hash_table_lookup(queue_users, &uid);
   if(!dl || (tth && !du))
     return;
+
+  g_debug("%016"G_GINT64_MODIFIER"x: Setting download error for `%s' to: %s", uid, dl?dl->dest:"all", dl_strerror(e, emsg));
 
   // from a single dl item
   if(dl) {
@@ -943,125 +961,6 @@ static void dl_finished(struct dl *dl) {
 }
 
 
-static gboolean dl_hash_check(struct dl *dl, int num, char *tth) {
-  // We don't have TTHL data for small files, so check against the root hash instead.
-  if(dl->size < dl->hash_block) {
-    g_return_val_if_fail(num == 0, FALSE);
-    return memcmp(tth, dl->hash, 24) == 0 ? TRUE : FALSE;
-  }
-  // Otherwise, check against the TTHL data in the database.
-  return db_dl_checkhash(dl->hash, num, tth);
-}
-
-
-// (Incrementally) hashes the incoming data and checks that what we have is
-// still correct. When this function is called, dl->length should refer to the
-// point where the newly received data will be written to.
-// Returns -1 if nothing went wrong, any other number to indicate which block
-// failed the hash check.
-static int dl_hash_update(struct dl *dl, int length, char *buf) {
-  g_return_val_if_fail(dl->hastthl, 0);
-
-  int block = dl->have / dl->hash_block;
-  guint64 cur = dl->have % dl->hash_block;
-
-  if(!dl->hash_tth) {
-    g_return_val_if_fail(!cur, FALSE);
-    dl->hash_tth = g_slice_new(struct tth_ctx);
-    tth_init(dl->hash_tth);
-  }
-
-  char tth[24];
-  while(length > 0) {
-    int w = MIN(dl->hash_block - cur, length);
-    tth_update(dl->hash_tth, buf, w);
-    length -= w;
-    cur += w;
-    buf += w;
-    // we have a complete block, validate it.
-    if(cur == dl->hash_block || (!length && dl->size == (block*dl->hash_block)+cur)) {
-      tth_final(dl->hash_tth, tth);
-      tth_init(dl->hash_tth);
-      if(!dl_hash_check(dl, block, tth))
-        return block;
-      cur = 0;
-      block++;
-    }
-  }
-
-  return -1;
-}
-
-
-// Called when we've received some file data. Returns TRUE to continue the
-// download, FALSE when something went wrong and the transfer should be
-// aborted.
-// TODO: do this in a separate thread to avoid blocking on HDD writes.
-gboolean dl_received(guint64 uid, char *tth, char *buf, int length) {
-  struct dl *dl = g_hash_table_lookup(dl_queue, tth);
-  struct dl_user *du = g_hash_table_lookup(queue_users, &uid);
-  if(!dl || !du)
-    return FALSE;
-  g_return_val_if_fail(du->state == DLU_ACT && du->active && du->active->dl == dl, FALSE);
-  g_return_val_if_fail(dl->have + length <= dl->size, FALSE);
-
-  // open dl->incfd, if it's not open yet
-  if(dl->incfd <= 0) {
-    dl->incfd = open(dl->inc, O_WRONLY|O_CREAT, 0666);
-    if(dl->incfd < 0 || lseek(dl->incfd, dl->have, SEEK_SET) == (off_t)-1) {
-      g_warning("Error opening %s: %s", dl->inc, g_strerror(errno));
-      dl_queue_seterr(dl, DLE_IO_INC, g_strerror(errno));
-      return FALSE;
-    }
-  }
-
-  // save to the file and update dl->have
-  while(length > 0) {
-    // write
-    int r = write(dl->incfd, buf, length);
-    if(r < 0) {
-      g_warning("Error writing to %s: %s", dl->inc, g_strerror(errno));
-      dl_queue_seterr(dl, DLE_IO_INC, g_strerror(errno));
-      return FALSE;
-    }
-
-    // check hash
-    int fail = dl->islist ? -1 : dl_hash_update(dl, r, buf);
-    if(fail >= 0) {
-      g_warning("Hash failed for %s (block %d)", dl->inc, fail);
-      char msg[200];
-      g_snprintf(msg, 200, "Hash for block %d does not match.", fail);
-      dl_queue_setuerr(uid, tth, DLE_HASH, msg);
-      // Delete the failed block and everything after it, so that a resume is possible.
-      dl->have = fail*dl->hash_block;
-      // I have no idea what to do when these functions fail. Resuming the
-      // download without an ncdc restart won't work if lseek() fails, resuming
-      // the download after an ncdc restart may result in a corrupted download
-      // if the ftruncate() fails. Either way, resuming isn't possible in a
-      // reliable fashion, so perhaps we should throw away the entire inc file?
-      off_t rs = lseek(dl->incfd, dl->have, SEEK_SET);
-      int rt = ftruncate(dl->incfd, dl->have);
-      if(rs == (off_t)-1 || rt == -1) {
-        g_warning("Error recovering from hash failure: %s", g_strerror(errno));
-        dl_queue_seterr(dl, DLE_IO_INC, g_strerror(errno));
-      }
-      return FALSE;
-    }
-
-    // update vars
-    length -= r;
-    buf += r;
-    dl->have += r;
-  }
-
-  if(dl->have >= dl->size) {
-    g_warn_if_fail(dl->have == dl->size);
-    dl_finished(dl);
-  }
-  return TRUE;
-}
-
-
 // Called when we've received TTHL data. The *tthl data may be modified
 // in-place.
 void dl_settthl(guint64 uid, char *tth, char *tthl, int len) {
@@ -1072,6 +971,7 @@ void dl_settthl(guint64 uid, char *tth, char *tthl, int len) {
   g_return_if_fail(du->state == DLU_ACT);
   g_return_if_fail(!dl->islist);
   g_return_if_fail(!dl->have);
+  g_return_if_fail(!dl->dlthread);
   // Ignore this if we already have the TTHL data. Currently, this situation
   // can't happen, but it may be possible with segmented downloading.
   g_return_if_fail(!dl->hastthl);
@@ -1105,6 +1005,180 @@ void dl_settthl(guint64 uid, char *tth, char *tthl, int len) {
   db_dl_settthl(tth, tthl, newlen);
   dl->hastthl = TRUE;
   dl->hash_block = bs;
+}
+
+
+
+
+// Data receive background thread
+
+// The background thread access the following struct dl members:
+// - size       (read only  - not changed in an other thread, no problem)
+// - have       (read/write - also read in other threads - TODO: this could be a problem)
+// - hash_block (read only  - not changed in an other thread, no problem)
+// - hash_tth   (read/write - not used in other threads, no problem)
+// - incfd      (read/write - not used in other threads, no problem)
+// - islist     (read only  - not changed in an other thread, no problem)
+
+struct recv_ctx {
+  struct dl *dl;
+  guint64 uid;
+  char *err_msg, *uerr_msg;
+  char err, uerr;
+};
+
+
+void *dl_recv_create(guint64 uid, const char *tth) {
+  struct dl *dl = g_hash_table_lookup(dl_queue, tth);
+  struct dl_user *du = g_hash_table_lookup(queue_users, &uid);
+  if(!dl || !du)
+    return NULL;
+  g_return_val_if_fail(!dl->dlthread, NULL);
+  g_return_val_if_fail(du->state == DLU_ACT && du->active && du->active->dl == dl, NULL);
+  g_return_val_if_fail(dl->islist || dl->hastthl, NULL);
+
+  // open dl->incfd, if it's not open yet
+  if(dl->incfd <= 0) {
+    dl->incfd = open(dl->inc, O_WRONLY|O_CREAT, 0666);
+    if(dl->incfd < 0 || lseek(dl->incfd, dl->have, SEEK_SET) == (off_t)-1) {
+      g_warning("Error opening %s: %s", dl->inc, g_strerror(errno));
+      dl_queue_seterr(dl, DLE_IO_INC, g_strerror(errno));
+      return NULL;
+    }
+  }
+
+  // Create context and mark the dl item als being active
+  dl->dlthread = TRUE;
+  struct recv_ctx *c = g_slice_new0(struct recv_ctx);
+  c->uid = uid;
+  c->dl = dl;
+
+  return c;
+}
+
+
+void dl_recv_done(void *dat) {
+  struct recv_ctx *c = dat;
+
+  // Indicate that the dl thread has stopped
+  c->dl->dlthread = FALSE;
+
+  if(c->dl->delete)
+    dl_queue_rm(c->dl);
+
+  else {
+    // Set error status if necessary
+    if(c->err)
+      dl_queue_seterr(c->dl, c->err, c->err_msg);
+    if(c->uerr)
+      dl_queue_setuerr(c->uid, c->dl->hash, c->uerr, c->uerr_msg);
+
+    if(c->dl->have >= c->dl->size) {
+      g_warn_if_fail(c->dl->have == c->dl->size);
+      dl_finished(c->dl);
+    }
+  }
+
+  // Clean up
+  g_free(c->uerr_msg);
+  g_free(c->err_msg);
+  g_slice_free(struct recv_ctx, c);
+}
+
+
+static gboolean dl_recv_check(struct dl *dl, int num, char *tth) {
+  // We don't have TTHL data for small files, so check against the root hash instead.
+  if(dl->size < dl->hash_block) {
+    g_return_val_if_fail(num == 0, FALSE);
+    return memcmp(tth, dl->hash, 24) == 0 ? TRUE : FALSE;
+  }
+  // Otherwise, check against the TTHL data in the database.
+  return db_dl_checkhash(dl->hash, num, tth);
+}
+
+
+// (Incrementally) hashes the incoming data and checks that what we have is
+// still correct. When this function is called, dl->length should refer to the
+// point where the newly received data will be written to.
+// Returns -1 if nothing went wrong, any other number to indicate which block
+// failed the hash check.
+static int dl_recv_update(struct dl *dl, int length, char *buf) {
+  int block = dl->have / dl->hash_block;
+  guint64 cur = dl->have % dl->hash_block;
+
+  if(!dl->hash_tth) {
+    g_return_val_if_fail(!cur, FALSE);
+    dl->hash_tth = g_slice_new(struct tth_ctx);
+    tth_init(dl->hash_tth);
+  }
+
+  char tth[24];
+  while(length > 0) {
+    int w = MIN(dl->hash_block - cur, length);
+    tth_update(dl->hash_tth, buf, w);
+    length -= w;
+    cur += w;
+    buf += w;
+    // we have a complete block, validate it.
+    if(cur == dl->hash_block || (!length && dl->size == (block*dl->hash_block)+cur)) {
+      tth_final(dl->hash_tth, tth);
+      tth_init(dl->hash_tth);
+      if(!dl_recv_check(dl, block, tth))
+        return block;
+      cur = 0;
+      block++;
+    }
+  }
+
+  return -1;
+}
+
+
+// Called directly from net.c.
+gboolean dl_recv_data(struct net *n, char *buf, int length, int left, void *dat) {
+  struct recv_ctx *c = dat;
+
+  while(length > 0) {
+    // write
+    int r = write(c->dl->incfd, buf, length);
+    if(r < 0) {
+      c->err = DLE_IO_INC;
+      c->err_msg = g_strdup(g_strerror(errno));
+      return FALSE;
+    }
+
+    // check hash
+    int fail = c->dl->islist ? -1 : dl_recv_update(c->dl, r, buf);
+    if(fail >= 0) {
+      c->uerr = DLE_HASH;
+      c->uerr_msg = g_strdup_printf("Hash for block %d does not match.", fail);
+      // Delete the failed block and everything after it, so that a resume is possible.
+      c->dl->have = fail*c->dl->hash_block;
+      // I have no idea what to do when these functions fail. Resuming the
+      // download without an ncdc restart won't work if lseek() fails, resuming
+      // the download after an ncdc restart may result in a corrupted download
+      // if the ftruncate() fails. Either way, resuming isn't possible in a
+      // reliable fashion, so perhaps we should throw away the entire inc file?
+      off_t rs = lseek(c->dl->incfd, c->dl->have, SEEK_SET);
+      int rt = ftruncate(c->dl->incfd, c->dl->have);
+      if(rs == (off_t)-1 || rt == -1) {
+        g_warning("Error recovering from hash failure: %s", g_strerror(errno));
+        c->err = DLE_IO_INC;
+        c->err_msg = g_strdup(g_strerror(errno));
+      }
+      return FALSE;
+    }
+
+    // update vars
+    length -= r;
+    buf += r;
+    c->dl->have += r;
+  }
+
+  // TODO: if dl->have == d->size, close() the file here? Since close() may
+  // actually flush the data to disk and thus block for a while.
+
+  return TRUE;
 }
 
 
@@ -1150,7 +1224,7 @@ void dl_load_partial(struct dl *dl) {
         left = 0;
         break;
       }
-      dl_hash_update(dl, r, buf);
+      dl_recv_update(dl, r, buf);
       dl->have += r;
       left -= r;
     }

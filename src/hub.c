@@ -1776,7 +1776,8 @@ void hub_disconnect(struct hub *hub, gboolean recon) {
   g_free(hub->hubname_hub);  hub->hubname_hub = NULL;
   hub->nick_valid = hub->isreg = hub->isop = hub->received_first =
     hub->joincomplete =  hub->sharecount = hub->sharesize =
-    hub->supports_nogetinfo = hub->state = 0;
+    hub->supports_nogetinfo = hub->state =
+    hub->nfo_h_norm = hub->nfo_h_reg = hub->nfo_h_op = 0;
   if(!recon)
     ui_m(hub->tab, 0, "Disconnected.");
   else {

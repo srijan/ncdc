@@ -153,7 +153,7 @@ static void c_help(char *args) {
 
   // list information on a setting
   } else if(strcmp(args, "set") == 0 && sec) {
-    c_help_set(sec);
+    c_help_oset(sec);
 
   // list available key sections
   } else if(strcmp(args, "keys") == 0 && !sec) {
@@ -195,8 +195,9 @@ static void c_help(char *args) {
 
 static void c_help_sug(char *args, char **sug) {
   // help set ..
+  // TODO: use vars
   if(strncmp(args, "set ", 4) == 0) {
-    c_set_sugkey(args+4, sug);
+    c_oset_sugkey(args+4, sug);
     strv_prefix(sug, "set ", NULL);
     return;
   }
@@ -848,7 +849,7 @@ static void c_kick(char *args) {
 static void c_nick(char *args) {
   // not the most elegant solution, but certainly the most simple.
   char *c = g_strdup_printf("nick %s", args);
-  c_set(c);
+  c_oset(c);
   g_free(c);
 }
 
@@ -1000,6 +1001,8 @@ static struct cmd cmds[] = {
   { "msg",         c_msg,         c_msg_sug        },
   { "nick",        c_nick,        NULL             },
   { "open",        c_open,        c_open_sug       },
+  { "oset",        c_oset,        c_oset_sug       }, // TODO: remove
+  { "ounset",      c_ounset,      c_oset_sugkey    }, // TODO: remove
   { "password",    c_password,    NULL             },
   { "pm",          c_msg,         c_msg_sug        },
   { "queue",       c_queue,       NULL             },
@@ -1008,10 +1011,8 @@ static struct cmd cmds[] = {
   { "refresh",     c_refresh,     fl_local_suggest },
   { "say",         c_say,         c_say_sug        },
   { "search",      c_search,      NULL             },
-  { "set",         c_set,         c_set_sug        },
   { "share",       c_share,       c_share_sug      },
   { "ungrant",     c_ungrant,     c_ungrant_sug    },
-  { "unset",       c_unset,       c_set_sugkey     },
   { "unshare",     c_unshare,     c_unshare_sug    },
   { "userlist",    c_userlist,    NULL             },
   { "version",     c_version,     NULL             },

@@ -61,12 +61,6 @@ static void get_bool_f(guint64 hub, char *key) {
 }
 
 
-// not set => true
-static void get_bool_t(guint64 hub, char *key) {
-  ui_mf(NULL, 0, "%s.%s = %s", hubname(hub), key, !conf_exists(hub, key) || conf_get_bool(hub, key) ? "true" : "false");
-}
-
-
 static void get_int(guint64 hub, char *key) {
   if(!conf_exists(hub, key))
     ui_mf(NULL, 0, "%s.%s is not set.", hubname(hub), key);
@@ -182,18 +176,6 @@ static void set_bool_f(guint64 hub, char *key, char *val) {
 
   conf_set_bool(hub, key, bool_var(val));
   get_bool_f(hub, key);
-}
-
-
-static void set_bool_t(guint64 hub, char *key, char *val) {
-  if(!val) {
-    db_vars_rm(hub, key);
-    ui_mf(NULL, 0, "%s.%s reset.", hubname(hub), key);
-    return;
-  }
-
-  conf_set_bool(hub, key, bool_var(val));
-  get_bool_t(hub, key);
 }
 
 
@@ -863,12 +845,12 @@ static gboolean parsesetting(char *name, guint64 *hub, char **key, struct settin
 }
 
 
-void c_set(char *args) {
+void c_oset(char *args) {
   if(!args[0]) {
     struct setting *s;
     ui_m(NULL, 0, "");
     for(s=settings; s->name; s++)
-      c_set(s->name);
+      c_oset(s->name);
     ui_m(NULL, 0, "");
     return;
   }
@@ -903,9 +885,9 @@ void c_set(char *args) {
 }
 
 
-void c_unset(char *args) {
+void c_ounset(char *args) {
   if(!args[0]) {
-    c_set("");
+    c_oset("");
     return;
   }
 
@@ -926,7 +908,7 @@ void c_unset(char *args) {
 
 // Doesn't provide suggestions for group prefixes (e.g. global.<stuff> or
 // #hub.<stuff>), but I don't think that'll be used very often anyway.
-void c_set_sugkey(char *args, char **sug) {
+void c_oset_sugkey(char *args, char **sug) {
   int i = 0, len = strlen(args);
   struct setting *s;
   for(s=settings; i<20 && s->name; s++)
@@ -935,10 +917,10 @@ void c_set_sugkey(char *args, char **sug) {
 }
 
 
-void c_set_sug(char *args, char **sug) {
+void c_oset_sug(char *args, char **sug) {
   char *sep = strchr(args, ' ');
   if(!sep)
-    c_set_sugkey(args, sug);
+    c_oset_sugkey(args, sug);
   else {
     *sep = 0;
     char *pre = g_strdup(args);
@@ -962,7 +944,7 @@ void c_set_sug(char *args, char **sug) {
 }
 
 
-void c_help_set(char *args) {
+void c_help_oset(char *args) {
   struct setting *s = getsetting(args);
   struct doc_set *d = s ? getdoc(s) : NULL;
   if(!s)

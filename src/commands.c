@@ -1009,11 +1009,28 @@ c_search_clean:
   } while(0)
 
 
+static gboolean listsettings(guint64 hub, const char *hubname, const char *key) {
+  int i, n = 0;
+  char *pat = !key || !*key ? NULL : key[strlen(key)-1] == '*' || key[strlen(key)-1] == '?' ? g_strdup(key) : g_strconcat(key, "*", NULL);
+  GPatternSpec *p = pat ? g_pattern_spec_new(pat) : NULL;
+  g_free(pat);
+  for(i=0; i<VAR_END; i++) {
+    if((hub ? vars[i].hub : vars[i].global) && (!pat || g_pattern_match_string(p, vars[i].name))) {
+      if(n++ == 0)
+        ui_m(NULL, 0, "");
+      print_var(hub, hubname, i);
+    }
+  }
+  if(pat)
+    g_pattern_spec_free(p);
+  if(n)
+    ui_m(NULL, 0, "");
+  return n == 0 ? FALSE : TRUE;
+}
+
+
 // Implements /set and /hset
 static void sethset(guint64 hub, const char *hubname, char *args) {
-  // TODO: list all settings if !args[0]
-  // TODO: list settings by glob-matching
-
   char *key = args;
   char *val; // NULL = get
 
@@ -1021,14 +1038,18 @@ static void sethset(guint64 hub, const char *hubname, char *args) {
   if((val = strchr(args, ' '))) {
     *(val++) = 0;
     g_strstrip(val);
+    if(!*val)
+      val = NULL;
   }
 
-  // Get var and check whether it can be used in this context
-  int var = vars_byname(key);
+  // Get var, optionally list, and check whether it can be used in this context
+  int var = *key ? vars_byname(key) : -1;
+  if(var < 0 && !val && listsettings(hub, hubname, key))
+    return;
   check_var(hub, var, key, FALSE);
 
   // get
-  if(!val || !val[0])
+  if(!val)
     print_var(hub, hubname, var);
 
   // set
@@ -1069,10 +1090,10 @@ static void c_hset(char *args) {
 
 // Implements /unset and /hunset
 static void unsethunset(guint64 hub, const char *hubname, const char *key) {
-  // TODO: list vars here as well.
-
-  // Get var and check whether it can be used in this context
-  int var = vars_byname(key);
+  // Get var, optionally list, and check whether it can be used in this context
+  int var = *key ? vars_byname(key) : -1;
+  if(var < 0 && listsettings(hub, hubname, key))
+    return;
   check_var(hub, var, key, TRUE);
   GError *err = NULL;
 

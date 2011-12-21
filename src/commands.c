@@ -982,6 +982,113 @@ c_search_clean:
 }
 
 
+#define print_var(hub, hubname, var) do {\
+    char *raw = var_get(hub, var);\
+    if(!raw)\
+      ui_mf(NULL, 0, "%s.%s is not set.", hubname, vars[var].name);\
+    else {\
+      char *fmt = vars[var].format(raw);\
+      ui_mf(NULL, 0, "%s.%s = %s", hubname, vars[var].name, fmt);\
+      g_free(fmt);\
+    }\
+  } while(0)
+
+
+#define check_var(hub, var, key, unset) do {\
+    if(var < 0 || (!vars[var].global && !vars[var].hub)) {\
+      ui_mf(NULL, 0, "No setting with the name '%s'.", key);\
+      return;\
+    }\
+    if(hub ? !vars[var].hub : !vars[var].global) {\
+      ui_mf(NULL, 0,\
+        hub ? "`%s' is a global setting, did you mean to use /%s instead?"\
+            : "'%s' is a hub setting, did you mean to use /%s instead?",\
+        vars[var].name, !hub ? (unset ? "hunset" : "hset") : unset ? "unset" : "set");\
+      return;\
+    }\
+  } while(0)
+
+
+// Implements /set and /hset
+static void sethset(guint64 hub, const char *hubname, char *args) {
+  // TODO: list all settings if !args[0]
+  // TODO: list settings by glob-matching
+
+  char *key = args;
+  char *val; // NULL = get
+
+  // separate key/value
+  if((val = strchr(args, ' '))) {
+    *(val++) = 0;
+    g_strstrip(val);
+  }
+
+  // Get var and check whether it can be used in this context
+  int var = vars_byname(key);
+  check_var(hub, var, key, FALSE);
+
+  // get
+  if(!val || !val[0])
+    print_var(hub, hubname, var);
+
+  // set
+  else {
+    GError *err = NULL;
+    char *raw = vars[var].parse(val, &err);
+    if(err) {
+      g_free(raw);
+      ui_mf(NULL, 0, "Error setting `%s': %s", vars[var].name, err->message);
+      g_error_free(err);
+    }
+    var_set(hub, var, raw);
+    g_free(raw);
+    print_var(hub, hubname, var);
+  }
+}
+
+
+static void c_set(char *args) {
+  sethset(0, "global", args);
+}
+
+
+static void c_hset(char *args) {
+  struct ui_tab *tab = ui_tab_cur->data;
+  if(tab->type != UIT_HUB && tab->type != UIT_MSG) {
+    ui_m(NULL, 0, "This command can only be used on hub tabs.");
+    return;
+  }
+  sethset(tab->hub->id, tab->name, args);
+}
+
+
+// Implements /unset and /hunset
+static void unsethunset(guint64 hub, const char *hubname, const char *key) {
+  // TODO: list vars here as well.
+
+  // Get var and check whether it can be used in this context
+  int var = vars_byname(key);
+  check_var(hub, var, key, TRUE);
+  var_set(hub, var, NULL);
+  print_var(hub, hubname, var);
+}
+
+
+static void c_unset(char *args) {
+  unsethunset(0, "global", args);
+}
+
+
+static void c_hunset(char *args) {
+  struct ui_tab *tab = ui_tab_cur->data;
+  if(tab->type != UIT_HUB && tab->type != UIT_MSG) {
+    ui_m(NULL, 0, "This command can only be used on hub tabs.");
+    return;
+  }
+  unsethunset(tab->hub->id, tab->name, args);
+}
+
+
 
 
 // definition of the command list
@@ -996,6 +1103,8 @@ static struct cmd cmds[] = {
   { "gc",          c_gc,          NULL             },
   { "grant",       c_grant,       c_msg_sug        },
   { "help",        c_help,        c_help_sug       },
+  { "hset",        c_hset,        NULL             }, // TODO: tab completion
+  { "hunset",      c_hunset,      NULL             }, // TODO: tab completion
   { "kick",        c_kick,        c_msg_sug        },
   { "me",          c_me,          c_say_sug        },
   { "msg",         c_msg,         c_msg_sug        },
@@ -1011,8 +1120,10 @@ static struct cmd cmds[] = {
   { "refresh",     c_refresh,     fl_local_suggest },
   { "say",         c_say,         c_say_sug        },
   { "search",      c_search,      NULL             },
+  { "set",         c_set,         NULL             }, // TODO: tab completion
   { "share",       c_share,       c_share_sug      },
   { "ungrant",     c_ungrant,     c_ungrant_sug    },
+  { "unset",       c_unset,       NULL             }, // TODO: tab completion
   { "unshare",     c_unshare,     c_unshare_sug    },
   { "userlist",    c_userlist,    NULL             },
   { "version",     c_version,     NULL             },

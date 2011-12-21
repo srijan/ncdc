@@ -205,6 +205,18 @@ struct var vars[] = {
 // Exported functions
 
 
+// Get a var id by name. Returns -1 if not found.
+// TODO: case insensitive? Allow '-' in addition to '_'?
+// TODO: binary search?
+int vars_byname(const char *n) {
+  int i;
+  for(i=0; i<VAR_END; i++)
+    if(strcmp(vars[i].name, n) == 0)
+      break;
+  return i==VAR_END ? -1 : i;
+}
+
+
 // Calls setraw() on the specified var
 void var_set(guint64 h, int n, const char *v) {
   if(vars[n].setraw)
@@ -214,12 +226,16 @@ void var_set(guint64 h, int n, const char *v) {
 }
 
 
-// Calls getraw() on the specified var
+// Calls getraw() on the specified var. If h != 0 and no value is found for
+// that hub, then another getraw() will be called with h = 0. If that fails,
+// the default value is returned instead.
 char *var_get(guint64 h, int n) {
+  char *r = NULL;
   if(vars[n].getraw)
-    return vars[n].getraw(h, vars[n].name);
+    r = vars[n].getraw(h, vars[n].name);
   else
-    return db_vars_get(h, vars[n].name);
+    r = db_vars_get(h, vars[n].name);
+  return r ? r : h ? var_get(0, n) : vars[n].def;
 }
 
 

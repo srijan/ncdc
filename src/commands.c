@@ -1009,6 +1009,20 @@ c_search_clean:
   } while(0)
 
 
+#define hubandhubname(h) \
+  guint64 hub = 0;\
+  char *hubname = "global";\
+  if(h) {\
+    struct ui_tab *tab = ui_tab_cur->data;\
+    if(tab->type != UIT_HUB && tab->type != UIT_MSG) {\
+      ui_m(NULL, 0, "This command can only be used on hub tabs.");\
+      return;\
+    }\
+    hub = tab->hub->id;\
+    hubname = tab->name;\
+  }
+
+
 static gboolean listsettings(guint64 hub, const char *hubname, const char *key) {
   int i, n = 0;
   char *pat = !key || !*key ? NULL : key[strlen(key)-1] == '*' || key[strlen(key)-1] == '?' ? g_strdup(key) : g_strconcat(key, "*", NULL);
@@ -1030,7 +1044,8 @@ static gboolean listsettings(guint64 hub, const char *hubname, const char *key) 
 
 
 // Implements /set and /hset
-static void sethset(guint64 hub, const char *hubname, char *args) {
+static void sethset(gboolean h, char *args) {
+  hubandhubname(h);
   char *key = args;
   char *val; // NULL = get
 
@@ -1073,23 +1088,14 @@ static void sethset(guint64 hub, const char *hubname, char *args) {
 }
 
 
-static void c_set(char *args) {
-  sethset(0, "global", args);
-}
-
-
-static void c_hset(char *args) {
-  struct ui_tab *tab = ui_tab_cur->data;
-  if(tab->type != UIT_HUB && tab->type != UIT_MSG) {
-    ui_m(NULL, 0, "This command can only be used on hub tabs.");
-    return;
-  }
-  sethset(tab->hub->id, tab->name, args);
-}
+static void c_set(char *args)  { sethset(FALSE, args); }
+static void c_hset(char *args) { sethset(TRUE,  args); }
 
 
 // Implements /unset and /hunset
-static void unsethunset(guint64 hub, const char *hubname, const char *key) {
+static void unsethunset(gboolean h, const char *key) {
+  hubandhubname(h);
+
   // Get var, optionally list, and check whether it can be used in this context
   int var = *key ? vars_byname(key) : -1;
   if(var < 0 && listsettings(hub, hubname, key))
@@ -1107,19 +1113,49 @@ static void unsethunset(guint64 hub, const char *hubname, const char *key) {
 }
 
 
-static void c_unset(char *args) {
-  unsethunset(0, "global", args);
-}
+static void c_unset(char *args)  { unsethunset(FALSE, args); }
+static void c_hunset(char *args) { unsethunset(TRUE,  args); }
 
 
-static void c_hunset(char *args) {
-  struct ui_tab *tab = ui_tab_cur->data;
-  if(tab->type != UIT_HUB && tab->type != UIT_MSG) {
-    ui_m(NULL, 0, "This command can only be used on hub tabs.");
+// Implementents suggestions for /h?(un)?set
+static void setunset_sug(gboolean set, gboolean h, const char *val, char **sug) {
+  guint64 hub = 0;
+  if(h) {
+    struct ui_tab *tab = ui_tab_cur->data;
+    if(tab->type != UIT_HUB && tab->type != UIT_MSG)
+      return;
+    hub = tab->hub->id;
+  }
+
+  char *sep = strchr(val, ' ');
+
+  // Suggest var name
+  if(!set || !sep) {
+    int len = strlen(val);
+    int i, n = 0;
+    for(i=0; i<VAR_END && n<20; i++)
+      if((hub ? vars[i].hub : vars[i].global) && strncmp(vars[i].name, val, len) == 0 && strlen(vars[i].name) != len)
+        sug[n++] = g_strdup(vars[i].name);
     return;
   }
-  unsethunset(tab->hub->id, tab->name, args);
+
+  // Suggest value
+  *(sep++) = 0;
+  g_strstrip(sep);
+  int var = vars_byname(val);
+  if(var >= 0 && vars[var].sug) {
+    vars[var].sug(var_get(hub, var), sep, sug);
+    strv_prefix(sug, val, " ", NULL);
+  }
 }
+
+
+static void c_set_sug(char *args, char **sug)    { setunset_sug(TRUE,  FALSE, args, sug); }
+static void c_hset_sug(char *args, char **sug)   { setunset_sug(TRUE,  TRUE,  args, sug); }
+static void c_unset_sug(char *args, char **sug)  { setunset_sug(FALSE, FALSE, args, sug); }
+static void c_hunset_sug(char *args, char **sug) { setunset_sug(FALSE, TRUE,  args, sug); }
+
+
 
 
 
@@ -1136,8 +1172,8 @@ static struct cmd cmds[] = {
   { "gc",          c_gc,          NULL             },
   { "grant",       c_grant,       c_msg_sug        },
   { "help",        c_help,        c_help_sug       },
-  { "hset",        c_hset,        NULL             }, // TODO: tab completion
-  { "hunset",      c_hunset,      NULL             }, // TODO: tab completion
+  { "hset",        c_hset,        c_hset_sug       },
+  { "hunset",      c_hunset,      c_hunset_sug     },
   { "kick",        c_kick,        c_msg_sug        },
   { "me",          c_me,          c_say_sug        },
   { "msg",         c_msg,         c_msg_sug        },
@@ -1153,10 +1189,10 @@ static struct cmd cmds[] = {
   { "refresh",     c_refresh,     fl_local_suggest },
   { "say",         c_say,         c_say_sug        },
   { "search",      c_search,      NULL             },
-  { "set",         c_set,         NULL             }, // TODO: tab completion
+  { "set",         c_set,         c_set_sug        },
   { "share",       c_share,       c_share_sug      },
   { "ungrant",     c_ungrant,     c_ungrant_sug    },
-  { "unset",       c_unset,       NULL             }, // TODO: tab completion
+  { "unset",       c_unset,       c_unset_sug      },
   { "unshare",     c_unshare,     c_unshare_sug    },
   { "userlist",    c_userlist,    NULL             },
   { "version",     c_version,     NULL             },

@@ -102,9 +102,10 @@ static void su_bool(const char *old, const char *val, char **sug) {
 
 gboolean var_log_debug = TRUE;
 
-static void s_log_debug(guint64 hub, const char *key, const char *val) {
+static gboolean s_log_debug(guint64 hub, const char *key, const char *val, GError **err) {
   db_vars_set(hub, key, val);
   var_log_debug = bool_raw(val);
+  return TRUE;
 }
 
 static char *i_log_debug() {
@@ -167,9 +168,9 @@ struct var {
 
   // Set the raw value and make sure it's active. val = NULL to unset it. In
   // general, this function should not fail if parse() didn't return an error,
-  // but it may still refuse to set the value and write to ui_m(NULL, ..) to
-  // indicate failure.
-  void (*setraw)(guint64 hub, const char *name, const char *val);
+  // but it may still refuse to set the value set *err to indicate failure.
+  // (e.g. when trying to unset a var that must always exist).
+  gboolean (*setraw)(guint64 hub, const char *name, const char *val, GError **err);
 
   // Default raw value, to be used when getraw() returns NULL.
   char *def;
@@ -218,11 +219,11 @@ int vars_byname(const char *n) {
 
 
 // Calls setraw() on the specified var
-void var_set(guint64 h, int n, const char *v) {
+gboolean var_set(guint64 h, int n, const char *v, GError **err) {
   if(vars[n].setraw)
-    vars[n].setraw(h, vars[n].name, v);
-  else
-    db_vars_set(h, vars[n].name, v);
+    return vars[n].setraw(h, vars[n].name, v, err);
+  db_vars_set(h, vars[n].name, v);
+  return FALSE;
 }
 
 
@@ -240,7 +241,7 @@ char *var_get(guint64 h, int n) {
 
 
 #if INTERFACE
-#define var_set_bool(h, n, v) var_set(h, n, v ? "true" : "false")
+#define var_set_bool(h, n, v) var_set(h, n, v ? "true" : "false", NULL)
 #endif
 
 

@@ -1039,10 +1039,15 @@ static void sethset(guint64 hub, const char *hubname, char *args) {
       g_free(raw);
       ui_mf(NULL, 0, "Error setting `%s': %s", vars[var].name, err->message);
       g_error_free(err);
+      return;
     }
-    var_set(hub, var, raw);
+    var_set(hub, var, raw, &err);
     g_free(raw);
-    print_var(hub, hubname, var);
+    if(err) {
+      ui_mf(NULL, 0, "Error setting `%s': %s", vars[var].name, err->message);
+      g_error_free(err);
+    } else
+      print_var(hub, hubname, var);
   }
 }
 
@@ -1069,8 +1074,15 @@ static void unsethunset(guint64 hub, const char *hubname, const char *key) {
   // Get var and check whether it can be used in this context
   int var = vars_byname(key);
   check_var(hub, var, key, TRUE);
-  var_set(hub, var, NULL);
-  print_var(hub, hubname, var);
+  GError *err = NULL;
+
+  // Unset
+  var_set(hub, var, NULL, &err);
+  if(err) {
+    ui_mf(NULL, 0, "Error resetting `%s': %s", vars[var].name, err->message);
+    g_error_free(err);
+  } else
+    ui_mf(NULL, 0, "%s.%s reset.", hubname, vars[var].name);
 }
 
 

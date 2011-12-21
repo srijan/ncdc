@@ -68,6 +68,7 @@ struct ui_listing;
 struct ui_logwindow;
 struct ui_tab;
 struct ui_textinput;
+struct var;
 
 
 // include the auto-generated header files
@@ -86,4 +87,5 @@ struct ui_textinput;
 #include "ui.h"
 #include "ui_util.h"
 #include "util.h"
+#include "vars.h"
 

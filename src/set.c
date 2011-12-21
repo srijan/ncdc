@@ -760,20 +760,6 @@ static void set_flush_file_cache(guint64 hub, char *key, char *val) {
 }
 
 
-static void set_log_debug(guint64 hub, char *key, char *val) {
-  if(!val) {
-    db_vars_rm(hub, key);
-    ui_mf(NULL, 0, "global.%s reset.", key);
-    log_debug = FALSE;
-    return;
-  }
-
-  log_debug = bool_var(val);
-  conf_set_bool(hub, key, log_debug);
-  get_bool_f(hub, key);
-}
-
-
 // the settings list
 static struct setting settings[] = {
   { "active",           get_bool_f,          set_active,          set_bool_sug       },
@@ -798,9 +784,6 @@ static struct setting settings[] = {
   { "flush_file_cache", get_flush_file_cache,set_flush_file_cache,set_bool_sug       },
   { "hubname",          get_hubname,         set_hubname,         set_hubname_sug    },
   { "incoming_dir",     get_incoming_dir,    set_dl_inc_dir,      set_path_sug       },
-  { "log_debug",        get_bool_f,          set_log_debug,       set_bool_sug       },
-  { "log_downloads",    get_bool_t,          set_bool_t,          set_bool_sug       },
-  { "log_uploads",      get_bool_t,          set_bool_t,          set_bool_sug       },
   { "minislots",        get_minislots,       set_minislots,       NULL               },
   { "minislot_size",    get_minislot_size,   set_minislot_size,   NULL               },
   { "nick",             get_string,          set_nick,            set_old_sug        },

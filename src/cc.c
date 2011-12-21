@@ -461,8 +461,7 @@ static void xfer_log_add(struct cc *cc) {
   if(cc->tthl_dat || !cc->last_length)
     return;
 
-  char *key = cc->dl ? "log_downloads" : "log_uploads";
-  if(conf_exists(0, key) && !conf_get_bool(0, key))
+  if(!var_get_bool(0, cc->dl ? VAR_log_downloads : VAR_log_uploads))
     return;
 
   static struct logfile *log = NULL;

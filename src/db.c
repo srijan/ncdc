@@ -1487,9 +1487,6 @@ void db_init() {
 
   // load fadv_enabled
   g_atomic_int_set(&fadv_enabled, conf_get_bool(0, "flush_file_cache"));
-
-  // load log_debug
-  log_debug = conf_get_bool(0, "log_debug");
 }
 
 

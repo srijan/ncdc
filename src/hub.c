@@ -917,7 +917,7 @@ static void adc_handle(struct hub *hub, char *msg) {
     else {
       hub->sid = ADC_DFCC(cmd.argv[0]);
       hub->state = ADC_S_IDENTIFY;
-      hub->nick = g_strdup(conf_hub_get(hub->id, "nick"));
+      hub->nick = g_strdup(var_get(hub->id, VAR_nick));
       ui_hub_setnick(hub->tab);
       hub_send_nfo(hub);
     }
@@ -1259,7 +1259,7 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
       net_send(hub->net, "$Supports NoGetINFO NoHello UserIP2");
     char *key = nmdc_lock2key(lock);
     net_sendf(hub->net, "$Key %s", key);
-    hub->nick = g_strdup(conf_hub_get(hub->id, "nick"));
+    hub->nick = g_strdup(var_get(hub->id, VAR_nick));
     hub->nick_hub = charset_convert(hub, FALSE, hub->nick);
     ui_hub_setnick(hub->tab);
     net_sendf(hub->net, "$ValidateNick %s", hub->nick_hub);

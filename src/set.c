@@ -76,39 +76,6 @@ static gboolean bool_var(const char *val) {
   return FALSE;
 }
 
-
-static void set_nick(guint64 hub, char *key, char *val) {
-  if(!val) {
-    if(!hub) {
-      ui_m(NULL, 0, "global.nick may not be unset.");
-      return;
-    }
-    db_vars_rm(hub, key);
-    ui_mf(NULL, 0, "%s.%s reset.", hubname(hub), key);
-    return;
-  }
-
-  if(strlen(val) > 32) {
-    ui_m(NULL, 0, "Too long nick name.");
-    return;
-  }
-
-  int i;
-  for(i=strlen(val)-1; i>=0; i--)
-    if(val[i] == '$' || val[i] == '|' || val[i] == ' ' || val[i] == '<' || val[i] == '>')
-      break;
-  if(i >= 0) {
-    ui_m(NULL, 0, "Invalid character in nick name.");
-    return;
-  }
-
-  db_vars_set(hub, key, val);
-  get_string(hub, key);
-  ui_m(NULL, 0, "Your new nick will be used for new hub connections.");
-  // TODO: nick change without reconnect on ADC?
-}
-
-
 // set email/description/connection info
 static void set_userinfo(guint64 hub, char *key, char *val) {
   if(!val) {
@@ -744,7 +711,6 @@ static struct setting settings[] = {
   { "incoming_dir",     get_incoming_dir,    set_dl_inc_dir,      set_path_sug       },
   { "minislots",        get_minislots,       set_minislots,       NULL               },
   { "minislot_size",    get_minislot_size,   set_minislot_size,   NULL               },
-  { "nick",             get_string,          set_nick,            set_old_sug        },
   { "password",         get_password,        set_password,        NULL               },
   { "share_hidden",     get_bool_f,          set_bool_f,          set_bool_sug       },
   { "share_exclude",    get_string,          set_regex,           set_old_sug        },

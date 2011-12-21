@@ -86,16 +86,68 @@ static void su_bool(const char *old, const char *val, char **sug) {
 }
 
 
+static void su_old(const char *old, const char *val, char **sug) {
+  if(old && strncmp(old, val, strlen(val)) == 0)
+    sug[0] = g_strdup(old);
+}
+
+
 
 
 // Var definitions
-// 
+//
 // Each variable is defined in a VAR_* (where * is all-capitals), which "calls"
 // a V() macro with the following arguments:
 //   V(name, global, hub, format, parse, suggest, getraw, setraw, default)
 // "default" does not need to be a run-time constant, it will be evaluated at
 // initialization instead (after the database has been initialized). Setting
 // this to a function allows it to initialize other stuff as well.
+
+
+// nick
+// TODO: nick change without reconnect on ADC?
+
+static char *p_nick(const char *val, GError **err) {
+  if(strlen(val) > 32) {
+    g_set_error_literal(err, 1, 0, "Too long nick name.");
+    return NULL;
+  }
+
+  int i;
+  for(i=strlen(val)-1; i>=0; i--)
+    if(val[i] == '$' || val[i] == '|' || val[i] == ' ' || val[i] == '<' || val[i] == '>')
+      break;
+  if(i >= 0) {
+    g_set_error_literal(err, 1, 0, "Invalid character in nick name.");
+    return NULL;
+  }
+
+  ui_m(NULL, 0, "Your new nick will be used for new hub connections.");
+  return g_strdup(val);
+}
+
+static gboolean s_nick(guint64 hub, const char *key, const char *val, GError **err) {
+  if(!val && !hub) {
+    g_set_error_literal(err, 1, 0, "May not be unset.");
+    return FALSE;
+  }
+  db_vars_set(hub, key, val);
+  return TRUE;
+}
+
+static char *i_nick() {
+  // make sure a nick is set
+  if(!db_vars_get(0, "nick")) {
+    char *nick = g_strdup_printf("ncdc_%d", g_random_int_range(1, 9999));
+    db_vars_set(0, "nick", nick);
+    g_free(nick);
+  }
+  return "ncdc";
+}
+
+#if INTERFACE
+#define VAR_NICK V(nick, 1, 1, f_id, p_nick, su_old, NULL, s_nick, i_nick())
+#endif
 
 
 // flush_file_cache
@@ -216,7 +268,8 @@ struct var {
   VAR_FLUSH_FILE_CACHE \
   VAR_LOG_DEBUG \
   VAR_LOG_DOWNLOADS \
-  VAR_LOG_UPLOADS
+  VAR_LOG_UPLOADS \
+  VAR_NICK
 
 enum var_names {
 #define V(n, gl, h, f, p, su, g, s, d) VAR_##n,

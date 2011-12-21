@@ -1076,11 +1076,6 @@ struct fadv {
 
 #endif
 
-// Enable/disable calling of posix_fadvise(). Use g_atomic_int_() functions to
-// read/write this variable!
-int fadv_enabled = 0;
-
-
 #ifdef HAVE_POSIX_FADVISE
 
 // call with length = -1 to force a flush
@@ -1088,7 +1083,7 @@ void fadv_purge(struct fadv *a, int length) {
   if(length > 0)
     a->chunk += length;
   // flush every 5MB. Some magical value, don't think too much into it.
-  if(g_atomic_int_get(&fadv_enabled) && (a->chunk > 5*1024*1024 || (length < 0 && a->chunk > 0))) {
+  if(var_flush_file_cache_get() && (a->chunk > 5*1024*1024 || (length < 0 && a->chunk > 0))) {
     posix_fadvise(a->fd, a->offset, a->chunk, POSIX_FADV_DONTNEED);
     a->offset += a->chunk;
     a->chunk = 0;

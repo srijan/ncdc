@@ -1484,9 +1484,6 @@ void db_init() {
     db_vars_set(0, "nick", nick);
     g_free(nick);
   }
-
-  // load fadv_enabled
-  g_atomic_int_set(&fadv_enabled, conf_get_bool(0, "flush_file_cache"));
 }
 
 

@@ -98,6 +98,41 @@ static void su_bool(const char *old, const char *val, char **sug) {
 // this to a function allows it to initialize other stuff as well.
 
 
+// flush_file_cache
+
+// Special interface to allow quick and threaded access to the current value
+#if INTERFACE
+#define var_flush_file_cache_get() g_atomic_int_get(&var_flush_file_cache)
+#define var_flush_file_cache_set(v) g_atomic_int_set(&var_flush_file_cache, v)
+#endif
+
+int var_flush_file_cache = 0;
+
+static char *f_flush_file_cache(const char *raw) {
+#if HAVE_POSIX_FADVISE
+  return f_id(raw);
+#else
+  return g_strdup("false (not supported)");
+#endif
+}
+
+static gboolean s_flush_file_cache(guint64 hub, const char *key, const char *val, GError **err) {
+  db_vars_set(hub, key, val);
+  var_flush_file_cache_set(bool_raw(val));
+  return TRUE;
+}
+
+static char *i_flush_file_cache() {
+  char *r = db_vars_get(0, "flush_file_cache");
+  var_flush_file_cache_set(bool_raw(r));
+  return "false";
+}
+
+#if INTERFACE
+#define VAR_FLUSH_FILE_CACHE V(flush_file_cache, 1, 0, f_flush_file_cache, p_bool, su_bool, NULL, s_flush_file_cache, i_flush_file_cache())
+#endif
+
+
 // log_debug
 
 gboolean var_log_debug = TRUE;
@@ -178,6 +213,7 @@ struct var {
 
 
 #define VARS\
+  VAR_FLUSH_FILE_CACHE \
   VAR_LOG_DEBUG \
   VAR_LOG_DOWNLOADS \
   VAR_LOG_UPLOADS

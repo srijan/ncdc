@@ -719,29 +719,6 @@ static void set_filelist_maxage(guint64 hub, char *key, char *val) {
 }
 
 
-static void get_flush_file_cache(guint64 hub, char *key) {
-#if HAVE_POSIX_FADVISE
-  ui_mf(NULL, 0, "global.%s = %s", key, g_atomic_int_get(&fadv_enabled) ? "true" : "false");
-#else
-  ui_mf(NULL, 0, "global.%s = false (not supported)", key);
-#endif
-}
-
-
-static void set_flush_file_cache(guint64 hub, char *key, char *val) {
-  if(!val) {
-    db_vars_rm(0, key);
-    g_atomic_int_set(&fadv_enabled, 0);
-    ui_mf(NULL, 0, "global.%s reset.", key);
-  } else {
-    int v = bool_var(val);
-    conf_set_bool(0, key, v);
-    g_atomic_int_set(&fadv_enabled, v);
-    get_flush_file_cache(0, key);
-  }
-}
-
-
 // the settings list
 static struct setting settings[] = {
   { "active",           get_bool_f,          set_active,          set_bool_sug       },
@@ -763,7 +740,6 @@ static struct setting settings[] = {
   { "email",            get_string,          set_userinfo,        set_old_sug        },
   { "encoding",         get_encoding,        set_encoding,        set_encoding_sug   },
   { "filelist_maxage",  get_filelist_maxage, set_filelist_maxage, set_old_sug        },
-  { "flush_file_cache", get_flush_file_cache,set_flush_file_cache,set_bool_sug       },
   { "hubname",          get_hubname,         set_hubname,         set_hubname_sug    },
   { "incoming_dir",     get_incoming_dir,    set_dl_inc_dir,      set_path_sug       },
   { "minislots",        get_minislots,       set_minislots,       NULL               },

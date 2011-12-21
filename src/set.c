@@ -76,20 +76,6 @@ static gboolean bool_var(const char *val) {
   return FALSE;
 }
 
-// set email/description/connection info
-static void set_userinfo(guint64 hub, char *key, char *val) {
-  if(!val) {
-    db_vars_rm(hub, key);
-    ui_mf(NULL, 0, "%s.%s reset.", hubname(hub), key);
-  } else {
-    if(strcmp(key, "connection") == 0 && !connection_to_speed(val))
-      ui_mf(NULL, 0, "Couldn't convert `%s' to bytes/second, won't broadcast upload speed on ADC. See `/help set connection' for more information.", val);
-    db_vars_set(hub, key, val);
-    get_string(hub, key);
-  }
-  hub_global_nfochange();
-}
-
 
 static void get_encoding(guint64 hub, char *key) {
   ui_mf(NULL, 0, "%s.%s = %s", hubname(hub), key, conf_encoding(hub));
@@ -699,12 +685,9 @@ static struct setting settings[] = {
 #define C(n, a,b,c) { "color_" G_STRINGIFY(n), get_color, set_color, set_color_sug },
   UI_COLORS
 #undef C
-  { "connection",       get_string,          set_userinfo,        set_old_sug        },
-  { "description",      get_string,          set_userinfo,        set_old_sug        },
   { "download_dir",     get_download_dir,    set_dl_inc_dir,      set_path_sug       },
   { "download_slots",   get_download_slots,  set_download_slots,  NULL               },
   { "download_exclude", get_string,          set_regex,           set_old_sug        },
-  { "email",            get_string,          set_userinfo,        set_old_sug        },
   { "encoding",         get_encoding,        set_encoding,        set_encoding_sug   },
   { "filelist_maxage",  get_filelist_maxage, set_filelist_maxage, set_old_sug        },
   { "hubname",          get_hubname,         set_hubname,         set_hubname_sug    },

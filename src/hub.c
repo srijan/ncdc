@@ -604,9 +604,9 @@ void hub_send_nfo(struct hub *hub) {
   unsigned short port;
   gboolean sup_tls;
 
-  desc = conf_hub_get(hub->id, "description");
-  conn = conf_hub_get(hub->id, "connection");
-  mail = conf_hub_get(hub->id, "email");
+  desc = var_get(hub->id, VAR_description);
+  conn = var_get(hub->id, VAR_connection);
+  mail = var_get(hub->id, VAR_email);
 
   h_norm = h_reg = h_op = 0;
   GList *n;

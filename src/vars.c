@@ -65,6 +65,10 @@ static char *f_id(const char *val) {
 
 #define f_bool f_id
 
+static char *p_id(const char *val, GError **err) {
+  return g_strdup(val);
+}
+
 
 static char *p_bool(const char *val, GError **err) {
   GError *e = NULL;
@@ -147,6 +151,27 @@ static char *i_nick() {
 
 #if INTERFACE
 #define VAR_NICK V(nick, 1, 1, f_id, p_nick, su_old, NULL, s_nick, i_nick())
+#endif
+
+
+// email / description / connection
+
+static char *p_connection(const char *val, GError **err) {
+  if(!connection_to_speed(val))
+    ui_mf(NULL, 0, "Couldn't convert `%s' to bytes/second, won't broadcast upload speed on ADC. See `/help set connection' for more information.", val);
+  return g_strdup(val);
+}
+
+static gboolean s_hubinfo(guint64 hub, const char *key, const char *val, GError **err) {
+  db_vars_set(hub, key, val);
+  hub_global_nfochange();
+  return TRUE;
+}
+
+#if INTERFACE
+#define VAR_EMAIL       V(email,       1, 1, f_id, p_id,         su_old, NULL, s_hubinfo, NULL)
+#define VAR_CONNECTION  V(connection,  1, 1, f_id, p_connection, su_old, NULL, s_hubinfo, NULL)
+#define VAR_DESCRIPTION V(description, 1, 1, f_id, p_id,         su_old, NULL, s_hubinfo, NULL)
 #endif
 
 
@@ -265,6 +290,9 @@ struct var {
 
 
 #define VARS\
+  VAR_CONNECTION \
+  VAR_DESCRIPTION \
+  VAR_EMAIL \
   VAR_FLUSH_FILE_CACHE \
   VAR_LOG_DEBUG \
   VAR_LOG_DOWNLOADS \

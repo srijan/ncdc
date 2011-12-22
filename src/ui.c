@@ -173,7 +173,7 @@ struct ui_tab *ui_msg_create(struct hub *hub, struct hub_user *user) {
   tab->hub = hub;
   tab->uid = user->uid;
   tab->name = g_strdup_printf("~%s", user->name);
-  tab->log = ui_logwindow_create(tab->name, conf_get_int(0, "backlog"));
+  tab->log = ui_logwindow_create(tab->name, var_get_int(0, VAR_backlog));
   tab->log->handle = tab;
   tab->log->checkchat = ui_hub_log_checkchat;
 
@@ -305,8 +305,7 @@ struct ui_tab *ui_hub_create(const char *name, gboolean conn) {
   tab->name = g_strdup_printf("#%s", name);
   tab->type = UIT_HUB;
   tab->hub = hub_create(tab);
-  tab->log = ui_logwindow_create(tab->name,
-      conf_get_int(conf_exists(tab->hub->id, "backlog") ? tab->hub->id : 0, "backlog"));
+  tab->log = ui_logwindow_create(tab->name, var_get_int(tab->hub->id, VAR_backlog));
   tab->log->handle = tab;
   tab->log->checkchat = ui_hub_log_checkchat;
   // already used this name before? open connection again

@@ -204,6 +204,13 @@ static char *p_active_port(const char *val, GError **err) {
 #endif
 
 
+// autoconnect
+
+#if INTERFACE
+#define VAR_AUTOCONNECT V(autoconnect, 0, 1, f_bool, p_bool, su_bool, NULL, NULL, "false")
+#endif
+
+
 // autorefresh
 
 static char *f_autorefresh(const char *val) {
@@ -225,6 +232,27 @@ static char *p_autorefresh(const char *val, GError **err) {
 
 #if INTERFACE
 #define VAR_AUTOREFRESH V(autorefresh, 1, 0, f_autorefresh, p_autorefresh, NULL, NULL, NULL, "3600")
+#endif
+
+
+// backlog
+
+static char *f_backlog(const char *var) {
+  return g_strdup(strcmp(var, "0") == 0 ? "0 (disabled)" : var);
+}
+
+static char *p_backlog(const char *val, GError **err) {
+  char *r = p_int(val, err);
+  if(r && int_raw(r) > LOGWIN_BUF-1) {
+    g_set_error(err, 1, 0, "Maximum value is %d.", LOGWIN_BUF-1);
+    g_free(r);
+    return NULL;
+  }
+  return r;
+}
+
+#if INTERFACE
+#define VAR_BACKLOG V(backlog, 1, 1, f_backlog, p_backlog, NULL, NULL, NULL, "0")
 #endif
 
 
@@ -446,7 +474,9 @@ struct var {
   VAR_ACTIVE_BIND \
   VAR_ACTIVE_IP \
   VAR_ACTIVE_PORT \
+  VAR_AUTOCONNECT \
   VAR_AUTOREFRESH \
+  VAR_BACKLOG \
   VAR_CONNECTION \
   VAR_DESCRIPTION \
   VAR_EMAIL \

@@ -134,14 +134,6 @@ static void set_bool_sug(guint64 hub, char *key, char *val, char **sug) {
 }
 
 
-static void set_autoconnect(guint64 hub, char *key, char *val) {
-  if(!hub)
-    ui_m(NULL, 0, "ERROR: autoconnect can only be used as hub setting.");
-  else
-    set_bool_f(hub, key, val);
-}
-
-
 static void get_password(guint64 hub, char *key) {
   ui_mf(NULL, 0, "%s.%s is %s", hubname(hub), key, conf_exists(hub, key) ? "set" : "not set");
 }
@@ -312,32 +304,6 @@ static void set_download_slots(guint64 hub, char *key, char *val) {
 }
 
 
-static void get_backlog(guint64 hub, char *key) {
-  int n = conf_get_int(hub, key);
-  ui_mf(NULL, 0, "%s.%s = %d%s", hubname(hub), key, n, !n ? " (disabled)" : "");
-}
-
-
-static void set_backlog(guint64 hub, char *key, char *val) {
-  if(!val) {
-    db_vars_rm(hub, key);
-    ui_mf(NULL, 0, "%s.%s reset.", hubname(hub), key);
-    return;
-  }
-
-  errno = 0;
-  long v = strtol(val, NULL, 10);
-  if((!v && errno == EINVAL) || v < INT_MIN || v > INT_MAX || v < 0)
-    ui_m(NULL, 0, "Invalid number.");
-  else if(v >= LOGWIN_BUF)
-    ui_mf(NULL, 0, "Maximum value is %d.", LOGWIN_BUF-1);
-  else {
-    conf_set_int(hub, key, v);
-    get_backlog(hub, key);
-  }
-}
-
-
 static void get_color(guint64 hub, char *key) {
   g_return_if_fail(strncmp(key, "color_", 6) == 0);
   struct ui_color *c = ui_color_by_name(key+6);
@@ -497,8 +463,6 @@ static void set_filelist_maxage(guint64 hub, char *key, char *val) {
 
 // the settings list
 static struct setting settings[] = {
-  { "autoconnect",      get_bool_f,          set_autoconnect,     set_bool_sug       },
-  { "backlog",          get_backlog,         set_backlog,         NULL,              },
   { "chat_only",        get_bool_f,          set_bool_f,          set_bool_sug       },
 #define C(n, a,b,c) { "color_" G_STRINGIFY(n), get_color, set_color, set_color_sug },
   UI_COLORS

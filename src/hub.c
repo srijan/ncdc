@@ -627,7 +627,7 @@ void hub_send_nfo(struct hub *hub) {
     else
       h_norm++;
   }
-  slots = conf_slots();
+  slots = var_get_int(0, VAR_slots);
   ip4 = cc_listen ? ip4_pack(conf_hub_get(hub->id, "active_ip")) : 0;
   port = cc_listen ? cc_listen_port : 0;
   share = fl_local_list_size;
@@ -838,7 +838,7 @@ static void adc_sch(struct hub *hub, struct adc_cmd *cmd) {
   if(!i)
     goto adc_search_cleanup;
 
-  int slots = conf_slots();
+  int slots = var_get_int(0, VAR_slots);
   int slots_free = slots - cc_slots_in_use(NULL);
   if(slots_free < 0)
     slots_free = 0;
@@ -1195,7 +1195,7 @@ static void nmdc_search(struct hub *hub, char *from, int size_m, guint64 size, i
     return;
 
   char *hubaddr = net_remoteaddr(hub->net);
-  int slots = conf_slots();
+  int slots = var_get_int(0, VAR_slots);
   int slots_free = slots - cc_slots_in_use(NULL);
   if(slots_free < 0)
     slots_free = 0;

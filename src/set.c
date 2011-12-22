@@ -223,29 +223,6 @@ static void set_active_bind(guint64 hub, char *key, char *val) {
 }
 
 
-static void get_slots(guint64 hub, char *key) {
-  ui_mf(NULL, 0, "global.%s = %d", key, conf_slots());
-}
-
-
-static void set_slots(guint64 hub, char *key, char *val) {
-  if(!val) {
-    db_vars_rm(0, key);
-    ui_mf(NULL, 0, "global.%s reset.", key);
-  } else {
-    long v = strtol(val, NULL, 10);
-    if((!v && errno == EINVAL) || v < INT_MIN || v > INT_MAX || v < 0)
-      ui_m(NULL, 0, "Invalid number.");
-    else {
-      conf_set_int(0, key, v);
-      get_slots(0, key);
-      hub_global_nfochange();
-    }
-  }
-  hub_global_nfochange();
-}
-
-
 static void get_minislot_size(guint64 hub, char *key) {
   ui_mf(NULL, 0, "global.%s = %d KiB", key, conf_minislot_size() / 1024);
 }
@@ -672,7 +649,6 @@ static struct setting settings[] = {
   { "share_hidden",     get_bool_f,          set_bool_f,          set_bool_sug       },
   { "share_exclude",    get_string,          set_regex,           set_old_sug        },
   { "show_joinquit",    get_bool_f,          set_bool_f,          set_bool_sug       },
-  { "slots",            get_slots,           set_slots,           NULL               },
   { "tls_policy",       get_tls_policy,      set_tls_policy,      set_tls_policy_sug },
   { "ui_time_format",   get_ui_time_format,  set_ui_time_format,  set_old_sug        },
   { NULL }

@@ -2501,7 +2501,7 @@ static void ui_draw_status() {
     mvprintw(winrows-1, 0, "[Hashing: %d / %s / %.2f MiB/s]",
       g_hash_table_size(fl_hash_queue), str_formatsize(fl_hash_queue_size), ((float)ratecalc_get(&fl_hash_rate))/(1024.0f*1024.0f));
   mvprintw(winrows-1, wincols-37, "[U/D:%6d/%6d KiB/s]", ratecalc_get(&net_out)/1024, ratecalc_get(&net_in)/1024);
-  mvprintw(winrows-1, wincols-11, "[S:%3d/%3d]", cc_slots_in_use(NULL), conf_slots());
+  mvprintw(winrows-1, wincols-11, "[S:%3d/%3d]", cc_slots_in_use(NULL), var_get_int(0, VAR_slots));
 
   ui_m_updated = FALSE;
   if(ui_m_text) {

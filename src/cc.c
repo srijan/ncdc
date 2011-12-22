@@ -526,7 +526,7 @@ static gboolean request_slot(struct cc *cc, gboolean need_full) {
     return TRUE;
 
   // if we have a free slot, use that
-  if(slots < conf_slots())
+  if(slots < var_get_int(0, VAR_slots))
     return TRUE;
 
   // if we can use a minislot, do so
@@ -1002,7 +1002,7 @@ static void adc_handle(struct cc *cc, char *msg) {
         g_string_append_printf(r, " 151 File Not Available");
       } else {
         r = adc_generate('C', ADCC_RES, 0, 0);
-        g_string_append_printf(r, " SL%d SI%"G_GUINT64_FORMAT, conf_slots() - cc_slots_in_use(NULL), f->size);
+        g_string_append_printf(r, " SL%d SI%"G_GUINT64_FORMAT, var_get_int(0, VAR_slots) - cc_slots_in_use(NULL), f->size);
         char *path = fl_list_path(f);
         adc_append(r, "FN", path);
         g_free(path);

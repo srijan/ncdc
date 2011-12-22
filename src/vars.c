@@ -64,6 +64,7 @@ static char *f_id(const char *val) {
 }
 
 #define f_bool f_id
+#define f_int f_id
 
 static char *f_interval(const char *val) {
   return g_strdup(str_formatinterval(int_raw(val)));
@@ -82,6 +83,15 @@ static char *p_bool(const char *val, GError **err) {
     return NULL;
   }
   return g_strdup(b ? "true" : "false");
+}
+
+static char *p_int(const char *val, GError **err) {
+  long v = strtol(val, NULL, 10);
+  if((!v && errno == EINVAL) || v < INT_MIN || v > INT_MAX || v < 0) {
+    g_set_error_literal(err, 1, 0, "Invalid number.");
+    return NULL;
+  }
+  return g_strdup_printf("%d", (int)v);
 }
 
 static char *p_interval(const char *val, GError **err) {
@@ -106,6 +116,12 @@ static void su_bool(const char *old, const char *val, char **sug) {
 static void su_old(const char *old, const char *val, char **sug) {
   if(old && strncmp(old, val, strlen(val)) == 0)
     sug[0] = g_strdup(old);
+}
+
+static gboolean s_hubinfo(guint64 hub, const char *key, const char *val, GError **err) {
+  db_vars_set(hub, key, val);
+  hub_global_nfochange();
+  return TRUE;
 }
 
 
@@ -134,6 +150,7 @@ static char *p_autorefresh(const char *val, GError **err) {
   char *raw = p_interval(val, err);
   if(raw && raw[0] != '0' && int_raw(raw) < 600) {
     g_set_error_literal(err, 1, 0, "Interval between automatic refreshes should be at least 10 minutes.");
+    g_free(raw);
     return NULL;
   }
   return raw;
@@ -197,12 +214,6 @@ static char *p_connection(const char *val, GError **err) {
   if(!connection_to_speed(val))
     ui_mf(NULL, 0, "Couldn't convert `%s' to bytes/second, won't broadcast upload speed on ADC. See `/help set connection' for more information.", val);
   return g_strdup(val);
-}
-
-static gboolean s_hubinfo(guint64 hub, const char *key, const char *val, GError **err) {
-  db_vars_set(hub, key, val);
-  hub_global_nfochange();
-  return TRUE;
 }
 
 #if INTERFACE
@@ -282,6 +293,24 @@ static char *i_log_debug() {
 #endif
 
 
+// slots
+
+static char *p_slots(const char *val, GError **err) {
+  char *r = p_int(val, err);
+  if(r && int_raw(r) < 1) {
+    g_set_error_literal(err, 1, 0, "Invalid value.");
+    g_free(r);
+    return NULL;
+  }
+  return r;
+}
+
+#if INTERFACE
+#define VAR_SLOTS V(slots, 1, 0, f_int, p_slots, NULL, NULL, s_hubinfo, "10")
+#endif
+
+
+
 
 
 // Exported data
@@ -335,7 +364,8 @@ struct var {
   VAR_LOG_DEBUG \
   VAR_LOG_DOWNLOADS \
   VAR_LOG_UPLOADS \
-  VAR_NICK
+  VAR_NICK \
+  VAR_SLOTS
 
 enum var_names {
 #define V(n, gl, h, f, p, su, g, s, d) VAR_##n,
@@ -401,12 +431,12 @@ char *var_get(guint64 h, int n) {
 
 
 gboolean var_get_bool(guint64 h, int n) {
-  char *r = var_get(n, h);
+  char *r = var_get(h, n);
   return bool_raw(r);
 }
 
 int var_get_int(guint64 h, int n) {
-  char *r = var_get(n, h);
+  char *r = var_get(h, n);
   return int_raw(r);
 }
 

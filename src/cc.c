@@ -530,7 +530,7 @@ static gboolean request_slot(struct cc *cc, gboolean need_full) {
     return TRUE;
 
   // if we can use a minislot, do so
-  if(!need_full && minislots < conf_minislots()) {
+  if(!need_full && minislots < var_get_int(0, VAR_minislots)) {
     cc->slot_mini = TRUE;
     return TRUE;
   }

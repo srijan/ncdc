@@ -94,6 +94,16 @@ static char *p_int(const char *val, GError **err) {
   return g_strdup_printf("%d", (int)v);
 }
 
+static char *p_int_ge1(const char *val, GError **err) {
+  char *r = p_int(val, err);
+  if(r && int_raw(r) < 1) {
+    g_set_error_literal(err, 1, 0, "Invalid value.");
+    g_free(r);
+    return NULL;
+  }
+  return r;
+}
+
 static char *p_interval(const char *val, GError **err) {
   int n = str_parseinterval(val);
   if(n < 0) {
@@ -293,20 +303,17 @@ static char *i_log_debug() {
 #endif
 
 
-// slots
-
-static char *p_slots(const char *val, GError **err) {
-  char *r = p_int(val, err);
-  if(r && int_raw(r) < 1) {
-    g_set_error_literal(err, 1, 0, "Invalid value.");
-    g_free(r);
-    return NULL;
-  }
-  return r;
-}
+// minislots
 
 #if INTERFACE
-#define VAR_SLOTS V(slots, 1, 0, f_int, p_slots, NULL, NULL, s_hubinfo, "10")
+#define VAR_MINISLOTS V(minislots, 1, 0, f_int, p_int_ge1, NULL, NULL, NULL, "3")
+#endif
+
+
+// slots
+
+#if INTERFACE
+#define VAR_SLOTS V(slots, 1, 0, f_int, p_int_ge1, NULL, NULL, s_hubinfo, "10")
 #endif
 
 
@@ -364,6 +371,7 @@ struct var {
   VAR_LOG_DEBUG \
   VAR_LOG_DOWNLOADS \
   VAR_LOG_UPLOADS \
+  VAR_MINISLOTS \
   VAR_NICK \
   VAR_SLOTS
 

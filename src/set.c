@@ -247,30 +247,6 @@ static void set_minislot_size(guint64 hub, char *key, char *val) {
 }
 
 
-static void get_minislots(guint64 hub, char *key) {
-  ui_mf(NULL, 0, "global.%s = %d", key, conf_minislots());
-}
-
-
-static void set_minislots(guint64 hub, char *key, char *val) {
-  if(!val) {
-    db_vars_rm(0, key);
-    ui_mf(NULL, 0, "global.%s reset.", key);
-    return;
-  }
-
-  long v = strtol(val, NULL, 10);
-  if((!v && errno == EINVAL) || v < INT_MIN || v > INT_MAX || v < 0)
-    ui_m(NULL, 0, "Invalid number.");
-  else if(v < 1)
-    ui_m(NULL, 0, "You must have at least 1 minislot.");
-  else {
-    conf_set_int(0, key, v);
-    get_minislots(0, key);
-  }
-}
-
-
 static void get_password(guint64 hub, char *key) {
   ui_mf(NULL, 0, "%s.%s is %s", hubname(hub), key, conf_exists(hub, key) ? "set" : "not set");
 }
@@ -643,7 +619,6 @@ static struct setting settings[] = {
   { "filelist_maxage",  get_filelist_maxage, set_filelist_maxage, set_old_sug        },
   { "hubname",          get_hubname,         set_hubname,         set_hubname_sug    },
   { "incoming_dir",     get_incoming_dir,    set_dl_inc_dir,      set_path_sug       },
-  { "minislots",        get_minislots,       set_minislots,       NULL               },
   { "minislot_size",    get_minislot_size,   set_minislot_size,   NULL               },
   { "password",         get_password,        set_password,        NULL               },
   { "share_hidden",     get_bool_f,          set_bool_f,          set_bool_sug       },

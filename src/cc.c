@@ -796,7 +796,7 @@ static void handle_adcget(struct cc *cc, char *type, char *id, guint64 start, gi
       memcpy(cc->last_hash, f->tth, 24);
     char *tmp = adc_escape(id, !cc->adc);
     net_sendf(cc->net,
-      cc->adc ? "CSND file %s %"G_GUINT64_FORMAT" %"G_GINT64_FORMAT : "$ADCSND file %s %"G_GUINT64_FORMAT" %"G_GINT64_FORMAT,
+      cc->adc ? "CSND file %s %"G_GUINT64_FORMAT" %d" : "$ADCSND file %s %"G_GUINT64_FORMAT" %d",
       tmp, start, cc->last_length);
     cc->state = CCS_TRANSFER;
     time(&cc->last_start);

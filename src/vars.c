@@ -49,16 +49,6 @@ static gboolean bool_parse(const char *val, GError **err) {
   return FALSE;
 }
 
-/*static int int_parse(const char *val, GError **err) {
-  long v = strtol(val, NULL, 10);
-  if((!v && errno == EINVAL) || v < INT_MIN || v > INT_MAX) {
-    g_set_error_literal(err, 1, 0, "Invalid number.");
-    return 0;
-  }
-  return v;
-}*/
-
-
 static char *f_id(const char *val) {
   return g_strdup(val);
 }
@@ -113,6 +103,16 @@ static char *p_interval(const char *val, GError **err) {
   return g_strdup_printf("%d", n);
 }
 
+static char *p_ip(const char *val, GError **err) {
+  GInetAddress *a = g_inet_address_new_from_string(val);
+  if(!a) {
+    g_set_error_literal(err, 1, 0, "Invalid IP.");
+    return NULL;
+  }
+  g_object_unref(a);
+  return g_strdup(val);
+}
+
 // Only suggests "true" or "false" regardless of the input. There are only two
 // states anyway, and one would want to switch between those two without any
 // hassle.
@@ -134,6 +134,17 @@ static gboolean s_hubinfo(guint64 hub, const char *key, const char *val, GError 
   return TRUE;
 }
 
+static gboolean s_active_conf(guint64 hub, const char *key, const char *val, GError **err) {
+  db_vars_set(hub, key, val);
+  if(!val && !hub && strcmp(key, "active_ip") == 0)
+    var_set_bool(0, VAR_active, FALSE);
+  if(!hub)
+    cc_listen_start();
+  else
+    hub_global_nfochange();
+  return TRUE;
+}
+
 
 
 
@@ -145,6 +156,52 @@ static gboolean s_hubinfo(guint64 hub, const char *key, const char *val, GError 
 // "default" does not need to be a run-time constant, it will be evaluated at
 // initialization instead (after the database has been initialized). Setting
 // this to a function allows it to initialize other stuff as well.
+
+
+// active
+
+static gboolean s_active(guint64 hub, const char *key, const char *val, GError **err) {
+  if(bool_raw(val) && !var_get(0, VAR_active_ip)) {
+    g_set_error_literal(err, 1, 0, "No IP address set. Please use `/set active_ip <your_ip>' first.");
+    return FALSE;
+  }
+  return s_active_conf(hub, key, val, err);
+}
+
+#if INTERFACE
+#define VAR_ACTIVE V(active, 1, 0, f_bool, p_bool, su_bool, NULL, s_active, "false")
+#endif
+
+
+// active_bind
+
+#if INTERFACE
+#define VAR_ACTIVE_BIND V(active_bind, 1, 0, f_id, p_ip, su_old, NULL, s_active_conf, NULL)
+#endif
+
+
+// active_ip
+
+#if INTERFACE
+#define VAR_ACTIVE_IP V(active_ip, 1, 1, f_id, p_ip, su_old, NULL, s_active_conf, NULL)
+#endif
+
+
+// active_port
+
+static char *p_active_port(const char *val, GError **err) {
+  char *r = p_int(val, err);
+  if(r && (int_raw(r) < 1024 || int_raw(r) > 65535)) {
+    g_set_error_literal(err, 1, 0, "Port number must be between 1024 and 65535.");
+    g_free(r);
+    return NULL;
+  }
+  return r;
+}
+
+#if INTERFACE
+#define VAR_ACTIVE_PORT V(active_port, 1, 0, f_int, p_active_port, NULL, NULL, s_active_conf, NULL)
+#endif
 
 
 // autorefresh
@@ -385,6 +442,10 @@ struct var {
 
 
 #define VARS\
+  VAR_ACTIVE \
+  VAR_ACTIVE_BIND \
+  VAR_ACTIVE_IP \
+  VAR_ACTIVE_PORT \
   VAR_AUTOREFRESH \
   VAR_CONNECTION \
   VAR_DESCRIPTION \

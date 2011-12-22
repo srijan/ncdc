@@ -1700,16 +1700,16 @@ gboolean cc_listen_start() {
   GError *err = NULL;
 
   cc_listen_stop();
-  if(!conf_get_bool(0, "active")) {
+  if(!var_get_bool(0, VAR_active)) {
     hub_global_nfochange();
     return FALSE;
   }
 
   // can be 0, in which case it'll be randomly assigned
-  int port = conf_get_int(0, "active_port");
+  int port = var_get_int(0, VAR_active_port);
 
   // local addr
-  char *bind = db_vars_get(0, "active_bind");
+  char *bind = var_get(0, VAR_active_bind);
   GInetAddress *laddr = NULL;
   if(bind && *bind && !(laddr = g_inet_address_new_from_string(bind)))
     ui_m(ui_main, 0, "Error parsing `active_bind' setting, binding to all interfaces instead.");
@@ -1754,9 +1754,9 @@ gboolean cc_listen_start() {
   cc_listen_port = port;
 
   if(db_certificate)
-    ui_mf(ui_main, 0, "Listening on TCP+UDP port %d and TCP port %d, remote IP is %s.", cc_listen_port, cc_listen_port+1, db_vars_get(0, "active_ip"));
+    ui_mf(ui_main, 0, "Listening on TCP+UDP port %d and TCP port %d, remote IP is %s.", cc_listen_port, cc_listen_port+1, var_get(0, VAR_active_ip));
   else
-    ui_mf(ui_main, 0, "Listening on TCP+UDP port %d, remote IP is %s.", cc_listen_port, db_vars_get(0, "active_ip"));
+    ui_mf(ui_main, 0, "Listening on TCP+UDP port %d, remote IP is %s.", cc_listen_port, var_get(0, VAR_active_ip));
   hub_global_nfochange();
   return TRUE;
 }

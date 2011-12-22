@@ -61,14 +61,6 @@ static void get_bool_f(guint64 hub, char *key) {
 }
 
 
-static void get_int(guint64 hub, char *key) {
-  if(!conf_exists(hub, key))
-    ui_mf(NULL, 0, "%s.%s is not set.", hubname(hub), key);
-  else
-    ui_mf(NULL, 0, "%s.%s = %d", hubname(hub), key, conf_get_int(hub, key));
-}
-
-
 static gboolean bool_var(const char *val) {
   if(strcmp(val, "1") == 0 || strcmp(val, "t") == 0 || strcmp(val, "y") == 0
       || strcmp(val, "true") == 0 || strcmp(val, "yes") == 0 || strcmp(val, "on") == 0)
@@ -147,79 +139,6 @@ static void set_autoconnect(guint64 hub, char *key, char *val) {
     ui_m(NULL, 0, "ERROR: autoconnect can only be used as hub setting.");
   else
     set_bool_f(hub, key, val);
-}
-
-
-static void set_active(guint64 hub, char *key, char *val) {
-  if(!val) {
-    db_vars_rm(0, key);
-    ui_mf(NULL, 0, "global.%s reset.", key);
-  } else if(bool_var(val) && !conf_exists(0, "active_ip")) {
-    ui_m(NULL, 0, "ERROR: No IP address set. Please use `/set active_ip <your_ip>' first (on a non-hub tab).");
-    return;
-  }
-  set_bool_f(0, key, val);
-  cc_listen_start();
-}
-
-
-static void set_active_ip(guint64 hub, char *key, char *val) {
-  if(!val) {
-    db_vars_rm(hub, key);
-    ui_mf(NULL, 0, "%s.%s reset.", hubname(hub), key);
-    if(!hub)
-      set_active(0, "active", NULL);
-    else
-      hub_global_nfochange();
-    return;
-  }
-  // TODO: IPv6?
-  if(!g_regex_match_simple("^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}$", val, 0, 0)
-      || strncmp("127.", val, 4) == 0 || strncmp("0.", val, 2) == 0) {
-    ui_m(NULL, 0, "ERROR: Invalid IP.");
-    return;
-  }
-  db_vars_set(hub, key, val);
-  get_string(hub, key);
-  if(!hub)
-    cc_listen_start();
-  else
-    hub_global_nfochange();
-}
-
-
-static void set_active_port(guint64 hub, char *key, char *val) {
-  if(!val) {
-    db_vars_rm(0, key);
-    ui_mf(NULL, 0, "global.%s reset.", key);
-  } else {
-    long v = strtol(val, NULL, 10);
-    if((!v && errno == EINVAL) || v < 0 || v > 65535) {
-      ui_m(NULL, 0, "Invalid port number.");
-      return;
-    }
-    conf_set_int(0, key, v);
-    get_int(0, key);
-  }
-  cc_listen_start();
-}
-
-
-static void set_active_bind(guint64 hub, char *key, char *val) {
-  if(!val) {
-    db_vars_rm(0, key);
-    ui_mf(NULL, 0, "global.%s reset.", key);
-  } else {
-    GInetAddress *a = g_inet_address_new_from_string(val);
-    if(!a) {
-      ui_m(NULL, 0, "Invalid IP.");
-      return;
-    }
-    g_object_unref(a);
-    db_vars_set(0, key, val);
-    get_string(0, key);
-  }
-  cc_listen_start();
 }
 
 
@@ -578,10 +497,6 @@ static void set_filelist_maxage(guint64 hub, char *key, char *val) {
 
 // the settings list
 static struct setting settings[] = {
-  { "active",           get_bool_f,          set_active,          set_bool_sug       },
-  { "active_bind",      get_string,          set_active_bind,     set_old_sug        },
-  { "active_ip",        get_string,          set_active_ip,       set_old_sug        },
-  { "active_port",      get_int,             set_active_port,     NULL,              },
   { "autoconnect",      get_bool_f,          set_autoconnect,     set_bool_sug       },
   { "backlog",          get_backlog,         set_backlog,         NULL,              },
   { "chat_only",        get_bool_f,          set_bool_f,          set_bool_sug       },

@@ -921,7 +921,7 @@ int main(int argc, char **argv) {
     printf("\n"
       "The directory will be upgraded for use with ncdc 1.6 or later. This\n"
       "action is NOT reversible! You are encouraged to make a backup of the\n"
-      "of the following files if you want to be able to revert back:\n"
+      "following files if you want to be able to revert back:\n"
       "  %s/{config.ini,hashdata.dat,dl.dat,version}\n"
       "Or run this tool with --backup to do this automatically.\n",
       db_dir);

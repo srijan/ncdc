@@ -773,7 +773,7 @@ static void handle_adcget(struct cc *cc, char *type, char *id, guint64 start, gi
   }
   if(bytes < 0 || bytes > st.st_size-start)
     bytes = st.st_size-start;
-  if(needslot && st.st_size < conf_minislot_size())
+  if(needslot && st.st_size < var_get_int(0, VAR_minislot_size))
     needslot = FALSE;
 
   if(f && throttle_check(cc, f->tth, start)) {

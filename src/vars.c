@@ -310,6 +310,28 @@ static char *i_log_debug() {
 #endif
 
 
+// minislot_size
+
+static char *p_minislot_size(const char *val, GError **err) {
+  char *r = p_int(val, err);
+  int n = r ? int_raw(r) : 0;
+  g_free(r);
+  if(r && n < 64) {
+    g_set_error_literal(err, 1, 0, "Minislot size must be at least 64 KiB.");
+    return NULL;
+  }
+  return r ? g_strdup_printf("%d", MIN(G_MAXINT, n*1024)) : NULL;
+}
+
+static char *f_minislot_size(const char *val) {
+  return g_strdup_printf("%d KiB", (int)int_raw(val)/1024);
+}
+
+#if INTERFACE
+#define VAR_MINISLOT_SIZE V(minislot_size, 1, 0, f_minislot_size, p_minislot_size, NULL, NULL, NULL, "65536")
+#endif
+
+
 // slots
 
 #if INTERFACE
@@ -372,6 +394,7 @@ struct var {
   VAR_LOG_DOWNLOADS \
   VAR_LOG_UPLOADS \
   VAR_MINISLOTS \
+  VAR_MINISLOT_SIZE \
   VAR_NICK \
   VAR_SLOTS
 

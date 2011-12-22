@@ -223,31 +223,6 @@ static void set_active_bind(guint64 hub, char *key, char *val) {
 }
 
 
-static void get_autorefresh(guint64 hub, char *key) {
-  int a = conf_autorefresh();
-  ui_mf(NULL, 0, "global.%s = %s%s", key, str_formatinterval(a), !a ? " (disabled)" : "");
-}
-
-
-static void set_autorefresh(guint64 hub, char *key, char *val) {
-  if(!val) {
-    db_vars_rm(0, key);
-    ui_mf(NULL, 0, "global.%s reset.", key);
-    return;
-  }
-
-  int v = str_parseinterval(val);
-  if(v < 0)
-    ui_m(NULL, 0, "Invalid number.");
-  else if(v > 0 && v < 600)
-    ui_m(NULL, 0, "Interval between automatic refreshes should be at least 10 minutes.");
-  else {
-    conf_set_int(0, key, v);
-    get_autorefresh(0, key);
-  }
-}
-
-
 static void get_slots(guint64 hub, char *key) {
   ui_mf(NULL, 0, "global.%s = %d", key, conf_slots());
 }
@@ -679,7 +654,6 @@ static struct setting settings[] = {
   { "active_ip",        get_string,          set_active_ip,       set_old_sug        },
   { "active_port",      get_int,             set_active_port,     NULL,              },
   { "autoconnect",      get_bool_f,          set_autoconnect,     set_bool_sug       },
-  { "autorefresh",      get_autorefresh,     set_autorefresh,     NULL               },
   { "backlog",          get_backlog,         set_backlog,         NULL,              },
   { "chat_only",        get_bool_f,          set_bool_f,          set_bool_sug       },
 #define C(n, a,b,c) { "color_" G_STRINGIFY(n), get_color, set_color, set_color_sug },

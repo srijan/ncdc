@@ -65,6 +65,10 @@ static char *f_id(const char *val) {
 
 #define f_bool f_id
 
+static char *f_interval(const char *val) {
+  return g_strdup(str_formatinterval(int_raw(val)));
+}
+
 static char *p_id(const char *val, GError **err) {
   return g_strdup(val);
 }
@@ -78,6 +82,15 @@ static char *p_bool(const char *val, GError **err) {
     return NULL;
   }
   return g_strdup(b ? "true" : "false");
+}
+
+static char *p_interval(const char *val, GError **err) {
+  int n = str_parseinterval(val);
+  if(n < 0) {
+    g_set_error_literal(err, 1, 0, "Invalid interval.");
+    return NULL;
+  }
+  return g_strdup_printf("%d", n);
 }
 
 // Only suggests "true" or "false" regardless of the input. There are only two
@@ -106,6 +119,30 @@ static void su_old(const char *old, const char *val, char **sug) {
 // "default" does not need to be a run-time constant, it will be evaluated at
 // initialization instead (after the database has been initialized). Setting
 // this to a function allows it to initialize other stuff as well.
+
+
+// autorefresh
+
+static char *f_autorefresh(const char *val) {
+  int n = int_raw(val);
+  if(!n)
+    return g_strconcat(str_formatinterval(n), " (disabled)", NULL);
+  return f_interval(val);
+}
+
+static char *p_autorefresh(const char *val, GError **err) {
+  char *raw = p_interval(val, err);
+  if(raw && raw[0] != '0' && int_raw(raw) < 600) {
+    g_set_error_literal(err, 1, 0, "Interval between automatic refreshes should be at least 10 minutes.");
+    return NULL;
+  }
+  return raw;
+}
+
+#if INTERFACE
+#define VAR_AUTOREFRESH V(autorefresh, 1, 0, f_autorefresh, p_autorefresh, NULL, NULL, NULL, "3600")
+#endif
+
 
 
 // nick
@@ -290,6 +327,7 @@ struct var {
 
 
 #define VARS\
+  VAR_AUTOREFRESH \
   VAR_CONNECTION \
   VAR_DESCRIPTION \
   VAR_EMAIL \
@@ -365,6 +403,11 @@ char *var_get(guint64 h, int n) {
 gboolean var_get_bool(guint64 h, int n) {
   char *r = var_get(n, h);
   return bool_raw(r);
+}
+
+int var_get_int(guint64 h, int n) {
+  char *r = var_get(n, h);
+  return int_raw(r);
 }
 
 

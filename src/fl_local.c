@@ -945,7 +945,7 @@ static void fl_init_list(struct fl_list *fl) {
 
 
 static gboolean fl_init_autorefresh(gpointer dat) {
-  int r = conf_autorefresh();
+  int r = var_get_int(0, VAR_autorefresh);
   time_t t = time(NULL);
   if(r && fl_refresh_last+r < t)
     fl_refresh(NULL);
@@ -1018,7 +1018,7 @@ void fl_init() {
   if(!fl_local_list || !dorefresh)
     ui_m(NULL, UIM_NOLOG|UIM_DIRECT, NULL);
 
-  if(dorefresh || conf_autorefresh())
+  if(dorefresh || var_get_int(0, VAR_autorefresh))
     fl_refresh(NULL);
 }
 

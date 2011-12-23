@@ -448,7 +448,7 @@ static gint dl_queue_start_cmp(gconstpointer a, gconstpointer b) {
 // everything after some state variables have changed. Should not be called
 // directly, use dl_queue_start() instead.
 static gboolean dl_queue_start_do(gpointer dat) {
-  int freeslots = conf_download_slots();
+  int freeslots = var_get_int(0, VAR_download_slots);
 
   // Walk through all users in the queue and:
   // - determine possible targets to connect to or to start a transfer from
@@ -1314,7 +1314,7 @@ gboolean dl_fl_clean(gpointer dat) {
   }
 
   const char *n;
-  time_t ref = time(NULL) - conf_filelist_maxage();
+  time_t ref = time(NULL) - var_get_int(0, VAR_filelist_maxage);
   while((n = g_dir_read_name(d))) {
     if(strcmp(n, ".") == 0 || strcmp(n, "..") == 0)
       continue;

@@ -94,6 +94,16 @@ static char *p_int_ge1(const char *val, GError **err) {
   return r;
 }
 
+static char *p_int_range(const char *val, int min, int max, const char *msg, GError **err) {
+  char *r = p_int(val, err);
+  if(r && (int_raw(r) < min || int_raw(r) > max)) {
+    g_set_error_literal(err, 1, 0, msg);
+    g_free(r);
+    return NULL;
+  }
+  return r;
+}
+
 static char *p_interval(const char *val, GError **err) {
   int n = str_parseinterval(val);
   if(n < 0) {
@@ -190,13 +200,7 @@ static gboolean s_active(guint64 hub, const char *key, const char *val, GError *
 // active_port
 
 static char *p_active_port(const char *val, GError **err) {
-  char *r = p_int(val, err);
-  if(r && (int_raw(r) < 1024 || int_raw(r) > 65535)) {
-    g_set_error_literal(err, 1, 0, "Port number must be between 1024 and 65535.");
-    g_free(r);
-    return NULL;
-  }
-  return r;
+  return p_int_range(val, 1024, 65535, "Port number must be between 1024 and 65535.", err);
 }
 
 #if INTERFACE
@@ -242,13 +246,7 @@ static char *f_backlog(const char *var) {
 }
 
 static char *p_backlog(const char *val, GError **err) {
-  char *r = p_int(val, err);
-  if(r && int_raw(r) > LOGWIN_BUF-1) {
-    g_set_error(err, 1, 0, "Maximum value is %d.", LOGWIN_BUF-1);
-    g_free(r);
-    return NULL;
-  }
-  return r;
+  return p_int_range(val, 0, LOGWIN_BUF-1, "Maximum value is "G_STRINGIFY(LOGWIN_BUF-1)".", err);
 }
 
 #if INTERFACE
@@ -303,6 +301,28 @@ static char *i_nick() {
 #endif
 
 
+// chat_only
+
+#if INTERFACE
+#define VAR_CHAT_ONLY V(chat_only, 1, 1, f_bool, p_bool, su_bool, NULL, NULL, "false")
+#endif
+
+
+// download_slots
+
+static gboolean s_download_slots(guint64 hub, const char *key, const char *val, GError **err) {
+  int old = var_get_int(hub, VAR_download_slots);
+  db_vars_set(hub, key, val);
+  if(int_raw(val) > old)
+    dl_queue_start();
+  return TRUE;
+}
+
+#if INTERFACE
+#define VAR_DOWNLOAD_SLOTS V(download_slots, 1, 0, f_int, p_int, NULL, NULL, s_download_slots, "3")
+#endif
+
+
 // email / description / connection
 
 static char *p_connection(const char *val, GError **err) {
@@ -315,6 +335,13 @@ static char *p_connection(const char *val, GError **err) {
 #define VAR_EMAIL       V(email,       1, 1, f_id, p_id,         su_old, NULL, s_hubinfo, NULL)
 #define VAR_CONNECTION  V(connection,  1, 1, f_id, p_connection, su_old, NULL, s_hubinfo, NULL)
 #define VAR_DESCRIPTION V(description, 1, 1, f_id, p_id,         su_old, NULL, s_hubinfo, NULL)
+#endif
+
+
+// filelist_maxage
+
+#if INTERFACE
+#define VAR_FILELIST_MAXAGE V(filelist_maxage, 1, 0, f_interval, p_interval, su_old, NULL, NULL, "604800")
 #endif
 
 
@@ -477,9 +504,12 @@ struct var {
   VAR_AUTOCONNECT \
   VAR_AUTOREFRESH \
   VAR_BACKLOG \
+  VAR_CHAT_ONLY \
   VAR_CONNECTION \
   VAR_DESCRIPTION \
+  VAR_DOWNLOAD_SLOTS \
   VAR_EMAIL \
+  VAR_FILELIST_MAXAGE \
   VAR_FLUSH_FILE_CACHE \
   VAR_LOG_DEBUG \
   VAR_LOG_DOWNLOADS \

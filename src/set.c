@@ -280,30 +280,6 @@ static void set_dl_inc_dir(guint64 hub, char *key, char *val) {
 }
 
 
-static void get_download_slots(guint64 hub, char *key) {
-  ui_mf(NULL, 0, "global.%s = %d", key, conf_download_slots());
-}
-
-
-static void set_download_slots(guint64 hub, char *key, char *val) {
-  int oldval = conf_download_slots();
-  if(!val) {
-    db_vars_rm(0, key);
-    ui_mf(NULL, 0, "global.%s reset.", key);
-  } else {
-    long v = strtol(val, NULL, 10);
-    if((!v && errno == EINVAL) || v < INT_MIN || v > INT_MAX || v <= 0)
-      ui_m(NULL, 0, "Invalid number.");
-    else {
-      conf_set_int(0, key, v);
-      get_download_slots(0, key);
-    }
-  }
-  if(conf_download_slots() > oldval)
-    dl_queue_start();
-}
-
-
 static void get_color(guint64 hub, char *key) {
   g_return_if_fail(strncmp(key, "color_", 6) == 0);
   struct ui_color *c = ui_color_by_name(key+6);
@@ -439,39 +415,14 @@ static void set_old_sug(guint64 hub, char *key, char *val, char **sug) {
 }
 
 
-static void get_filelist_maxage(guint64 hub, char *key) {
-  ui_mf(NULL, 0, "global.%s = %s", key, str_formatinterval(conf_filelist_maxage()));
-}
-
-
-static void set_filelist_maxage(guint64 hub, char *key, char *val) {
-  if(!val) {
-    db_vars_rm(0, key);
-    ui_mf(NULL, 0, "global.%s reset.", key);\
-    return;
-  }
-
-  int v = str_parseinterval(val);
-  if(v < 0)
-    ui_m(NULL, 0, "Invalid number.");
-  else {
-    conf_set_int(0, key, v);
-    get_filelist_maxage(0, key);
-  }
-}
-
-
 // the settings list
 static struct setting settings[] = {
-  { "chat_only",        get_bool_f,          set_bool_f,          set_bool_sug       },
 #define C(n, a,b,c) { "color_" G_STRINGIFY(n), get_color, set_color, set_color_sug },
   UI_COLORS
 #undef C
   { "download_dir",     get_download_dir,    set_dl_inc_dir,      set_path_sug       },
-  { "download_slots",   get_download_slots,  set_download_slots,  NULL               },
   { "download_exclude", get_string,          set_regex,           set_old_sug        },
   { "encoding",         get_encoding,        set_encoding,        set_encoding_sug   },
-  { "filelist_maxage",  get_filelist_maxage, set_filelist_maxage, set_old_sug        },
   { "hubname",          get_hubname,         set_hubname,         set_hubname_sug    },
   { "incoming_dir",     get_incoming_dir,    set_dl_inc_dir,      set_path_sug       },
   { "password",         get_password,        set_password,        NULL               },

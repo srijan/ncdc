@@ -1134,13 +1134,9 @@ char **db_vars_hubs() {
   !conf_exists(0, "download_dir") ? g_build_filename(db_dir, "dl", NULL)\
     : g_strdup(db_vars_get(0, "download_dir")))
 
-#define conf_download_slots() (!conf_exists(0, "download_slots") ? 3 : conf_get_int(0, "download_slots"))
-
 #define conf_encoding(hub) (\
   conf_exists(hub, "encoding")   ? db_vars_get(hub, "encoding") \
     : conf_exists(0, "encoding") ? db_vars_get(0, "encoding") : "UTF-8")
-
-#define conf_filelist_maxage() (!conf_exists(0, "filelist_maxage") ? (7*24*3600) : conf_get_int(0, "filelist_maxage"))
 
 #define conf_incoming_dir() (\
   !conf_exists(0, "incoming_dir") ? g_build_filename(db_dir, "inc", NULL)\

@@ -743,7 +743,7 @@ gboolean search_do(struct search_q *q, struct hub *hub, struct ui_tab *parent) {
       search_q_free(q);
       return FALSE;
     }
-    if(conf_get_bool(hub->id, "chat_only"))
+    if(var_get_bool(hub->id, VAR_chat_only))
       ui_m(NULL, 0, "WARNING: Searching on a hub with the `chat_only' setting enabled.");
     hub_search(hub, q);
 
@@ -753,7 +753,7 @@ gboolean search_do(struct search_q *q, struct hub *hub, struct ui_tab *parent) {
     gboolean one = FALSE;
     for(n=ui_tabs; n; n=n->next) {
       struct ui_tab *t = n->data;
-      if(t->type == UIT_HUB && t->hub->nick_valid && !conf_get_bool(t->hub->id, "chat_only")) {
+      if(t->type == UIT_HUB && t->hub->nick_valid && !var_get_bool(t->hub->id, VAR_chat_only)) {
         hub_search(t->hub, q);
         one = TRUE;
       }

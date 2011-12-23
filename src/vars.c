@@ -380,6 +380,47 @@ static char *i_flush_file_cache() {
 #endif
 
 
+// hubname
+
+static char *p_hubname(const char *val, GError **err) {
+  if(val[0] == '#')
+    val++;
+  char *g = g_strdup_printf("#%s", val);
+  if(!is_valid_hubname(g+1)) {
+    g_set_error_literal(err, 1, 0, "Illegal characters or too long.");
+    g_free(g);
+    return NULL;
+  } else if(db_vars_hubid(g)) {
+    g_set_error_literal(err, 1, 0, "Name already used.");
+    g_free(g);
+    return NULL;
+  }
+  return g;
+}
+
+static gboolean s_hubname(guint64 hub, const char *key, const char *val, GError **err) {
+  if(!val) {
+    g_set_error_literal(err, 1, 0, "May not be unset.");
+    return FALSE;
+  }
+  db_vars_set(hub, key, val);
+  GList *n;
+  for(n=ui_tabs; n; n=n->next) {
+    struct ui_tab *t = n->data;
+    if(t->type == UIT_HUB && t->hub->id == hub) {
+      g_free(t->name);
+      t->name = g_strdup(val);
+    }
+  }
+  return TRUE;
+}
+
+#if INTERFACE
+#define VAR_HUBNAME V(hubname, 0, 1, f_id, p_hubname, su_old, NULL, s_hubname, NULL)
+#endif
+
+
+
 // log_debug
 
 gboolean var_log_debug = TRUE;
@@ -511,6 +552,7 @@ struct var {
   VAR_EMAIL \
   VAR_FILELIST_MAXAGE \
   VAR_FLUSH_FILE_CACHE \
+  VAR_HUBNAME \
   VAR_LOG_DEBUG \
   VAR_LOG_DOWNLOADS \
   VAR_LOG_UPLOADS \

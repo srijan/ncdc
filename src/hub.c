@@ -1623,7 +1623,7 @@ struct hub *hub_create(struct ui_tab *tab) {
   hub->id = db_vars_hubid(tab->name);
   if(!hub->id) {
     hub->id = rand_64();
-    db_vars_set(hub->id, "hubname", tab->name);
+    var_set(hub->id, VAR_hubname, tab->name, NULL);
   }
 
   // actual separator is set in handle_connect()

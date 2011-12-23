@@ -155,51 +155,6 @@ static void set_password(guint64 hub, char *key, char *val) {
 }
 
 
-// a bit pointless, but for consistency's sake
-static void get_hubname(guint64 hub, char *key) {
-  if(!hub)
-    ui_mf(NULL, 0, "global.%s is not set.", key);
-  else
-    ui_mf(NULL, 0, "%s.%s = %s", hubname(hub), key, hubname(hub)+1);
-}
-
-
-static void set_hubname(guint64 hub, char *key, char *val) {
-  if(!hub)
-    ui_mf(NULL, 0, "ERROR: hubname can only be used as hub setting.");
-  else if(!val || !val[0])
-    ui_mf(NULL, 0, "%s.%s may not be unset.", hubname(hub), key);
-  else {
-    if(val[0] == '#')
-      val++;
-    char *g = g_strdup_printf("#%s", val);
-    if(!is_valid_hubname(val))
-      ui_mf(NULL, 0, "Invalid name.");
-    else if(db_vars_hubid(g))
-      ui_mf(NULL, 0, "Name already used.");
-    else {
-      db_vars_set(hub, key, g);
-      GList *n;
-      for(n=ui_tabs; n; n=n->next) {
-        struct ui_tab *t = n->data;
-        if(t->type == UIT_HUB && t->hub->id == hub) {
-          g_free(t->name);
-          t->name = g_strdup(g);
-        }
-      }
-      get_hubname(hub, key);
-    }
-    g_free(g);
-  }
-}
-
-
-static void set_hubname_sug(guint64 hub, char *key, char *val, char **sug) {
-  if(hub)
-    sug[0] = g_strdup(hubname(hub));
-}
-
-
 static void get_download_dir(guint64 hub, char *key) {
   char *d = conf_download_dir();
   ui_mf(NULL, 0, "global.%s = %s", key, d);
@@ -423,7 +378,6 @@ static struct setting settings[] = {
   { "download_dir",     get_download_dir,    set_dl_inc_dir,      set_path_sug       },
   { "download_exclude", get_string,          set_regex,           set_old_sug        },
   { "encoding",         get_encoding,        set_encoding,        set_encoding_sug   },
-  { "hubname",          get_hubname,         set_hubname,         set_hubname_sug    },
   { "incoming_dir",     get_incoming_dir,    set_dl_inc_dir,      set_path_sug       },
   { "password",         get_password,        set_password,        NULL               },
   { "share_hidden",     get_bool_f,          set_bool_f,          set_bool_sug       },

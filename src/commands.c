@@ -409,7 +409,7 @@ static void c_open(char *args) {
     return;
   }
   if(!is_valid_hubname(name))
-    ui_m(NULL, 0, "Sorry, tab name may only consist of alphanumeric characters, and must not exceed 25 characters.");
+    ui_m(NULL, 0, "Sorry, hub name may only consist of alphanumeric characters, and must not exceed 25 characters.");
   else {
     // Look for existing tab
     GList *n;

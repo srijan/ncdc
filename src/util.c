@@ -529,7 +529,7 @@ int cmpstringp(const void *p1, const void *p2) {
 }
 
 // Expand and auto-complete a filesystem path
-void path_suggest(char *opath, char **sug) {
+void path_suggest(const char *opath, char **sug) {
   char *path = g_strdup(opath);
   char *name, *dir = NULL;
 

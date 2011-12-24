@@ -1744,11 +1744,10 @@ static void ui_dl_draw_row(struct ui_listing *list, GSequenceIter *iter, int row
   if(dl->islist)
     mvaddstr(row, 32, "files.xml.bz2");
   else {
-    char *def = conf_download_dir();
+    char *def = var_get(0, VAR_download_dir);
     int len = strlen(def);
     char *dest = strncmp(def, dl->dest, len) == 0 ? dl->dest+len+(dl->dest[len-1] == '/' ? 0 : 1) : dl->dest;
     mvaddnstr(row, 32, dest, str_offset_from_columns(dest, wincols-32));
-    g_free(def);
   }
 
   attroff(iter == list->sel ? UIC(list_select) : UIC(list_default));

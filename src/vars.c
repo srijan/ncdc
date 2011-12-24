@@ -149,6 +149,10 @@ static void su_old(const char *old, const char *val, char **sug) {
     sug[0] = g_strdup(old);
 }
 
+static void su_path(const char *old, const char *val, char **sug) {
+  path_suggest(val, sug);
+}
+
 static gboolean s_hubinfo(guint64 hub, const char *key, const char *val, GError **err) {
   db_vars_set(hub, key, val);
   hub_global_nfochange();
@@ -316,6 +320,57 @@ static char *i_nick() {
 
 #if INTERFACE
 #define VAR_CHAT_ONLY V(chat_only, 1, 1, f_bool, p_bool, su_bool, NULL, NULL, "false")
+#endif
+
+
+// download_dir & incoming_dir
+
+static char *i_dl_inc_dir(gboolean dl) {
+  return g_build_filename(db_dir, dl ? "dl" : "inc", NULL);
+}
+
+static gboolean s_dl_inc_dir(guint64 hub, const char *key, const char *val, GError **err) {
+  gboolean dl = strcmp(key, "download_dir") == 0 ? TRUE : FALSE;
+
+  // Don't allow changes to incoming_dir when the download queue isn't empty
+  if(!dl && g_hash_table_size(dl_queue) > 0) {
+    g_set_error_literal(err, 1, 0, "Can't change the incoming directory unless the download queue is empty.");
+    return FALSE;
+  }
+
+  char *tmp = val ? g_strdup(val) : i_dl_inc_dir(dl);
+  char nval[strlen(tmp)+1];
+  strcpy(nval, tmp);
+  g_free(tmp);
+
+  // make sure it exists
+  if(!g_mkdir_with_parents(nval, 0777)) {
+    g_set_error(err, 1, 0, "Error creating the directory: %s", g_strerror(errno));
+    return FALSE;
+  }
+
+  // test whether they are on the same filesystem
+  struct stat a, b;
+  char *bd = var_get(0, dl ? VAR_incoming_dir : VAR_download_dir);
+  if(stat(bd, &b) < 0) {
+    g_set_error(err, 1, 0, "Error stat'ing %s: %s", bd, g_strerror(errno));
+    return FALSE;
+  }
+  if(stat(nval, &a) < 0) {
+    g_set_error(err, 1, 0, "Error stat'ing %s: %s", nval, g_strerror(errno));
+    return FALSE;
+  }
+
+  if(a.st_dev != b.st_dev)
+    ui_m(NULL, 0, "WARNING: The download directory is not on the same filesystem as the incoming"
+                  " directory. This may cause the program to hang when downloading large files.");
+  db_vars_set(hub, key, val);
+  return TRUE;
+}
+
+#if INTERFACE
+#define VAR_DOWNLOAD_DIR V(download_dir, 1, 0, f_id, p_id, su_path, NULL, s_dl_inc_dir, i_dl_inc_dir(TRUE))
+#define VAR_INCOMING_DIR V(incoming_dir, 1, 0, f_id, p_id, su_path, NULL, s_dl_inc_dir, i_dl_inc_dir(FALSE))
 #endif
 
 
@@ -620,12 +675,14 @@ struct var {
   VAR_CHAT_ONLY \
   VAR_CONNECTION \
   VAR_DESCRIPTION \
+  VAR_DOWNLOAD_DIR \
   VAR_DOWNLOAD_EXCLUDE \
   VAR_DOWNLOAD_SLOTS \
   VAR_EMAIL \
   VAR_FILELIST_MAXAGE \
   VAR_FLUSH_FILE_CACHE \
   VAR_HUBNAME \
+  VAR_INCOMING_DIR \
   VAR_LOG_DEBUG \
   VAR_LOG_DOWNLOADS \
   VAR_LOG_UPLOADS \

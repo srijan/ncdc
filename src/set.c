@@ -88,86 +88,6 @@ static void set_encoding_sug(guint64 hub, char *key, char *val, char **sug) {
 }
 
 
-static void get_download_dir(guint64 hub, char *key) {
-  char *d = conf_download_dir();
-  ui_mf(NULL, 0, "global.%s = %s", key, d);
-  g_free(d);
-}
-
-
-static void get_incoming_dir(guint64 hub, char *key) {
-  char *d = conf_incoming_dir();
-  ui_mf(NULL, 0, "global.%s = %s", key, d);
-  g_free(d);
-}
-
-
-static void set_dl_inc_dir(guint64 hub, char *key, char *val) {
-  gboolean dl = strcmp(key, "download_dir") == 0 ? TRUE : FALSE;
-
-  // Don't allow changes to incoming_dir when the download queue isn't empty
-  if(!dl && g_hash_table_size(dl_queue) > 0) {
-    ui_m(NULL, 0, "Can't change the incoming directory unless the download queue is empty.");
-    return;
-  }
-
-  char *nval = val ? g_strdup(val) : g_build_filename(db_dir, dl ? "dl" : "inc", NULL);
-  gboolean cont = FALSE, warn = FALSE;
-  // check if it exists
-  if(g_file_test(nval, G_FILE_TEST_EXISTS)) {
-    if(!g_file_test(nval, G_FILE_TEST_IS_DIR))
-      ui_mf(NULL, 0, "%s: Not a directory.", nval);
-    else
-      cont = TRUE;
-  // otherwise, create
-  } else {
-    GFile *d = g_file_new_for_path(nval);
-    GError *err = NULL;
-    g_file_make_directory_with_parents(d, NULL, &err);
-    g_object_unref(d);
-    if(err) {
-      ui_mf(NULL, 0, "Error creating `%s': %s", nval, err->message);
-      g_error_free(err);
-    } else
-      cont = TRUE;
-  }
-  // test whether they are on the same filesystem
-  if(cont) {
-    struct stat a, b;
-    char *bd = dl ? conf_incoming_dir() : conf_download_dir();
-    if(stat(bd, &b) < 0) {
-      ui_mf(NULL, 0, "Error stat'ing %s: %s.", bd, g_strerror(errno));
-      cont = FALSE;
-    }
-    g_free(bd);
-    if(cont && stat(nval, &a) < 0) {
-      ui_mf(NULL, 0, "Error stat'ing %s: %s", a, g_strerror(errno));
-      cont = FALSE;
-    }
-    if(!cont || (cont && a.st_dev != b.st_dev))
-      warn = TRUE;
-    cont = TRUE;
-  }
-  // no errors? save.
-  if(cont) {
-    if(!val) {
-      db_vars_rm(0, key);
-      ui_mf(NULL, 0, "global.%s reset.", key);
-    } else {
-      db_vars_set(0, key, val);
-      if(dl)
-        get_download_dir(0, key);
-      else
-        get_incoming_dir(0, key);
-    }
-  }
-  if(warn)
-    ui_m(NULL, 0, "WARNING: The download directory is not on the same filesystem as the incoming"
-                  " directory. This may cause the program to hang when downloading large files.");
-  g_free(nval);
-}
-
-
 static void get_color(guint64 hub, char *key) {
   g_return_if_fail(strncmp(key, "color_", 6) == 0);
   struct ui_color *c = ui_color_by_name(key+6);
@@ -252,19 +172,12 @@ static void set_tls_policy_sug(guint64 hub, char *key, char *val, char **sug) {
 }
 
 
-static void set_path_sug(guint64 hub, char *key, char *val, char **sug) {
-  path_suggest(val, sug);
-}
-
-
 // the settings list
 static struct setting settings[] = {
 #define C(n, a,b,c) { "color_" G_STRINGIFY(n), get_color, set_color, set_color_sug },
   UI_COLORS
 #undef C
-  { "download_dir",     get_download_dir,    set_dl_inc_dir,      set_path_sug       },
   { "encoding",         get_encoding,        set_encoding,        set_encoding_sug   },
-  { "incoming_dir",     get_incoming_dir,    set_dl_inc_dir,      set_path_sug       },
   { "tls_policy",       get_tls_policy,      set_tls_policy,      set_tls_policy_sug },
   { NULL }
 };

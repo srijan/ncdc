@@ -1130,17 +1130,9 @@ char **db_vars_hubs() {
 
 #define conf_exists(h, n) (db_vars_get(h, n) ? TRUE : FALSE)
 
-#define conf_download_dir() (\
-  !conf_exists(0, "download_dir") ? g_build_filename(db_dir, "dl", NULL)\
-    : g_strdup(db_vars_get(0, "download_dir")))
-
 #define conf_encoding(hub) (\
   conf_exists(hub, "encoding")   ? db_vars_get(hub, "encoding") \
     : conf_exists(0, "encoding") ? db_vars_get(0, "encoding") : "UTF-8")
-
-#define conf_incoming_dir() (\
-  !conf_exists(0, "incoming_dir") ? g_build_filename(db_dir, "inc", NULL)\
-    : g_strdup(db_vars_get(0, "incoming_dir")))
 
 #define CONF_TLSP_DISABLE 0
 #define CONF_TLSP_ALLOW   1

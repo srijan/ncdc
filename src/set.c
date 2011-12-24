@@ -46,20 +46,6 @@ struct setting {
 };
 
 
-// not set => false
-static void get_bool_f(guint64 hub, char *key) {
-  ui_mf(NULL, 0, "%s.%s = %s", hubname(hub), key, conf_get_bool(hub, key) ? "true" : "false");
-}
-
-
-static gboolean bool_var(const char *val) {
-  if(strcmp(val, "1") == 0 || strcmp(val, "t") == 0 || strcmp(val, "y") == 0
-      || strcmp(val, "true") == 0 || strcmp(val, "yes") == 0 || strcmp(val, "on") == 0)
-    return TRUE;
-  return FALSE;
-}
-
-
 static void get_encoding(guint64 hub, char *key) {
   ui_mf(NULL, 0, "%s.%s = %s", hubname(hub), key, conf_encoding(hub));
 }
@@ -99,50 +85,6 @@ static void set_encoding_sug(guint64 hub, char *key, char *val, char **sug) {
   for(enc=encodings; *enc && i<20; enc++)
     if(g_ascii_strncasecmp(val, *enc, len) == 0 && strlen(*enc) != len)
       sug[i++] = g_strdup(*enc);
-}
-
-
-// generic set function for boolean settings that don't require any special attention
-static void set_bool_f(guint64 hub, char *key, char *val) {
-  if(!val) {
-    db_vars_rm(hub, key);
-    ui_mf(NULL, 0, "%s.%s reset.", hubname(hub), key);
-    return;
-  }
-
-  conf_set_bool(hub, key, bool_var(val));
-  get_bool_f(hub, key);
-}
-
-
-// Only suggests "true" or "false" regardless of the input. There are only two
-// states anyway, and one would want to switch between those two without any
-// hassle.
-static void set_bool_sug(guint64 hub, char *key, char *val, char **sug) {
-  gboolean f = !(val[0] == 0 || val[0] == '1' || val[0] == 't' || val[0] == 'y' || val[0] == 'o');
-  sug[f ? 1 : 0] = g_strdup("true");
-  sug[f ? 0 : 1] = g_strdup("false");
-}
-
-
-static void get_password(guint64 hub, char *key) {
-  ui_mf(NULL, 0, "%s.%s is %s", hubname(hub), key, conf_exists(hub, key) ? "set" : "not set");
-}
-
-
-static void set_password(guint64 hub, char *key, char *val) {
-  if(!hub)
-    ui_m(NULL, 0, "ERROR: password can only be used as hub setting.");
-  else if(!val) {
-    db_vars_rm(hub, key);
-    ui_mf(NULL, 0, "%s.%s reset.", hubname(hub), key);
-  } else {
-    db_vars_set(hub, key, val);
-    struct ui_tab *tab = ui_tab_cur->data;
-    if(tab->type == UIT_HUB && tab->hub->net->conn && !tab->hub->nick_valid)
-      hub_password(tab->hub, NULL);
-    ui_m(NULL, 0, "Password saved.");
-  }
 }
 
 
@@ -310,35 +252,8 @@ static void set_tls_policy_sug(guint64 hub, char *key, char *val, char **sug) {
 }
 
 
-static void get_ui_time_format(guint64 hub, char *key) {
-  ui_mf(NULL, 0, "global.%s = %s", key, conf_ui_time_format());
-}
-
-
-static void set_ui_time_format(guint64 hub, char *key, char *val) {
-  if(!val) {
-    db_vars_rm(0, key);
-    ui_mf(NULL, 0, "global.%s reset.", key);\
-    return;
-  }
-
-  db_vars_set(0, key, val);
-  get_ui_time_format(0, key);
-}
-
-
 static void set_path_sug(guint64 hub, char *key, char *val, char **sug) {
   path_suggest(val, sug);
-}
-
-
-// Suggest the current value. Works for both integers and strings. Perhaps also
-// for booleans, but set_bool_sug() is more useful there anyway.
-// BUG: This does not use a default value, if there is one...
-static void set_old_sug(guint64 hub, char *key, char *val, char **sug) {
-  char *old = db_vars_get(hub, key);
-  if(old && strncmp(old, val, strlen(val)) == 0)
-    sug[0] = g_strdup(old);
 }
 
 
@@ -350,11 +265,7 @@ static struct setting settings[] = {
   { "download_dir",     get_download_dir,    set_dl_inc_dir,      set_path_sug       },
   { "encoding",         get_encoding,        set_encoding,        set_encoding_sug   },
   { "incoming_dir",     get_incoming_dir,    set_dl_inc_dir,      set_path_sug       },
-  { "password",         get_password,        set_password,        NULL               },
-  { "share_hidden",     get_bool_f,          set_bool_f,          set_bool_sug       },
-  { "show_joinquit",    get_bool_f,          set_bool_f,          set_bool_sug       },
   { "tls_policy",       get_tls_policy,      set_tls_policy,      set_tls_policy_sug },
-  { "ui_time_format",   get_ui_time_format,  set_ui_time_format,  set_old_sug        },
   { NULL }
 };
 

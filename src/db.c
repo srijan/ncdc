@@ -1142,8 +1142,6 @@ char **db_vars_hubs() {
   !conf_exists(0, "incoming_dir") ? g_build_filename(db_dir, "inc", NULL)\
     : g_strdup(db_vars_get(0, "incoming_dir")))
 
-#define conf_ui_time_format() (!conf_exists(0, "ui_time_format") ? "[%H:%M:%S]" : db_vars_get(0, "ui_time_format"))
-
 #define CONF_TLSP_DISABLE 0
 #define CONF_TLSP_ALLOW   1
 #define CONF_TLSP_PREFER  2

@@ -822,7 +822,7 @@ char *ui_textinput_reset(struct ui_textinput *ti) {
   char *str = ui_textinput_get(ti);
   ui_textinput_set(ti, "");
   if(ti->usehist) {
-    // as a special case, don't allow /password to be logged. /set password is
+    // as a special case, don't allow /password to be logged. /hset password is
     // okay, since it will be stored anyway.
     if(!strstr(str, "/password "))
       ui_cmdhist_add(str);

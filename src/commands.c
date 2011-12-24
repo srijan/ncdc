@@ -818,9 +818,9 @@ static void c_password(char *args) {
   if(tab->type != UIT_HUB)
     ui_m(NULL, 0, "This command can only be used on hub tabs.");
   else if(!tab->hub->net->conn)
-    ui_m(NULL, 0, "Not connected to a hub. Did you want to use '/set password' instead?");
+    ui_m(NULL, 0, "Not connected to a hub. Did you want to use '/hset password' instead?");
   else if(tab->hub->nick_valid)
-    ui_m(NULL, 0, "Already logged in. Did you want to use '/set password' instead?");
+    ui_m(NULL, 0, "Already logged in. Did you want to use '/hset password' instead?");
   else
     hub_password(tab->hub, args);
 }

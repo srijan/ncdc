@@ -407,7 +407,7 @@ void ui_hub_userchange(struct ui_tab *tab, int change, struct hub_user *user) {
     ui_msg_userchange(mt, change, user);
 
   // display the join/quit, when requested
-  gboolean log = conf_get_bool(conf_exists(tab->hub->id, "show_joinquit") ? tab->hub->id : 0, "show_joinquit");
+  gboolean log = var_get_bool(tab->hub->id, VAR_show_joinquit);
   if(change == UIHUB_UC_NFO && !user->isjoined) {
     user->isjoined = TRUE;
     if(log && tab->hub->joincomplete && (!tab->hub->nick_valid
@@ -2653,7 +2653,7 @@ void ui_draw() {
   mvhline(winrows-2, 0, ACS_HLINE, wincols);
   // time
   int xoffset = 0;
-  char *tfmt = conf_ui_time_format();
+  char *tfmt = var_get(0, VAR_ui_time_format);
   if(strcmp(tfmt, "-") != 0) {
 #if GLIB_CHECK_VERSION(2,26,0)
     GDateTime *tm = g_date_time_new_now_local();

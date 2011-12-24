@@ -468,11 +468,11 @@ void hub_password(struct hub *hub, char *pass) {
   g_return_if_fail(hub->adc ? hub->state == ADC_S_VERIFY : !hub->nick_valid);
 
   if(!pass)
-    pass = db_vars_get(hub->id, "password");
+    pass = var_get(hub->id, VAR_password);
   if(!pass) {
     ui_m(hub->tab, UIP_HIGH,
       "\nPassword required. Type '/password <your password>' to log in without saving your password."
-      "\nOr use '/set password <your password>' to log in and save your password in the config file (unencrypted!).\n");
+      "\nOr use '/hset password <your password>' to log in and save your password in the config file (unencrypted!).\n");
   } else if(hub->adc) {
     char enc[40] = {};
     char res[24];
@@ -1512,8 +1512,8 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
 
   // $BadPass
   if(strncmp(cmd, "$BadPass", 8) == 0) {
-    if(conf_exists(hub->id, "password"))
-      ui_m(hub->tab, 0, "Wrong password. Use '/set password <password>' to edit your password or '/unset password' to reset it.");
+    if(var_get(hub->id, VAR_password))
+      ui_m(hub->tab, 0, "Wrong password. Use '/hset password <password>' to edit your password or '/hunset password' to reset it.");
     else
       ui_m(hub->tab, 0, "Wrong password. Type /reconnect to try again.");
     hub_disconnect(hub, FALSE);

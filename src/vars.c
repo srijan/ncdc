@@ -503,6 +503,32 @@ static char *f_minislot_size(const char *val) {
 #endif
 
 
+// password
+
+static char *f_password(const char *val) {
+  char *r = g_malloc(strlen(val)+1);
+  memset(r, '*', strlen(val));
+  r[strlen(val)-1] = 0;
+  return r;
+}
+
+static gboolean s_password(guint64 hub, const char *key, const char *val, GError **err) {
+  db_vars_set(hub, key, val);
+  // send password to hub
+  GList *tab;
+  for(tab=ui_tabs; tab; tab=tab->next) {
+    struct ui_tab *t = tab->data;
+    if(t->type == UIT_HUB && t->hub->id == hub && t->hub->net->conn && !t->hub->nick_valid)
+      hub_password(t->hub, NULL);
+  }
+  return TRUE;
+}
+
+#if INTERFACE
+#define VAR_PASSWORD V(password, 0, 1, f_password, p_id, NULL, NULL, s_password, NULL)
+#endif
+
+
 // share_exclude
 
 #if INTERFACE
@@ -510,10 +536,31 @@ static char *f_minislot_size(const char *val) {
 #endif
 
 
+// share_hidden
+
+#if INTERFACE
+#define VAR_SHARE_HIDDEN V(share_hidden, 1, 0, f_bool, p_bool, su_bool, NULL, NULL, "false")
+#endif
+
+
+// show_joinquit
+
+#if INTERFACE
+#define VAR_SHOW_JOINQUIT V(show_joinquit, 1, 1, f_bool, p_bool, su_bool, NULL, NULL, "false")
+#endif
+
+
 // slots
 
 #if INTERFACE
 #define VAR_SLOTS V(slots, 1, 0, f_int, p_int_ge1, NULL, NULL, s_hubinfo, "10")
+#endif
+
+
+// ui_time_format
+
+#if INTERFACE
+#define VAR_UI_TIME_FORMAT V(ui_time_format, 1, 0, f_id, p_id, su_old, NULL, NULL, "[%H:%M:%S]")
 #endif
 
 
@@ -585,8 +632,12 @@ struct var {
   VAR_MINISLOTS \
   VAR_MINISLOT_SIZE \
   VAR_NICK \
+  VAR_PASSWORD \
   VAR_SHARE_EXCLUDE \
-  VAR_SLOTS
+  VAR_SHARE_HIDDEN \
+  VAR_SHOW_JOINQUIT \
+  VAR_SLOTS \
+  VAR_UI_TIME_FORMAT
 
 enum var_names {
 #define V(n, gl, h, f, p, su, g, s, d) VAR_##n,

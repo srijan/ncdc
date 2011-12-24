@@ -796,7 +796,7 @@ static void fl_refresh_process() {
   args->donefun = fl_refresh_scanned;
   args->inc_hidden = conf_get_bool(0, "share_hidden");
 
-  char *excl = db_vars_get(0, "share_exclude");
+  char *excl = var_get(0, VAR_share_exclude);
   if(excl)
     args->excl_regex = g_regex_new(excl, G_REGEX_OPTIMIZE, 0, NULL);
 

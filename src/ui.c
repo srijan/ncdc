@@ -1517,7 +1517,7 @@ static void ui_fl_key(struct ui_tab *tab, guint64 key) {
       ui_m(NULL, 0, "Directory empty.");
     else {
       g_return_if_fail(!sel->isfile || sel->hastth);
-      char *excl = db_vars_get(0, "download_exclude");
+      char *excl = var_get(0, VAR_download_exclude);
       GRegex *r = excl ? g_regex_new(excl, 0, 0, NULL) : NULL;
       dl_queue_add_fl(tab->uid, sel, NULL, r);
       if(r)

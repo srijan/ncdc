@@ -123,6 +123,17 @@ static char *p_ip(const char *val, GError **err) {
   return g_strdup(val);
 }
 
+
+static char *p_regex(const char *val, GError **err) {
+  GRegex *r = g_regex_new(val, 0, 0, err);
+  if(!r)
+    return NULL;
+  else {
+    g_regex_unref(r);
+    return g_strdup(val);
+  }
+}
+
 // Only suggests "true" or "false" regardless of the input. There are only two
 // states anyway, and one would want to switch between those two without any
 // hassle.
@@ -308,6 +319,13 @@ static char *i_nick() {
 #endif
 
 
+// download_exclude
+
+#if INTERFACE
+#define VAR_DOWNLOAD_EXCLUDE V(download_exclude, 1, 0, f_id, p_regex, su_old, NULL, NULL, NULL)
+#endif
+
+
 // download_slots
 
 static gboolean s_download_slots(guint64 hub, const char *key, const char *val, GError **err) {
@@ -485,6 +503,13 @@ static char *f_minislot_size(const char *val) {
 #endif
 
 
+// share_exclude
+
+#if INTERFACE
+#define VAR_SHARE_EXCLUDE V(share_exclude, 1, 0, f_id, p_regex, su_old, NULL, NULL, NULL)
+#endif
+
+
 // slots
 
 #if INTERFACE
@@ -548,6 +573,7 @@ struct var {
   VAR_CHAT_ONLY \
   VAR_CONNECTION \
   VAR_DESCRIPTION \
+  VAR_DOWNLOAD_EXCLUDE \
   VAR_DOWNLOAD_SLOTS \
   VAR_EMAIL \
   VAR_FILELIST_MAXAGE \
@@ -559,6 +585,7 @@ struct var {
   VAR_MINISLOTS \
   VAR_MINISLOT_SIZE \
   VAR_NICK \
+  VAR_SHARE_EXCLUDE \
   VAR_SLOTS
 
 enum var_names {

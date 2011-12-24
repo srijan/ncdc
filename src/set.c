@@ -46,15 +46,6 @@ struct setting {
 };
 
 
-static void get_string(guint64 hub, char *key) {
-  char *str = db_vars_get(hub, key);
-  if(!str)
-    ui_mf(NULL, 0, "%s.%s is not set.", hubname(hub), key);
-  else
-    ui_mf(NULL, 0, "%s.%s = %s", hubname(hub), key, str);
-}
-
-
 // not set => false
 static void get_bool_f(guint64 hub, char *key) {
   ui_mf(NULL, 0, "%s.%s = %s", hubname(hub), key, conf_get_bool(hub, key) ? "true" : "false");
@@ -319,25 +310,6 @@ static void set_tls_policy_sug(guint64 hub, char *key, char *val, char **sug) {
 }
 
 
-static void set_regex(guint64 hub, char *key, char *val) {
-  if(!val) {
-    db_vars_rm(hub, key);
-    ui_mf(NULL, 0, "%s.%s reset.", hubname(hub), key);
-    return;
-  }
-  GError *err = NULL;
-  GRegex *r = g_regex_new(val, 0, 0, &err);
-  if(!r) {
-    ui_m(NULL, 0, err->message);
-    g_error_free(err);
-  } else {
-    g_regex_unref(r);
-    db_vars_set(hub, key, val);
-    get_string(hub, key);
-  }
-}
-
-
 static void get_ui_time_format(guint64 hub, char *key) {
   ui_mf(NULL, 0, "global.%s = %s", key, conf_ui_time_format());
 }
@@ -376,12 +348,10 @@ static struct setting settings[] = {
   UI_COLORS
 #undef C
   { "download_dir",     get_download_dir,    set_dl_inc_dir,      set_path_sug       },
-  { "download_exclude", get_string,          set_regex,           set_old_sug        },
   { "encoding",         get_encoding,        set_encoding,        set_encoding_sug   },
   { "incoming_dir",     get_incoming_dir,    set_dl_inc_dir,      set_path_sug       },
   { "password",         get_password,        set_password,        NULL               },
   { "share_hidden",     get_bool_f,          set_bool_f,          set_bool_sug       },
-  { "share_exclude",    get_string,          set_regex,           set_old_sug        },
   { "show_joinquit",    get_bool_f,          set_bool_f,          set_bool_sug       },
   { "tls_policy",       get_tls_policy,      set_tls_policy,      set_tls_policy_sug },
   { "ui_time_format",   get_ui_time_format,  set_ui_time_format,  set_old_sug        },

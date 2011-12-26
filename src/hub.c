@@ -422,7 +422,7 @@ static void user_adc_nfo(struct hub *hub, struct hub_user *u, struct adc_cmd *cm
       u->isop = (strtol(p, NULL, 10) & (4 | 8 | 16 | 32)) > 0;
       break;
     case P('U','S'): // upload speed
-      u->conn = GUINT_TO_POINTER(g_ascii_strtoull(p, NULL, 0));
+      u->conn = GUINT_TO_POINTER((int)g_ascii_strtoull(p, NULL, 0));
       break;
 #if TLS_SUPPORT
     case P('K','P'): // keyprint

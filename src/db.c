@@ -982,6 +982,9 @@ void db_share_add(const char *name, const char *path) {
 // As with db_share*, the db_vars* functions are NOT thread-safe, and must be
 // accessed only from the main thread.
 
+// Try to avoid using the db_vars_(get|set) functions directly. Use the
+// higher-level vars.c abstraction instead.
+
 struct db_var_item { char *name; char *val; guint64 hub; };
 static GHashTable *db_vars_cache = NULL;
 
@@ -1108,44 +1111,6 @@ char **db_vars_hubs() {
   g_ptr_array_sort(p, cmpstringp);
   g_ptr_array_add(p, NULL);
   return (char **)g_ptr_array_free(p, FALSE);
-}
-
-
-
-
-// conf_* macros and functions. These are provided here to ease the conversion
-// from the old glib key files to the new database format. These should be
-// replaced with a separate and better abstraction later on in a separate file
-// (vars.c, which will most likely replace set.c).
-
-#if INTERFACE
-
-#define conf_set_bool(h, n, v) db_vars_set(h, n, (v) ? "true" : "false")
-
-#define conf_set_int(h, n, v) do {\
-    char int_val[30];\
-    sprintf(int_val, "%d", (int)(v));\
-    db_vars_set(h, n, int_val);\
-  } while(0)
-
-#define conf_exists(h, n) (db_vars_get(h, n) ? TRUE : FALSE)
-
-#define conf_hub_get(hub, key) (conf_exists(hub, key) ? db_vars_get(hub, key) : db_vars_get(0, key))
-
-#endif
-
-char *conf_tlsp_list[] = { "disabled", "allow", "prefer" };
-
-gboolean conf_get_bool(guint64 hub, const char *name) {
-  char *v = db_vars_get(hub, name);
-  return v && strcmp(v, "true") == 0 ? TRUE : FALSE;
-}
-
-int conf_get_int(guint64 hub, const char *name) {
-  char *v = db_vars_get(hub, name);
-  if(!v)
-    return 0;
-  return g_ascii_strtoll(v, NULL, 0);
 }
 
 

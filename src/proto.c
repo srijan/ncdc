@@ -39,7 +39,7 @@
 // NMDC support
 
 char *charset_convert(struct hub *hub, gboolean to_utf8, const char *str) {
-  char *fmt = conf_encoding(hub->id);
+  char *fmt = var_get(hub->id, VAR_encoding);
   char *res = str_convert(to_utf8?"UTF-8":fmt, !to_utf8?"UTF-8":fmt, str);
   return res;
 }

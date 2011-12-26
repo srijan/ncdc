@@ -1130,10 +1130,6 @@ char **db_vars_hubs() {
 
 #define conf_exists(h, n) (db_vars_get(h, n) ? TRUE : FALSE)
 
-#define conf_encoding(hub) (\
-  conf_exists(hub, "encoding")   ? db_vars_get(hub, "encoding") \
-    : conf_exists(0, "encoding") ? db_vars_get(0, "encoding") : "UTF-8")
-
 #define conf_hub_get(hub, key) (conf_exists(hub, key) ? db_vars_get(hub, key) : db_vars_get(0, key))
 
 #endif

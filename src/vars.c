@@ -461,6 +461,30 @@ static gboolean s_download_slots(guint64 hub, const char *key, const char *val, 
 #endif
 
 
+// encoding
+
+static char *p_encoding(const char *val, GError **err) {
+  if(!str_convert_check(val, err)) {
+    if(err && !*err)
+      g_set_error_literal(err, 1, 0, "Invalid encoding.");
+    return NULL;
+  }
+  return g_strdup(val);
+}
+
+static void su_encoding(const char *old, const char *val, char **sug) {
+  static struct flag_option encoding_flags[] = {
+    {1,"CP1250"}, {1,"CP1251"}, {1,"CP1252"}, {1,"ISO-2022-JP"}, {1,"ISO-8859-2"}, {1,"ISO-8859-7"},
+    {1,"ISO-8859-8"}, {1,"ISO-8859-9"}, {1,"KOI8-R"}, {1,"LATIN1"}, {1,"SJIS"}, {1,"UTF-8"},
+    {1,"WINDOWS-1250"}, {1,"WINDOWS-1251"}, {1,"WINDOWS-1252"}, {0}
+  };
+  flags_sug(encoding_flags, val, sug);
+}
+
+#if INTERFACE
+#define VAR_ENCODING V(encoding, 1, 1, f_id, p_encoding, su_encoding, NULL, NULL, "UTF-8")
+#endif
+
 // email / description / connection
 
 static char *p_connection(const char *val, GError **err) {
@@ -806,6 +830,7 @@ struct var {
   VAR_DOWNLOAD_EXCLUDE \
   VAR_DOWNLOAD_SLOTS \
   VAR_EMAIL \
+  VAR_ENCODING \
   VAR_FILELIST_MAXAGE \
   VAR_FLUSH_FILE_CACHE \
   VAR_HUBNAME \

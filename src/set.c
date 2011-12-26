@@ -46,48 +46,6 @@ struct setting {
 };
 
 
-static void get_encoding(guint64 hub, char *key) {
-  ui_mf(NULL, 0, "%s.%s = %s", hubname(hub), key, conf_encoding(hub));
-}
-
-
-static void set_encoding(guint64 hub, char *key, char *val) {
-  GError *err = NULL;
-  if(!val) {
-    db_vars_rm(hub, key);
-    ui_mf(NULL, 0, "%s.%s reset.", hubname(hub), key);
-  } else if(!str_convert_check(val, &err)) {
-    if(err) {
-      ui_mf(NULL, 0, "ERROR: Can't use that encoding: %s", err->message);
-      g_error_free(err);
-    } else
-      ui_m(NULL, 0, "ERROR: Invalid encoding.");
-  } else {
-    db_vars_set(hub, key, val);
-    get_encoding(hub, key);
-  }
-  // TODO: note that this only affects new incoming data? and that a reconnect
-  // may be necessary to re-convert all names/descriptions/stuff?
-}
-
-
-static void set_encoding_sug(guint64 hub, char *key, char *val, char **sug) {
-  // This list is neither complete nor are the entries guaranteed to be
-  // available. Just a few commonly used encodings. There does not seem to be a
-  // portable way of obtaining the available encodings.
-  static char *encodings[] = {
-    "CP1250", "CP1251", "CP1252", "ISO-2022-JP", "ISO-8859-2", "ISO-8859-7",
-    "ISO-8859-8", "ISO-8859-9", "KOI8-R", "LATIN1", "SJIS", "UTF-8",
-    "WINDOWS-1250", "WINDOWS-1251", "WINDOWS-1252", NULL
-  };
-  int i = 0, len = strlen(val);
-  char **enc;
-  for(enc=encodings; *enc && i<20; enc++)
-    if(g_ascii_strncasecmp(val, *enc, len) == 0 && strlen(*enc) != len)
-      sug[i++] = g_strdup(*enc);
-}
-
-
 static void get_color(guint64 hub, char *key) {
   g_return_if_fail(strncmp(key, "color_", 6) == 0);
   struct ui_color *c = ui_color_by_name(key+6);
@@ -138,7 +96,6 @@ static struct setting settings[] = {
 #define C(n, a,b,c) { "color_" G_STRINGIFY(n), get_color, set_color, set_color_sug },
   UI_COLORS
 #undef C
-  { "encoding",         get_encoding,        set_encoding,        set_encoding_sug   },
   { NULL }
 };
 

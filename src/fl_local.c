@@ -591,10 +591,10 @@ static void fl_hash_process() {
   if(!g_hash_table_size(fl_hash_queue)) {
     ratecalc_unregister(&fl_hash_rate);
     ratecalc_reset(&fl_hash_rate);
-    db_fl_setdone(TRUE);
+    var_set_bool(0, VAR_fl_done, TRUE);
     return;
   }
-  db_fl_setdone(FALSE);
+  var_set_bool(0, VAR_fl_done, FALSE);
   ratecalc_register(&fl_hash_rate);
 
   // get one item from fl_hash_queue
@@ -846,7 +846,7 @@ static gboolean fl_refresh_scanned(gpointer dat) {
   // If the hash queue is empty after calling fl_refresh_compare() then it
   // means the file list is completely hashed.
   if(!g_hash_table_size(fl_hash_queue))
-    db_fl_setdone(TRUE);
+    var_set_bool(0, VAR_fl_done, TRUE);
 
   fl_needflush = TRUE;
   g_strfreev(args->path);
@@ -1005,7 +1005,7 @@ void fl_init() {
 
   // If ncdc was previously closed while hashing, make sure to force a refresh
   // this time to continue the hash progress.
-  if(sharing && !db_fl_getdone()) {
+  if(sharing && !var_get_bool(0, VAR_fl_done)) {
     dorefresh = TRUE;
     ui_m(ui_main, UIM_NOTIFY, "File list incomplete, refreshing...");
   }

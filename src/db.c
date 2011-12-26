@@ -519,18 +519,6 @@ static void *db_queue_item_create(int flags, const char *q, ...) {
 
 // hashdata and hashfiles
 
-#if INTERFACE
-
-#define db_fl_getdone() (db_vars_get(0, "fl_done") ? TRUE : FALSE)
-
-#define db_fl_setdone(v) do {\
-    if(!!db_fl_getdone() != !!(v))\
-      db_vars_set(0, "fl_done", (v) ? "true" : NULL);\
-  } while(0)
-
-#endif
-
-
 // Adds a file to hashfiles and, if not present yet, hashdata. Returns the new hashfiles.id.
 gint64 db_fl_addhash(const char *path, guint64 size, time_t lastmod, const char *root, const char *tthl, int tthl_len) {
   char hash[40] = {};

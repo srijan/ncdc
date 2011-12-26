@@ -707,6 +707,7 @@ struct var {
   V(encoding,         1,1, f_id,               p_encoding,      su_encoding,   NULL,         NULL,               "UTF-8")\
   V(filelist_maxage,  1,0, f_interval,         p_interval,      su_old,        NULL,         NULL,               "604800")\
   V(flush_file_cache, 1,0, f_flush_file_cache, p_bool,          su_bool,       NULL,         s_flush_file_cache, i_flush_file_cache())\
+  V(fl_done,          0,0, NULL,               NULL,            NULL,          NULL,         NULL,               "false")\
   V(hubaddr,          0,0, NULL,               NULL,            NULL,          NULL,         NULL,               NULL)\
   V(hubkp,            0,0, NULL,               NULL,            NULL,          NULL,         NULL,               NULL)\
   V(hubname,          0,1, f_id,               p_hubname,       su_old,        NULL,         s_hubname,          NULL)\

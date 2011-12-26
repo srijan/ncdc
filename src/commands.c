@@ -257,18 +257,18 @@ static gboolean c_connect_set_hubaddr(char *addr) {
   g_match_info_free(nfo);
 
   struct ui_tab *tab = ui_tab_cur->data;
-  char *old = g_strdup(db_vars_get(tab->hub->id, "hubaddr"));
+  char *old = g_strdup(var_get(tab->hub->id, VAR_hubaddr));
 
   // Reconstruct (without the kp) and save
   GString *a = g_string_new("");
   g_string_printf(a, "%s://%s:%s/", !proto || !*proto ? "dchub" : proto, host, !port || !*port ? "411" : port);
-  db_vars_set(tab->hub->id, "hubaddr", a->str);
+  var_set(tab->hub->id, VAR_hubaddr, a->str, NULL);
 
   // Save kp if specified, or throw it away if the URL changed
   if(kp && *kp)
-    db_vars_set(tab->hub->id, "hubkp", kp);
+    var_set(tab->hub->id, VAR_hubkp, kp, NULL);
   else if(old && strcmp(old, a->str) != 0)
-    db_vars_rm(tab->hub->id, "hubkp");
+    var_set(tab->hub->id, VAR_hubkp, NULL, NULL);
 
   g_string_free(a, TRUE);
   g_free(old);
@@ -289,7 +289,7 @@ static void c_connect(char *args) {
   else {
     if(args[0] && !c_connect_set_hubaddr(args))
       ;
-    else if(!conf_exists(tab->hub->id, "hubaddr"))
+    else if(!var_get(tab->hub->id, VAR_hubaddr))
       ui_m(NULL, 0, "No hub address configured. Use '/connect <address>' to do so.");
     else
       hub_connect(tab->hub);
@@ -303,7 +303,7 @@ static void c_connect_sug(char *args, char **sug) {
   if(t->type != UIT_HUB)
     return;
   int i = 0, len = strlen(args);
-  char *addr = db_vars_get(t->hub->id, "hubaddr");
+  char *addr = var_get(t->hub->id, VAR_hubaddr);
   if(addr && strncmp(addr, args, len) == 0)
     sug[i++] = g_strdup(addr);
   else if(addr) {
@@ -378,7 +378,7 @@ static void c_accept(char *args) {
   else {
     char enc[53] = {};
     base32_encode_dat(tab->hub->kp, enc, 32);
-    db_vars_set(tab->hub->id, "hubkp", enc);
+    var_set(tab->hub->id, VAR_hubkp, enc, NULL);
     g_slice_free1(32, tab->hub->kp);
     tab->hub->kp = NULL;
     hub_connect(tab->hub);

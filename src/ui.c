@@ -309,7 +309,7 @@ struct ui_tab *ui_hub_create(const char *name, gboolean conn) {
   tab->log->handle = tab;
   tab->log->checkchat = ui_hub_log_checkchat;
   // already used this name before? open connection again
-  if(conn && conf_exists(tab->hub->id, "hubaddr"))
+  if(conn && var_get(tab->hub->id, VAR_hubaddr))
     hub_connect(tab->hub);
   return tab;
 }
@@ -356,7 +356,7 @@ static void ui_hub_draw(struct ui_tab *tab) {
   else if(!tab->hub->nick_valid)
     mvaddstr(winrows-4, wincols-15, "Logging in...");
   else {
-    char *addr = conf_hub_get(tab->hub->id, "hubaddr");
+    char *addr = var_get(tab->hub->id, VAR_hubaddr);
     char *tmp = g_strdup_printf("%s @ %s%s", tab->hub->nick, addr,
       tab->hub->isop ? " (operator)" : tab->hub->isreg ? " (registered)" : "");
     mvaddstr(winrows-4, 0, tmp);

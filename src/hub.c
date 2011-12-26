@@ -1665,12 +1665,12 @@ static gboolean handle_accept_cert(GTlsConnection *conn, GTlsCertificate *cert, 
   base32_encode_dat(raw, enc, 32);
 
   // Get configured keyprint
-  char *old = db_vars_get(hub->id, "hubkp");
+  char *old = var_get(hub->id, VAR_hubkp);
 
   // No keyprint? Then assume first-use trust and save it to the config file.
   if(!old) {
     ui_mf(hub->tab, 0, "No previous TLS keyprint known. Storing `%s' for future validation.", enc);
-    db_vars_set(hub->id, "hubkp", enc);
+    var_set(hub->id, VAR_hubkp, enc, NULL);
     return TRUE;
   }
 
@@ -1697,7 +1697,7 @@ static gboolean handle_accept_cert(GTlsConnection *conn, GTlsCertificate *cert, 
 
 
 void hub_connect(struct hub *hub) {
-  char *oaddr = conf_hub_get(hub->id, "hubaddr");
+  char *oaddr = var_get(hub->id, VAR_hubaddr);
   char *addr = oaddr;
   g_return_if_fail(addr);
   // The address should be in the form of "dchub://hostname:port/", but older

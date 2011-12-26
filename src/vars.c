@@ -171,6 +171,71 @@ static gboolean s_active_conf(guint64 hub, const char *key, const char *val, GEr
 }
 
 
+struct flag_option {
+  int num;
+  char *name;
+};
+
+static int flags_raw(struct flag_option *ops, gboolean multi, const char *val, GError **err) {
+  char **args = g_strsplit(val, ",", 0);
+  int r = 0, n = 0;
+  char **arg = args;
+  for(; arg && *arg; arg++) {
+    g_strstrip(*arg);
+    if(!**arg)
+      continue;
+
+    struct flag_option *o = ops;
+    for(; o->num; o++) {
+      if(strcmp(o->name, *arg) == 0) {
+        n++;
+        r |= o->num;
+        break;
+      }
+    }
+    if(!o->num) {
+      g_strfreev(args);
+      g_set_error(err, 1, 0, "Unknown flag: %s", *arg);
+      return 0;
+    }
+  }
+  g_strfreev(args);
+  if((!multi && n > 1) || n < 1) {
+    g_set_error_literal(err, 1, 0, n > 1 ? "Too many flags." : "Not enough flags given.");
+    return 0;
+  }
+  return r;
+}
+
+static char *flags_fmt(struct flag_option *o, int val) {
+  GString *s = g_string_new("");
+  for(; o->num; o++) {
+    if(val & o->num) {
+      if(s->str[0])
+        g_string_append_c(s, ',');
+      g_string_append(s, o->name);
+      break;
+    }
+  }
+  return g_string_free(s, FALSE);
+}
+
+static void flags_sug(struct flag_option *o, const char *val, char **sug) {
+  char *v = g_strdup(val);
+  char *attr = strrchr(v, ',');
+  if(attr)
+    *(attr++) = 0;
+  else
+    attr = v;
+  g_strstrip(attr);
+  int i = 0, len = strlen(attr);
+  for(; o->num && i<20; o++)
+    if(strncmp(attr, o->name, len) == 0)
+      sug[i++] = g_strdup(o->name);
+  if(i && attr != v)
+    strv_prefix(sug, v, ",", NULL);
+  g_free(v);
+}
 
 
 // Var definitions
@@ -612,6 +677,68 @@ static gboolean s_password(guint64 hub, const char *key, const char *val, GError
 #endif
 
 
+// tls_policy
+
+#if INTERFACE
+#define VAR_TLSP_DISABLE 1
+#define VAR_TLSP_ALLOW   2
+#define VAR_TLSP_PREFER  4
+#endif
+
+static struct flag_option var_tls_policy_ops[] = {
+  { VAR_TLSP_DISABLE, "disabled" },
+  { VAR_TLSP_ALLOW,   "allow"    },
+  { VAR_TLSP_PREFER,  "prefer"   },
+  { 0 }
+};
+
+static char *f_tls_policy(const char *val) {
+  return !db_certificate ? g_strdup("disabled (not supported)") : flags_fmt(var_tls_policy_ops, int_raw(val));
+}
+
+static char *p_tls_policy(const char *val, GError **err) {
+  int n = flags_raw(var_tls_policy_ops, FALSE, val, err);
+  return n ? g_strdup_printf("%d", n) : NULL;
+}
+
+static void su_tls_policy(const char *old, const char *val, char **sug) {
+  flags_sug(var_tls_policy_ops, val, sug);
+}
+
+static char *g_tls_policy(guint64 hub, const char *key) {
+  if(!db_certificate)
+    return G_STRINGIFY(VAR_TLSP_DISABLE);
+  char *r = db_vars_get(hub, key);
+  if(!r)
+    return NULL;
+  static char num[2] = {};
+  // Compatibility with old versions
+  if(r && r[0] >= '0' && r[0] <= '2' && !r[1])
+    num[0] = var_tls_policy_ops[r[0]-'0'].num;
+  else
+    num[0] = flags_raw(var_tls_policy_ops, FALSE, r, NULL);
+  num[0] += '0';
+  return num;
+}
+
+static gboolean s_tls_policy(guint64 hub, const char *key, const char *val, GError **err) {
+  g_debug("Setting %s", val);
+  if(!db_certificate) {
+    g_set_error(err, 1, 0, "This option can't be modified: %s.", !have_tls_support ? "no TLS support available" : "no client certificate available");
+    return FALSE;
+  }
+  char *r = flags_fmt(var_tls_policy_ops, int_raw(val));
+  db_vars_set(hub, key, r[0] ? r : NULL);
+  g_free(r);
+  hub_global_nfochange();
+  return TRUE;
+}
+
+#if INTERFACE
+#define VAR_TLS_POLICY V(tls_policy, 1, 1, f_tls_policy, p_tls_policy, su_tls_policy, g_tls_policy, s_tls_policy, G_STRINGIFY(VAR_TLSP_ALLOW))
+#endif
+
+
 // ui_time_format
 
 #if INTERFACE
@@ -694,6 +821,7 @@ struct var {
   VAR_SHARE_HIDDEN \
   VAR_SHOW_JOINQUIT \
   VAR_SLOTS \
+  VAR_TLS_POLICY \
   VAR_UI_TIME_FORMAT
 
 enum var_names {

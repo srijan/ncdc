@@ -133,52 +133,12 @@ static void set_color_sug(guint64 hub, char *key, char *val, char **sug) {
 }
 
 
-static void get_tls_policy(guint64 hub, char *key) {
-  ui_mf(NULL, 0, "%s.%s = %s%s", hubname(hub), key,
-    conf_tlsp_list[conf_tls_policy(hub)], db_certificate ? "" : " (not supported)");
-}
-
-
-static void set_tls_policy(guint64 hub, char *key, char *val) {
-  int old = conf_tls_policy(hub);
-  if(!val) {
-    db_vars_rm(hub, key);
-    ui_mf(NULL, 0, "%s.%s reset.", hubname(hub), key);
-  } else if(!db_certificate)
-    ui_mf(NULL, 0, "This option can't be modified: %s.",
-      !have_tls_support ? "no TLS support available" : "no client certificate available");
-  else {
-    int p =
-      strcmp(val, "0") == 0 || strcmp(val, conf_tlsp_list[0]) == 0 ? 0 :
-      strcmp(val, "1") == 0 || strcmp(val, conf_tlsp_list[1]) == 0 ? 1 :
-      strcmp(val, "2") == 0 || strcmp(val, conf_tlsp_list[2]) == 0 ? 2 : -1;
-    if(p < 0)
-      ui_m(NULL, 0, "Invalid TLS policy.");
-    else {
-      conf_set_int(hub, key, p);
-      get_tls_policy(hub, key);
-    }
-  }
-  if(old != conf_tls_policy(hub))
-    hub_global_nfochange();
-}
-
-
-static void set_tls_policy_sug(guint64 hub, char *key, char *val, char **sug) {
-  int i = 0, j = 0, len = strlen(val);
-  for(i=0; i<=2; i++)
-    if(g_ascii_strncasecmp(val, conf_tlsp_list[i], len) == 0 && strlen(conf_tlsp_list[i]) != len)
-      sug[j++] = g_strdup(conf_tlsp_list[i]);
-}
-
-
 // the settings list
 static struct setting settings[] = {
 #define C(n, a,b,c) { "color_" G_STRINGIFY(n), get_color, set_color, set_color_sug },
   UI_COLORS
 #undef C
   { "encoding",         get_encoding,        set_encoding,        set_encoding_sug   },
-  { "tls_policy",       get_tls_policy,      set_tls_policy,      set_tls_policy_sug },
   { NULL }
 };
 

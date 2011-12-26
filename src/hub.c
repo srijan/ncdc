@@ -503,7 +503,7 @@ void hub_opencc(struct hub *hub, struct hub_user *u) {
   if(hub->adc)
     g_snprintf(token, 19, "%"G_GUINT32_FORMAT, g_random_int());
 
-  gboolean wanttls = conf_tls_policy(hub->id) == CONF_TLSP_PREFER ? TRUE : FALSE;
+  gboolean wanttls = var_get_int(hub->id, VAR_tls_policy) == VAR_TLSP_PREFER ? TRUE : FALSE;
   gboolean cantls = wanttls && u->hastls;
   char *adcproto = !cantls ? "ADC/1.0" : u->hasadc0 ? "ADCS/0.10" : "ADCS/1.0";
 
@@ -631,7 +631,7 @@ void hub_send_nfo(struct hub *hub) {
   ip4 = cc_listen ? ip4_pack(var_get(hub->id, VAR_active_ip)) : 0;
   port = cc_listen ? cc_listen_port : 0;
   share = fl_local_list_size;
-  sup_tls = conf_tls_policy(hub->id) == CONF_TLSP_DISABLE ? FALSE : TRUE;
+  sup_tls = var_get_int(hub->id, VAR_tls_policy) == VAR_TLSP_DISABLE ? FALSE : TRUE;
 
   // check whether we need to make any further effort
   if(hub->nick_valid && streq(desc) && streq(conn) && streq(mail) && eq(slots)
@@ -1023,7 +1023,7 @@ static void adc_handle(struct hub *hub, char *msg) {
   case ADCC_CTM:
     if(cmd.argc < 3 || cmd.type != 'D' || cmd.dest != hub->sid)
       g_warning("Invalid message from %s: %s", net_remoteaddr(hub->net), msg);
-    else if(conf_tls_policy(hub->id) == CONF_TLSP_DISABLE ? !is_adc_proto(cmd.argv[0]) : !is_valid_proto(cmd.argv[0])) {
+    else if(var_get_int(hub->id, VAR_tls_policy) == VAR_TLSP_DISABLE ? !is_adc_proto(cmd.argv[0]) : !is_valid_proto(cmd.argv[0])) {
       GString *r = adc_generate('D', ADCC_STA, hub->sid, cmd.source);
       g_string_append(r, " 141 Unknown\\protocol");
       adc_append(r, "PR", cmd.argv[0]);
@@ -1051,7 +1051,7 @@ static void adc_handle(struct hub *hub, char *msg) {
   case ADCC_RCM:
     if(cmd.argc < 2 || cmd.type != 'D' || cmd.dest != hub->sid)
       g_warning("Invalid message from %s: %s", net_remoteaddr(hub->net), msg);
-    else if(conf_tls_policy(hub->id) == CONF_TLSP_DISABLE ? !is_adc_proto(cmd.argv[0]) : !is_valid_proto(cmd.argv[0])) {
+    else if(var_get_int(hub->id, VAR_tls_policy) == VAR_TLSP_DISABLE ? !is_adc_proto(cmd.argv[0]) : !is_valid_proto(cmd.argv[0])) {
       GString *r = adc_generate('D', ADCC_STA, hub->sid, cmd.source);
       g_string_append(r, " 141 Unknown\\protocol");
       adc_append(r, "PR", cmd.argv[0]);
@@ -1473,7 +1473,7 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
       // Unlike with ADC, the client sending the $RCTM can not indicate it
       // wants to use TLS or not, so the decision is with us. Let's require
       // tls_policy to be PREFER here.
-      int usetls = u->hastls && conf_tls_policy(hub->id) == CONF_TLSP_PREFER;
+      int usetls = u->hastls && var_get_int(hub->id, VAR_tls_policy) == VAR_TLSP_PREFER;
       net_sendf(hub->net, "$ConnectToMe %s %s:%d%s", other, var_get(hub->id, VAR_active_ip),
         usetls ? cc_listen_port+1 : cc_listen_port, usetls ? "S" : "");
       cc_expect_add(hub, u, NULL, FALSE);

@@ -1134,15 +1134,6 @@ char **db_vars_hubs() {
   conf_exists(hub, "encoding")   ? db_vars_get(hub, "encoding") \
     : conf_exists(0, "encoding") ? db_vars_get(0, "encoding") : "UTF-8")
 
-#define CONF_TLSP_DISABLE 0
-#define CONF_TLSP_ALLOW   1
-#define CONF_TLSP_PREFER  2
-
-#define conf_tls_policy(hub) (\
-  !db_certificate ? CONF_TLSP_DISABLE\
-    : conf_exists(hub, "tls_policy") ? conf_get_int(hub, "tls_policy")\
-    : conf_exists(0, "tls_policy")   ? conf_get_int(0, "tls_policy") : CONF_TLSP_ALLOW)
-
 #define conf_hub_get(hub, key) (conf_exists(hub, key) ? db_vars_get(hub, key) : db_vars_get(0, key))
 
 #endif

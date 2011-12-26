@@ -153,7 +153,7 @@ static void c_help(char *args) {
 
   // list information on a setting
   } else if(strcmp(args, "set") == 0 && sec) {
-    c_help_oset(sec);
+    // TODO
 
   // list available key sections
   } else if(strcmp(args, "keys") == 0 && !sec) {
@@ -195,9 +195,8 @@ static void c_help(char *args) {
 
 static void c_help_sug(char *args, char **sug) {
   // help set ..
-  // TODO: use vars
   if(strncmp(args, "set ", 4) == 0) {
-    c_oset_sugkey(args+4, sug);
+    // TODO
     strv_prefix(sug, "set ", NULL);
     return;
   }
@@ -847,10 +846,18 @@ static void c_kick(char *args) {
 
 
 static void c_nick(char *args) {
-  // not the most elegant solution, but certainly the most simple.
-  char *c = g_strdup_printf("nick %s", args);
-  c_oset(c);
-  g_free(c);
+  struct ui_tab *tab = ui_tab_cur->data;
+  guint64 hub = tab->type == UIT_HUB || tab->type == UIT_MSG ? tab->hub->id : 0;
+  int v = vars_byname("nick");
+  g_return_if_fail(v >= 0);
+  GError *err = NULL;
+  char *r = vars[v].parse(args, &err);
+  if(!r || !var_set(hub, v, r, &err)) {
+    ui_mf(NULL, 0, "Error changing nick: %s", err->message);
+    g_free(r);
+    return;
+  }
+  ui_mf(NULL, 0, "Nick changed.");
 }
 
 static void c_browse(char *args) {
@@ -1179,8 +1186,6 @@ static struct cmd cmds[] = {
   { "msg",         c_msg,         c_msg_sug        },
   { "nick",        c_nick,        NULL             },
   { "open",        c_open,        c_open_sug       },
-  { "oset",        c_oset,        c_oset_sug       }, // TODO: remove
-  { "ounset",      c_ounset,      c_oset_sugkey    }, // TODO: remove
   { "password",    c_password,    NULL             },
   { "pm",          c_msg,         c_msg_sug        },
   { "queue",       c_queue,       NULL             },

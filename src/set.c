@@ -46,56 +46,8 @@ struct setting {
 };
 
 
-static void get_color(guint64 hub, char *key) {
-  g_return_if_fail(strncmp(key, "color_", 6) == 0);
-  struct ui_color *c = ui_color_by_name(key+6);
-  g_return_if_fail(c);
-  ui_mf(NULL, 0, "global.%s = %s", key, ui_color_str_gen(c->fg, c->bg, c->x));
-}
-
-
-static void set_color(guint64 hub, char *key, char *val) {
-  if(!val) {
-    db_vars_rm(0, key);
-    ui_mf(NULL, 0, "global.%s reset.", key);
-    ui_colors_update();
-    return;
-  }
-
-  GError *err = NULL;
-  if(!ui_color_str_parse(val, NULL, NULL, NULL, &err)) {
-    ui_m(NULL, 0, err->message);
-    g_error_free(err);
-  } else {
-    db_vars_set(0, key, val);
-    ui_colors_update();
-    get_color(0, key);
-  }
-}
-
-
-static void set_color_sug(guint64 hub, char *key, char *val, char **sug) {
-  char *attr = strrchr(val, ',');
-  if(attr)
-    *(attr++) = 0;
-  else
-    attr = val;
-  g_strstrip(attr);
-  struct ui_attr *a = ui_attr_names;
-  int i = 0, len = strlen(attr);
-  for(; a->name[0] && i<20; a++)
-    if(strncmp(attr, a->name, len) == 0)
-      sug[i++] = g_strdup(a->name);
-  if(i && attr != val)
-    strv_prefix(sug, val, ",", NULL);
-}
-
-
 // the settings list
 static struct setting settings[] = {
-#define C(n, a,b,c) { "color_" G_STRINGIFY(n), get_color, set_color, set_color_sug },
-  UI_COLORS
-#undef C
   { NULL }
 };
 

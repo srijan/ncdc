@@ -388,6 +388,40 @@ static char *i_nick() {
 #endif
 
 
+// color_*
+
+static char *p_color(const char *val, GError **err) {
+  if(!ui_color_str_parse(val, NULL, NULL, NULL, err))
+    return NULL;
+  return g_strdup(val);
+}
+
+static void su_color(const char *old, const char *v, char **sug) {
+  // TODO: use flags_sug()?
+  char *val = g_strdup(v);
+  char *attr = strrchr(val, ',');
+  if(attr)
+    *(attr++) = 0;
+  else
+    attr = val;
+  g_strstrip(attr);
+  struct ui_attr *a = ui_attr_names;
+  int i = 0, len = strlen(attr);
+  for(; a->name[0] && i<20; a++)
+    if(strncmp(attr, a->name, len) == 0)
+      sug[i++] = g_strdup(a->name);
+  if(i && attr != val)
+    strv_prefix(sug, val, ",", NULL);
+  g_free(val);
+}
+
+static gboolean s_color(guint64 hub, const char *key, const char *val, GError **err) {
+  db_vars_set(hub, key, val);
+  ui_colors_update();
+  return TRUE;
+}
+
+
 // download_dir & incoming_dir
 
 static char *i_dl_inc_dir(gboolean dl) {
@@ -824,6 +858,7 @@ struct var {
   VAR_AUTOREFRESH \
   VAR_BACKLOG \
   VAR_CHAT_ONLY \
+  UI_COLORS \
   VAR_CONNECTION \
   VAR_DESCRIPTION \
   VAR_DOWNLOAD_DIR \
@@ -851,8 +886,10 @@ struct var {
 
 enum var_names {
 #define V(n, gl, h, f, p, su, g, s, d) VAR_##n,
+#define C(n, d) VAR_color_##n,
   VARS
 #undef V
+#undef C
   VAR_END
 };
 
@@ -860,10 +897,11 @@ enum var_names {
 
 
 struct var vars[] = {
-#define V(n, gl, h, f, p, su, g, s, d)\
-  { G_STRINGIFY(n), gl, h, f, p, su, g, s, NULL },
+#define V(n, gl, h, f, p, su, g, s, d) { G_STRINGIFY(n), gl, h, f, p, su, g, s, NULL },
+#define C(n, d) { "color_"G_STRINGIFY(n), 1, 0, f_id, p_color, su_color, NULL, s_color, d },
   VARS
 #undef V
+#undef C
   { NULL }
 };
 
@@ -933,7 +971,10 @@ void vars_init() {
 #define V(n, gl, h, f, p, su, g, s, d)\
     { vars[var_num].def = d; };\
     var_num++;
+  // Colors already have their defaults initialized statically
+#define C(n, d) var_num++;
   VARS
+#undef C
 #undef V
 }
 

@@ -28,7 +28,6 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <fcntl.h>
-#include <gdbm.h>
 
 
 char           *fl_local_list_file;

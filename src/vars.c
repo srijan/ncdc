@@ -339,6 +339,37 @@ static char *i_nick() {
 }
 
 
+// cid / pid
+
+static char *i_cid_pid() {
+  if(db_vars_get(0, "cid") && db_vars_get(0, "pid"))
+    return NULL;
+
+  guint64 r = rand_64();
+
+  struct tiger_ctx t;
+  char pid[24];
+  tiger_init(&t);
+  tiger_update(&t, (char *)&r, 8);
+  tiger_final(&t, pid);
+
+  // now hash the PID so we have our CID
+  char cid[24];
+  tiger_init(&t);
+  tiger_update(&t, pid, 24);
+  tiger_final(&t, cid);
+
+  // encode and save
+  char enc[40] = {};
+  base32_encode(pid, enc);
+  db_vars_set(0, "pid", enc);
+  base32_encode(cid, enc);
+  db_vars_set(0, "cid", enc);
+
+  return NULL;
+}
+
+
 // color_*
 
 static char *p_color(const char *val, GError **err) {
@@ -697,6 +728,7 @@ struct var {
   V(autorefresh,      1,0, f_autorefresh,      p_autorefresh,   NULL,          NULL,         NULL,               "3600")\
   V(backlog,          1,1, f_backlog,          p_backlog,       NULL,          NULL,         NULL,               "0")\
   V(chat_only,        1,1, f_bool,             p_bool,          su_bool,       NULL,         NULL,               "false")\
+  V(cid,              0,0, NULL,               NULL,            NULL,          NULL,         NULL,               i_cid_pid())\
   UI_COLORS \
   V(connection,       1,1, f_id,               p_connection,    su_old,        NULL,         s_hubinfo,          NULL)\
   V(description,      1,1, f_id,               p_id,            su_old,        NULL,         s_hubinfo,          NULL)\
@@ -719,6 +751,7 @@ struct var {
   V(minislot_size,    1,0, f_minislot_size,    p_minislot_size, NULL,          NULL,         NULL,               "65536")\
   V(nick,             1,1, f_id,               p_nick,          su_old,        NULL,         s_nick,             i_nick())\
   V(password,         0,1, f_password,         p_id,            NULL,          NULL,         s_password,         NULL)\
+  V(pid,              0,0, NULL,               NULL,            NULL,          NULL,         NULL,               i_cid_pid())\
   V(share_exclude,    1,0, f_id,               p_regex,         su_old,        NULL,         NULL,               NULL)\
   V(share_hidden,     1,0, f_bool,             p_bool,          su_bool,       NULL,         NULL,               "false")\
   V(show_joinquit,    1,1, f_bool,             p_bool,          su_bool,       NULL,         NULL,               "false")\

@@ -1107,8 +1107,6 @@ char **db_vars_hubs() {
 
 // Initialize the database directory and other stuff
 
-char db_cid[24];
-char db_pid[24];
 const char *db_dir = NULL;
 
 // Base32-encoded keyprint of our own certificate
@@ -1205,31 +1203,6 @@ static void db_load_cert() {
 }
 
 #endif // TLS_SUPPORT
-
-
-// Generates a PID/CID pair and stores it in the database.
-static void generate_pid() {
-  guint64 r = rand_64();
-
-  struct tiger_ctx t;
-  char pid[24];
-  tiger_init(&t);
-  tiger_update(&t, (char *)&r, 8);
-  tiger_final(&t, pid);
-
-  // now hash the PID so we have our CID
-  char cid[24];
-  tiger_init(&t);
-  tiger_update(&t, pid, 24);
-  tiger_final(&t, cid);
-
-  // encode and save
-  char enc[40] = {};
-  base32_encode(pid, enc);
-  db_vars_set(0, "pid", enc);
-  base32_encode(cid, enc);
-  db_vars_set(0, "cid", enc);
-}
 
 
 // Checks or creates the initial session directory, including subdirectories
@@ -1389,12 +1362,6 @@ void db_init() {
   db_thread = g_thread_create(db_thread_func, g_build_filename(db_dir, "db.sqlite3", NULL), TRUE, NULL);
 
   db_init_schema();
-
-  // load db_pid and db_cid
-  if(!db_vars_get(0, "pid"))
-    generate_pid();
-  base32_decode(db_vars_get(0, "pid"), db_pid);
-  base32_decode(db_vars_get(0, "cid"), db_cid);
 }
 
 

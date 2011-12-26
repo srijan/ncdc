@@ -883,9 +883,7 @@ static void adc_handle(struct cc *cc, char *msg) {
         net_send(cc->net, "CSUP ADBASE ADTIGR ADBZIP");
 
       GString *r = adc_generate('C', ADCC_INF, 0, 0);
-      char cid[40] = {};
-      base32_encode(db_cid, cid);
-      adc_append(r, "ID", cid);
+      adc_append(r, "ID", var_get(0, VAR_cid));
       if(!cc->active)
         adc_append(r, "TO", cc->token);
       net_send(cc->net, r->str);

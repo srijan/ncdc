@@ -645,10 +645,7 @@ void hub_send_nfo(struct hub *hub) {
     // send non-changing stuff in the IDENTIFY state
     gboolean f = hub->state == ADC_S_IDENTIFY;
     if(f) {
-      char cid[40] = {}, pid[40] = {};
-      base32_encode(db_pid, pid);
-      base32_encode(db_cid, cid);
-      g_string_append_printf(cmd, " ID%s PD%s VEncdc\\s%s", cid, pid, VERSION);
+      g_string_append_printf(cmd, " ID%s PD%s VEncdc\\s%s", var_get(0, VAR_cid), var_get(0, VAR_pid), VERSION);
       adc_append(cmd, "NI", hub->nick);
       // Always add our KP field, even if we're not active. Other clients may
       // validate our certificate even when we are the one connecting.
@@ -843,10 +840,10 @@ static void adc_sch(struct hub *hub, struct adc_cmd *cmd) {
   if(slots_free < 0)
     slots_free = 0;
   char tth[40] = {};
-  char cid[40] = {};
+  char *cid = NULL;
   char *dest = NULL;
   if(u->hasudp4) {
-    base32_encode(db_cid, cid);
+    cid = var_get(0, VAR_cid);
     dest = g_strdup_printf("%s:%d", ip4_unpack(u->ip4), u->udp4);
   }
 

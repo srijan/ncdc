@@ -590,10 +590,10 @@ static void fl_hash_process() {
   if(!g_hash_table_size(fl_hash_queue)) {
     ratecalc_unregister(&fl_hash_rate);
     ratecalc_reset(&fl_hash_rate);
-    db_fl_setdone(TRUE);
+    var_set_bool(0, VAR_fl_done, TRUE);
     return;
   }
-  db_fl_setdone(FALSE);
+  var_set_bool(0, VAR_fl_done, FALSE);
   ratecalc_register(&fl_hash_rate);
 
   // get one item from fl_hash_queue
@@ -793,9 +793,9 @@ static void fl_refresh_process() {
   struct fl_list *dir = fl_refresh_queue->head->data;
   struct fl_scan_args *args = g_slice_new0(struct fl_scan_args);
   args->donefun = fl_refresh_scanned;
-  args->inc_hidden = conf_get_bool(0, "share_hidden");
+  args->inc_hidden = var_get_bool(0, VAR_share_hidden);
 
-  char *excl = db_vars_get(0, "share_exclude");
+  char *excl = var_get(0, VAR_share_exclude);
   if(excl)
     args->excl_regex = g_regex_new(excl, G_REGEX_OPTIMIZE, 0, NULL);
 
@@ -845,7 +845,7 @@ static gboolean fl_refresh_scanned(gpointer dat) {
   // If the hash queue is empty after calling fl_refresh_compare() then it
   // means the file list is completely hashed.
   if(!g_hash_table_size(fl_hash_queue))
-    db_fl_setdone(TRUE);
+    var_set_bool(0, VAR_fl_done, TRUE);
 
   fl_needflush = TRUE;
   g_strfreev(args->path);
@@ -944,7 +944,7 @@ static void fl_init_list(struct fl_list *fl) {
 
 
 static gboolean fl_init_autorefresh(gpointer dat) {
-  int r = conf_autorefresh();
+  int r = var_get_int(0, VAR_autorefresh);
   time_t t = time(NULL);
   if(r && fl_refresh_last+r < t)
     fl_refresh(NULL);
@@ -1004,7 +1004,7 @@ void fl_init() {
 
   // If ncdc was previously closed while hashing, make sure to force a refresh
   // this time to continue the hash progress.
-  if(sharing && !db_fl_getdone()) {
+  if(sharing && !var_get_bool(0, VAR_fl_done)) {
     dorefresh = TRUE;
     ui_m(ui_main, UIM_NOTIFY, "File list incomplete, refreshing...");
   }
@@ -1017,7 +1017,7 @@ void fl_init() {
   if(!fl_local_list || !dorefresh)
     ui_m(NULL, UIM_NOLOG|UIM_DIRECT, NULL);
 
-  if(dorefresh || conf_autorefresh())
+  if(dorefresh || var_get_int(0, VAR_autorefresh))
     fl_refresh(NULL);
 }
 

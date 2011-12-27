@@ -461,8 +461,7 @@ static void xfer_log_add(struct cc *cc) {
   if(cc->tthl_dat || !cc->last_length)
     return;
 
-  char *key = cc->dl ? "log_downloads" : "log_uploads";
-  if(conf_exists(0, key) && !conf_get_bool(0, key))
+  if(!var_get_bool(0, cc->dl ? VAR_log_downloads : VAR_log_uploads))
     return;
 
   static struct logfile *log = NULL;
@@ -527,11 +526,11 @@ static gboolean request_slot(struct cc *cc, gboolean need_full) {
     return TRUE;
 
   // if we have a free slot, use that
-  if(slots < conf_slots())
+  if(slots < var_get_int(0, VAR_slots))
     return TRUE;
 
   // if we can use a minislot, do so
-  if(!need_full && minislots < conf_minislots()) {
+  if(!need_full && minislots < var_get_int(0, VAR_minislots)) {
     cc->slot_mini = TRUE;
     return TRUE;
   }
@@ -774,7 +773,7 @@ static void handle_adcget(struct cc *cc, char *type, char *id, guint64 start, gi
   }
   if(bytes < 0 || bytes > st.st_size-start)
     bytes = st.st_size-start;
-  if(needslot && st.st_size < conf_minislot_size())
+  if(needslot && st.st_size < var_get_int(0, VAR_minislot_size))
     needslot = FALSE;
 
   if(f && throttle_check(cc, f->tth, start)) {
@@ -884,9 +883,7 @@ static void adc_handle(struct cc *cc, char *msg) {
         net_send(cc->net, "CSUP ADBASE ADTIGR ADBZIP");
 
       GString *r = adc_generate('C', ADCC_INF, 0, 0);
-      char cid[40] = {};
-      base32_encode(db_cid, cid);
-      adc_append(r, "ID", cid);
+      adc_append(r, "ID", var_get(0, VAR_cid));
       if(!cc->active)
         adc_append(r, "TO", cc->token);
       net_send(cc->net, r->str);
@@ -1003,7 +1000,7 @@ static void adc_handle(struct cc *cc, char *msg) {
         g_string_append_printf(r, " 151 File Not Available");
       } else {
         r = adc_generate('C', ADCC_RES, 0, 0);
-        g_string_append_printf(r, " SL%d SI%"G_GUINT64_FORMAT, conf_slots() - cc_slots_in_use(NULL), f->size);
+        g_string_append_printf(r, " SL%d SI%"G_GUINT64_FORMAT, var_get_int(0, VAR_slots) - cc_slots_in_use(NULL), f->size);
         char *path = fl_list_path(f);
         adc_append(r, "FN", path);
         g_free(path);
@@ -1701,16 +1698,16 @@ gboolean cc_listen_start() {
   GError *err = NULL;
 
   cc_listen_stop();
-  if(!conf_get_bool(0, "active")) {
+  if(!var_get_bool(0, VAR_active)) {
     hub_global_nfochange();
     return FALSE;
   }
 
   // can be 0, in which case it'll be randomly assigned
-  int port = conf_get_int(0, "active_port");
+  int port = var_get_int(0, VAR_active_port);
 
   // local addr
-  char *bind = db_vars_get(0, "active_bind");
+  char *bind = var_get(0, VAR_active_bind);
   GInetAddress *laddr = NULL;
   if(bind && *bind && !(laddr = g_inet_address_new_from_string(bind)))
     ui_m(ui_main, 0, "Error parsing `active_bind' setting, binding to all interfaces instead.");
@@ -1755,9 +1752,9 @@ gboolean cc_listen_start() {
   cc_listen_port = port;
 
   if(db_certificate)
-    ui_mf(ui_main, 0, "Listening on TCP+UDP port %d and TCP port %d, remote IP is %s.", cc_listen_port, cc_listen_port+1, db_vars_get(0, "active_ip"));
+    ui_mf(ui_main, 0, "Listening on TCP+UDP port %d and TCP port %d, remote IP is %s.", cc_listen_port, cc_listen_port+1, var_get(0, VAR_active_ip));
   else
-    ui_mf(ui_main, 0, "Listening on TCP+UDP port %d, remote IP is %s.", cc_listen_port, db_vars_get(0, "active_ip"));
+    ui_mf(ui_main, 0, "Listening on TCP+UDP port %d, remote IP is %s.", cc_listen_port, var_get(0, VAR_active_ip));
   hub_global_nfochange();
   return TRUE;
 }

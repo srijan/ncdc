@@ -31,6 +31,7 @@
 
 #define DOC_CMD
 #define DOC_KEY
+#define DOC_SET
 #include "doc.h"
 
 struct cmd {
@@ -152,8 +153,16 @@ static void c_help(char *args) {
     ui_m(NULL, 0, "\nFor help on key bindings, use `/help keys'.\n");
 
   // list information on a setting
-  } else if(strcmp(args, "set") == 0 && sec) {
-    c_help_set(sec);
+  } else if((strcmp(args, "set") == 0 || strcmp(args, "hset") == 0) && sec) {
+    sec = strncmp(sec, "color_", 6) == 0 ? "color_*" : sec;
+    struct doc_set *s = (struct doc_set *)doc_sets;
+    for(; s->name; s++)
+      if(strcmp(s->name, sec) == 0)
+        break;
+    if(!s->name)
+      ui_mf(NULL, 0, "\nUnknown setting '%s'.", sec);
+    else
+      ui_mf(NULL, 0, "\nSetting: %s.%s %s\n\n%s\n", s->hub ? "#hub" : "global", s->name, s->type, s->desc);
 
   // list available key sections
   } else if(strcmp(args, "keys") == 0 && !sec) {
@@ -194,9 +203,13 @@ static void c_help(char *args) {
 
 
 static void c_help_sug(char *args, char **sug) {
-  // help set ..
-  if(strncmp(args, "set ", 4) == 0) {
-    c_set_sugkey(args+4, sug);
+  // help h?set ..
+  if(strncmp(args, "set ", 4) == 0 || strncmp(args, "hset ", 5) == 0) {
+    char *sec = args + (*args == 'h' ? 5 : 4);
+    int i, n=0, len = strlen(sec);
+    for(i=0; i<VAR_END && n<20; i++)
+      if((vars[i].global || vars[i].hub) && strncmp(vars[i].name, sec, len) == 0 && strlen(vars[i].name) != len)
+        sug[n++] = g_strdup(vars[i].name);
     strv_prefix(sug, "set ", NULL);
     return;
   }
@@ -257,18 +270,18 @@ static gboolean c_connect_set_hubaddr(char *addr) {
   g_match_info_free(nfo);
 
   struct ui_tab *tab = ui_tab_cur->data;
-  char *old = g_strdup(db_vars_get(tab->hub->id, "hubaddr"));
+  char *old = g_strdup(var_get(tab->hub->id, VAR_hubaddr));
 
   // Reconstruct (without the kp) and save
   GString *a = g_string_new("");
   g_string_printf(a, "%s://%s:%s/", !proto || !*proto ? "dchub" : proto, host, !port || !*port ? "411" : port);
-  db_vars_set(tab->hub->id, "hubaddr", a->str);
+  var_set(tab->hub->id, VAR_hubaddr, a->str, NULL);
 
   // Save kp if specified, or throw it away if the URL changed
   if(kp && *kp)
-    db_vars_set(tab->hub->id, "hubkp", kp);
+    var_set(tab->hub->id, VAR_hubkp, kp, NULL);
   else if(old && strcmp(old, a->str) != 0)
-    db_vars_rm(tab->hub->id, "hubkp");
+    var_set(tab->hub->id, VAR_hubkp, NULL, NULL);
 
   g_string_free(a, TRUE);
   g_free(old);
@@ -289,7 +302,7 @@ static void c_connect(char *args) {
   else {
     if(args[0] && !c_connect_set_hubaddr(args))
       ;
-    else if(!conf_exists(tab->hub->id, "hubaddr"))
+    else if(!var_get(tab->hub->id, VAR_hubaddr))
       ui_m(NULL, 0, "No hub address configured. Use '/connect <address>' to do so.");
     else
       hub_connect(tab->hub);
@@ -303,7 +316,7 @@ static void c_connect_sug(char *args, char **sug) {
   if(t->type != UIT_HUB)
     return;
   int i = 0, len = strlen(args);
-  char *addr = db_vars_get(t->hub->id, "hubaddr");
+  char *addr = var_get(t->hub->id, VAR_hubaddr);
   if(addr && strncmp(addr, args, len) == 0)
     sug[i++] = g_strdup(addr);
   else if(addr) {
@@ -378,7 +391,7 @@ static void c_accept(char *args) {
   else {
     char enc[53] = {};
     base32_encode_dat(tab->hub->kp, enc, 32);
-    db_vars_set(tab->hub->id, "hubkp", enc);
+    var_set(tab->hub->id, VAR_hubkp, enc, NULL);
     g_slice_free1(32, tab->hub->kp);
     tab->hub->kp = NULL;
     hub_connect(tab->hub);
@@ -408,7 +421,7 @@ static void c_open(char *args) {
     return;
   }
   if(!is_valid_hubname(name))
-    ui_m(NULL, 0, "Sorry, tab name may only consist of alphanumeric characters, and must not exceed 25 characters.");
+    ui_m(NULL, 0, "Sorry, hub name may only consist of alphanumeric characters, and must not exceed 25 characters.");
   else {
     // Look for existing tab
     GList *n;
@@ -817,9 +830,9 @@ static void c_password(char *args) {
   if(tab->type != UIT_HUB)
     ui_m(NULL, 0, "This command can only be used on hub tabs.");
   else if(!tab->hub->net->conn)
-    ui_m(NULL, 0, "Not connected to a hub. Did you want to use '/set password' instead?");
+    ui_m(NULL, 0, "Not connected to a hub. Did you want to use '/hset password' instead?");
   else if(tab->hub->nick_valid)
-    ui_m(NULL, 0, "Already logged in. Did you want to use '/set password' instead?");
+    ui_m(NULL, 0, "Already logged in. Did you want to use '/hset password' instead?");
   else
     hub_password(tab->hub, args);
 }
@@ -846,10 +859,18 @@ static void c_kick(char *args) {
 
 
 static void c_nick(char *args) {
-  // not the most elegant solution, but certainly the most simple.
-  char *c = g_strdup_printf("nick %s", args);
-  c_set(c);
-  g_free(c);
+  struct ui_tab *tab = ui_tab_cur->data;
+  guint64 hub = tab->type == UIT_HUB || tab->type == UIT_MSG ? tab->hub->id : 0;
+  int v = vars_byname("nick");
+  g_return_if_fail(v >= 0);
+  GError *err = NULL;
+  char *r = vars[v].parse(args, &err);
+  if(!r || !var_set(hub, v, r, &err)) {
+    ui_mf(NULL, 0, "Error changing nick: %s", err->message);
+    g_free(r);
+    return;
+  }
+  ui_mf(NULL, 0, "Nick changed.");
 }
 
 static void c_browse(char *args) {
@@ -981,6 +1002,182 @@ c_search_clean:
 }
 
 
+#define print_var(hub, hubname, var) do {\
+    char *raw = var_get(hub, var);\
+    if(!raw)\
+      ui_mf(NULL, 0, "%s.%s is not set.", hubname, vars[var].name);\
+    else {\
+      char *fmt = vars[var].format(raw);\
+      ui_mf(NULL, 0, "%s.%s = %s", hubname, vars[var].name, fmt);\
+      g_free(fmt);\
+    }\
+  } while(0)
+
+
+#define check_var(hub, var, key, unset) do {\
+    if(var < 0 || (!vars[var].global && !vars[var].hub)) {\
+      ui_mf(NULL, 0, "No setting with the name '%s'.", key);\
+      return;\
+    }\
+    if(hub ? !vars[var].hub : !vars[var].global) {\
+      ui_mf(NULL, 0,\
+        hub ? "`%s' is a global setting, did you mean to use /%s instead?"\
+            : "'%s' is a hub setting, did you mean to use /%s instead?",\
+        vars[var].name, !hub ? (unset ? "hunset" : "hset") : unset ? "unset" : "set");\
+      return;\
+    }\
+  } while(0)
+
+
+#define hubandhubname(h) \
+  guint64 hub = 0;\
+  char *hubname = "global";\
+  if(h) {\
+    struct ui_tab *tab = ui_tab_cur->data;\
+    if(tab->type != UIT_HUB && tab->type != UIT_MSG) {\
+      ui_m(NULL, 0, "This command can only be used on hub tabs.");\
+      return;\
+    }\
+    hub = tab->hub->id;\
+    hubname = tab->name;\
+  }
+
+
+static gboolean listsettings(guint64 hub, const char *hubname, const char *key) {
+  int i, n = 0;
+  char *pat = !key || !*key ? NULL : key[strlen(key)-1] == '*' || key[strlen(key)-1] == '?' ? g_strdup(key) : g_strconcat(key, "*", NULL);
+  GPatternSpec *p = pat ? g_pattern_spec_new(pat) : NULL;
+  g_free(pat);
+  for(i=0; i<VAR_END; i++) {
+    if((hub ? vars[i].hub : vars[i].global) && (!pat || g_pattern_match_string(p, vars[i].name))) {
+      if(n++ == 0)
+        ui_m(NULL, 0, "");
+      print_var(hub, hubname, i);
+    }
+  }
+  if(pat)
+    g_pattern_spec_free(p);
+  if(n)
+    ui_m(NULL, 0, "");
+  return n == 0 ? FALSE : TRUE;
+}
+
+
+// Implements /set and /hset
+static void sethset(gboolean h, char *args) {
+  hubandhubname(h);
+  char *key = args;
+  char *val; // NULL = get
+
+  // separate key/value
+  if((val = strchr(args, ' '))) {
+    *(val++) = 0;
+    g_strstrip(val);
+    if(!*val)
+      val = NULL;
+  }
+
+  // Get var, optionally list, and check whether it can be used in this context
+  int var = *key ? vars_byname(key) : -1;
+  if(var < 0 && !val && listsettings(hub, hubname, key))
+    return;
+  check_var(hub, var, key, FALSE);
+
+  // get
+  if(!val)
+    print_var(hub, hubname, var);
+
+  // set
+  else {
+    GError *err = NULL;
+    char *raw = vars[var].parse(val, &err);
+    if(err) {
+      g_free(raw);
+      ui_mf(NULL, 0, "Error setting `%s': %s", vars[var].name, err->message);
+      g_error_free(err);
+      return;
+    }
+    var_set(hub, var, raw, &err);
+    g_free(raw);
+    if(err) {
+      ui_mf(NULL, 0, "Error setting `%s': %s", vars[var].name, err->message);
+      g_error_free(err);
+    } else
+      print_var(hub, hubname, var);
+  }
+}
+
+
+static void c_set(char *args)  { sethset(FALSE, args); }
+static void c_hset(char *args) { sethset(TRUE,  args); }
+
+
+// Implements /unset and /hunset
+static void unsethunset(gboolean h, const char *key) {
+  hubandhubname(h);
+
+  // Get var, optionally list, and check whether it can be used in this context
+  int var = *key ? vars_byname(key) : -1;
+  if(var < 0 && listsettings(hub, hubname, key))
+    return;
+  check_var(hub, var, key, TRUE);
+  GError *err = NULL;
+
+  // Unset
+  var_set(hub, var, NULL, &err);
+  if(err) {
+    ui_mf(NULL, 0, "Error resetting `%s': %s", vars[var].name, err->message);
+    g_error_free(err);
+  } else
+    ui_mf(NULL, 0, "%s.%s reset.", hubname, vars[var].name);
+}
+
+
+static void c_unset(char *args)  { unsethunset(FALSE, args); }
+static void c_hunset(char *args) { unsethunset(TRUE,  args); }
+
+
+// Implementents suggestions for /h?(un)?set
+static void setunset_sug(gboolean set, gboolean h, const char *val, char **sug) {
+  guint64 hub = 0;
+  if(h) {
+    struct ui_tab *tab = ui_tab_cur->data;
+    if(tab->type != UIT_HUB && tab->type != UIT_MSG)
+      return;
+    hub = tab->hub->id;
+  }
+
+  char *sep = strchr(val, ' ');
+
+  // Suggest var name
+  if(!set || !sep) {
+    int len = strlen(val);
+    int i, n = 0;
+    for(i=0; i<VAR_END && n<20; i++)
+      if((hub ? vars[i].hub : vars[i].global) && strncmp(vars[i].name, val, len) == 0 && strlen(vars[i].name) != len)
+        sug[n++] = g_strdup(vars[i].name);
+    return;
+  }
+
+  // Suggest value
+  *(sep++) = 0;
+  g_strstrip(sep);
+  int var = vars_byname(val);
+  if(var >= 0 && vars[var].sug) {
+    vars[var].sug(var_get(hub, var), sep, sug);
+    strv_prefix(sug, val, " ", NULL);
+  }
+}
+
+
+static void c_set_sug(char *args, char **sug)    { setunset_sug(TRUE,  FALSE, args, sug); }
+static void c_hset_sug(char *args, char **sug)   { setunset_sug(TRUE,  TRUE,  args, sug); }
+static void c_unset_sug(char *args, char **sug)  { setunset_sug(FALSE, FALSE, args, sug); }
+static void c_hunset_sug(char *args, char **sug) { setunset_sug(FALSE, TRUE,  args, sug); }
+
+
+
+
 
 
 // definition of the command list
@@ -995,6 +1192,8 @@ static struct cmd cmds[] = {
   { "gc",          c_gc,          NULL             },
   { "grant",       c_grant,       c_msg_sug        },
   { "help",        c_help,        c_help_sug       },
+  { "hset",        c_hset,        c_hset_sug       },
+  { "hunset",      c_hunset,      c_hunset_sug     },
   { "kick",        c_kick,        c_msg_sug        },
   { "me",          c_me,          c_say_sug        },
   { "msg",         c_msg,         c_msg_sug        },
@@ -1011,7 +1210,7 @@ static struct cmd cmds[] = {
   { "set",         c_set,         c_set_sug        },
   { "share",       c_share,       c_share_sug      },
   { "ungrant",     c_ungrant,     c_ungrant_sug    },
-  { "unset",       c_unset,       c_set_sugkey     },
+  { "unset",       c_unset,       c_unset_sug      },
   { "unshare",     c_unshare,     c_unshare_sug    },
   { "userlist",    c_userlist,    NULL             },
   { "version",     c_version,     NULL             },

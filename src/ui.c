@@ -173,7 +173,7 @@ struct ui_tab *ui_msg_create(struct hub *hub, struct hub_user *user) {
   tab->hub = hub;
   tab->uid = user->uid;
   tab->name = g_strdup_printf("~%s", user->name);
-  tab->log = ui_logwindow_create(tab->name, conf_get_int(0, "backlog"));
+  tab->log = ui_logwindow_create(tab->name, var_get_int(0, VAR_backlog));
   tab->log->handle = tab;
   tab->log->checkchat = ui_hub_log_checkchat;
 
@@ -305,12 +305,11 @@ struct ui_tab *ui_hub_create(const char *name, gboolean conn) {
   tab->name = g_strdup_printf("#%s", name);
   tab->type = UIT_HUB;
   tab->hub = hub_create(tab);
-  tab->log = ui_logwindow_create(tab->name,
-      conf_get_int(conf_exists(tab->hub->id, "backlog") ? tab->hub->id : 0, "backlog"));
+  tab->log = ui_logwindow_create(tab->name, var_get_int(tab->hub->id, VAR_backlog));
   tab->log->handle = tab;
   tab->log->checkchat = ui_hub_log_checkchat;
   // already used this name before? open connection again
-  if(conn && conf_exists(tab->hub->id, "hubaddr"))
+  if(conn && var_get(tab->hub->id, VAR_hubaddr))
     hub_connect(tab->hub);
   return tab;
 }
@@ -357,7 +356,7 @@ static void ui_hub_draw(struct ui_tab *tab) {
   else if(!tab->hub->nick_valid)
     mvaddstr(winrows-4, wincols-15, "Logging in...");
   else {
-    char *addr = conf_hub_get(tab->hub->id, "hubaddr");
+    char *addr = var_get(tab->hub->id, VAR_hubaddr);
     char *tmp = g_strdup_printf("%s @ %s%s", tab->hub->nick, addr,
       tab->hub->isop ? " (operator)" : tab->hub->isreg ? " (registered)" : "");
     mvaddstr(winrows-4, 0, tmp);
@@ -408,7 +407,7 @@ void ui_hub_userchange(struct ui_tab *tab, int change, struct hub_user *user) {
     ui_msg_userchange(mt, change, user);
 
   // display the join/quit, when requested
-  gboolean log = conf_get_bool(conf_exists(tab->hub->id, "show_joinquit") ? tab->hub->id : 0, "show_joinquit");
+  gboolean log = var_get_bool(tab->hub->id, VAR_show_joinquit);
   if(change == UIHUB_UC_NFO && !user->isjoined) {
     user->isjoined = TRUE;
     if(log && tab->hub->joincomplete && (!tab->hub->nick_valid
@@ -1289,7 +1288,7 @@ void ui_fl_queue(guint64 uid, gboolean force, const char *sel, struct ui_tab *pa
   gboolean e = !force;
   if(!force) {
     struct stat st;
-    int age = conf_filelist_maxage();
+    int age = var_get_int(0, VAR_filelist_maxage);
     e = stat(fn, &st) < 0 || st.st_mtime < time(NULL)-MAX(age, 30) ? FALSE : TRUE;
   }
   if(e) {
@@ -1518,7 +1517,7 @@ static void ui_fl_key(struct ui_tab *tab, guint64 key) {
       ui_m(NULL, 0, "Directory empty.");
     else {
       g_return_if_fail(!sel->isfile || sel->hastth);
-      char *excl = db_vars_get(0, "download_exclude");
+      char *excl = var_get(0, VAR_download_exclude);
       GRegex *r = excl ? g_regex_new(excl, 0, 0, NULL) : NULL;
       dl_queue_add_fl(tab->uid, sel, NULL, r);
       if(r)
@@ -1745,11 +1744,10 @@ static void ui_dl_draw_row(struct ui_listing *list, GSequenceIter *iter, int row
   if(dl->islist)
     mvaddstr(row, 32, "files.xml.bz2");
   else {
-    char *def = conf_download_dir();
+    char *def = var_get(0, VAR_download_dir);
     int len = strlen(def);
     char *dest = strncmp(def, dl->dest, len) == 0 ? dl->dest+len+(dl->dest[len-1] == '/' ? 0 : 1) : dl->dest;
     mvaddnstr(row, 32, dest, str_offset_from_columns(dest, wincols-32));
-    g_free(def);
   }
 
   attroff(iter == list->sel ? UIC(list_select) : UIC(list_default));
@@ -2501,7 +2499,7 @@ static void ui_draw_status() {
     mvprintw(winrows-1, 0, "[Hashing: %d / %s / %.2f MiB/s]",
       g_hash_table_size(fl_hash_queue), str_formatsize(fl_hash_queue_size), ((float)ratecalc_get(&fl_hash_rate))/(1024.0f*1024.0f));
   mvprintw(winrows-1, wincols-37, "[U/D:%6d/%6d KiB/s]", ratecalc_get(&net_out)/1024, ratecalc_get(&net_in)/1024);
-  mvprintw(winrows-1, wincols-11, "[S:%3d/%3d]", cc_slots_in_use(NULL), conf_slots());
+  mvprintw(winrows-1, wincols-11, "[S:%3d/%3d]", cc_slots_in_use(NULL), var_get_int(0, VAR_slots));
 
   ui_m_updated = FALSE;
   if(ui_m_text) {
@@ -2654,7 +2652,7 @@ void ui_draw() {
   mvhline(winrows-2, 0, ACS_HLINE, wincols);
   // time
   int xoffset = 0;
-  char *tfmt = conf_ui_time_format();
+  char *tfmt = var_get(0, VAR_ui_time_format);
   if(strcmp(tfmt, "-") != 0) {
 #if GLIB_CHECK_VERSION(2,26,0)
     GDateTime *tm = g_date_time_new_now_local();

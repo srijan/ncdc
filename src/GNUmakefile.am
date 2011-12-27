@@ -11,11 +11,11 @@ ncdc_SOURCES =\
 	main.c\
 	net.c\
 	proto.c\
-	set.c\
 	tth.c\
 	ui.c\
 	ui_util.c\
-	util.c
+	util.c\
+	vars.c
 
 auto_headers = $(ncdc_SOURCES:.c=.h)
 noinst_HEADERS = doc.h ncdc.h ${auto_headers}

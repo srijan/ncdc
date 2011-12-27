@@ -41,7 +41,6 @@
 GMainLoop *main_loop;
 
 gboolean have_tls_support;
-gboolean log_debug = TRUE;
 
 
 // input handling declarations
@@ -236,7 +235,7 @@ static gboolean stderr_redir = FALSE;
 
 // redirect all non-fatal errors to stderr (NOT stdout!)
 static void log_redirect(const gchar *dom, GLogLevelFlags level, const gchar *msg, gpointer dat) {
-  if(!(level & (G_LOG_LEVEL_INFO|G_LOG_LEVEL_DEBUG)) || (stderr_redir && log_debug)) {
+  if(!(level & (G_LOG_LEVEL_INFO|G_LOG_LEVEL_DEBUG)) || (stderr_redir && var_log_debug)) {
     time_t tm = time(NULL);
     char ts[50];
     strftime(ts, 49, "[%F %H:%M:%S %Z]", localtime(&tm));
@@ -263,7 +262,7 @@ static void open_autoconnect() {
   char **hub;
   // TODO: make sure the tabs are opened in the same order as they were in the last run?
   for(hub=hubs; *hub; hub++)
-    if(conf_get_bool(db_vars_hubid(*hub), "autoconnect"))
+    if(var_get_bool(db_vars_hubid(*hub), VAR_autoconnect))
       ui_tab_open(ui_hub_create(*hub+1, TRUE), FALSE, NULL);
   g_strfreev(hubs);
 }
@@ -401,8 +400,9 @@ int main(int argc, char **argv) {
   g_log_set_handler(NULL, G_LOG_FATAL_MASK | G_LOG_FLAG_FATAL | G_LOG_LEVEL_ERROR, log_fatal, NULL);
   g_log_set_default_handler(log_redirect, NULL);
 
-  // Init database
+  // Init database & variables
   db_init();
+  vars_init();
 
   // redirect stderr to a log file
   char *errlog = g_build_filename(db_dir, "stderr.log", NULL);
@@ -461,7 +461,7 @@ int main(int argc, char **argv) {
 
   g_timeout_add_seconds_full(G_PRIORITY_HIGH, 1, one_second_timer, NULL, NULL);
   g_timeout_add(100, screen_update_check, NULL);
-  int maxage = conf_filelist_maxage();
+  int maxage = var_get_int(0, VAR_filelist_maxage);
   g_timeout_add_seconds_full(G_PRIORITY_LOW, CLAMP(maxage, 3600, 24*3600), dl_fl_clean, NULL, NULL);
 
   g_main_loop_run(main_loop);

@@ -900,10 +900,7 @@ gboolean fl_save(struct fl_list *fl, const char *file, GString *buf, int level, 
   CHECKFAIL(xmlTextWriterStartElement(writer, (xmlChar *)"FileListing"));
   CHECKFAIL(xmlTextWriterWriteAttribute(writer, (xmlChar *)"Version", (xmlChar *)"1"));
   CHECKFAIL(xmlTextWriterWriteAttribute(writer, (xmlChar *)"Generator", (xmlChar *)PACKAGE_STRING));
-
-  char cid[40] = {};
-  base32_encode(db_cid, cid);
-  CHECKFAIL(xmlTextWriterWriteAttribute(writer, (xmlChar *)"CID", (xmlChar *)cid));
+  CHECKFAIL(xmlTextWriterWriteAttribute(writer, (xmlChar *)"CID", (xmlChar *)var_get(0, VAR_cid)));
 
   char *path = fl ? fl_list_path(fl) : g_strdup("/");
   // Make sure the base path always ends with a slash, some clients will fail otherwise.

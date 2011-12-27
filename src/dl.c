@@ -448,7 +448,7 @@ static gint dl_queue_start_cmp(gconstpointer a, gconstpointer b) {
 // everything after some state variables have changed. Should not be called
 // directly, use dl_queue_start() instead.
 static gboolean dl_queue_start_do(gpointer dat) {
-  int freeslots = conf_download_slots();
+  int freeslots = var_get_int(0, VAR_download_slots);
 
   // Walk through all users in the queue and:
   // - determine possible targets to connect to or to start a transfer from
@@ -536,9 +536,7 @@ static void dl_queue_insert(struct dl *dl, gboolean init) {
   // figure out dl->inc
   char hash[40] = {};
   base32_encode(dl->hash, hash);
-  char *tmp = conf_incoming_dir();
-  dl->inc = g_build_filename(tmp, hash, NULL);
-  g_free(tmp);
+  dl->inc = g_build_filename(var_get(0, VAR_incoming_dir), hash, NULL);
   // create dl->u
   dl->u = g_ptr_array_new();
   // insert in the global queue
@@ -603,9 +601,7 @@ static gboolean dl_queue_addfile(guint64 uid, char *hash, guint64 size, char *fn
   memcpy(dl->hash, hash, 24);
   dl->size = size;
   // Figure out dl->dest
-  char *tmp = conf_download_dir();
-  dl->dest = g_build_filename(tmp, fn, NULL);
-  g_free(tmp);
+  dl->dest = g_build_filename(var_get(0, VAR_download_dir), fn, NULL);
   // and add to the queue
   g_debug("dl:%016"G_GINT64_MODIFIER"x: queueing %s", uid, fn);
   dl_queue_insert(dl, FALSE);
@@ -1196,9 +1192,7 @@ void dl_load_partial(struct dl *dl) {
   if(dl->hastthl) {
     char tth[40] = {};
     base32_encode(dl->hash, tth);
-    char *tmp = conf_incoming_dir();
-    fn = g_build_filename(tmp, tth, NULL);
-    g_free(tmp);
+    fn = g_build_filename(var_get(0, VAR_incoming_dir), tth, NULL);
     struct stat st;
     if(stat(fn, &st) >= 0)
       dl->have = st.st_size;
@@ -1314,7 +1308,7 @@ gboolean dl_fl_clean(gpointer dat) {
   }
 
   const char *n;
-  time_t ref = time(NULL) - conf_filelist_maxage();
+  time_t ref = time(NULL) - var_get_int(0, VAR_filelist_maxage);
   while((n = g_dir_read_name(d))) {
     if(strcmp(n, ".") == 0 || strcmp(n, "..") == 0)
       continue;
@@ -1332,12 +1326,10 @@ gboolean dl_fl_clean(gpointer dat) {
 
 // Removes unused files in <incoming_dir>.
 void dl_inc_clean() {
-  char *dir = conf_incoming_dir();
+  char *dir = var_get(0, VAR_incoming_dir);
   GDir *d = g_dir_open(dir, 0, NULL);
-  if(!d) {
-    g_free(dir);
+  if(!d)
     return;
-  }
 
   const char *n;
   char hash[24];
@@ -1355,6 +1347,5 @@ void dl_inc_clean() {
     g_free(fn);
   }
   g_dir_close(d);
-  g_free(dir);
 }
 

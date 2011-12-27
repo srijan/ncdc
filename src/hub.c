@@ -468,11 +468,11 @@ void hub_password(struct hub *hub, char *pass) {
   g_return_if_fail(hub->adc ? hub->state == ADC_S_VERIFY : !hub->nick_valid);
 
   if(!pass)
-    pass = db_vars_get(hub->id, "password");
+    pass = var_get(hub->id, VAR_password);
   if(!pass) {
     ui_m(hub->tab, UIP_HIGH,
       "\nPassword required. Type '/password <your password>' to log in without saving your password."
-      "\nOr use '/set password <your password>' to log in and save your password in the config file (unencrypted!).\n");
+      "\nOr use '/hset password <your password>' to log in and save your password in the config file (unencrypted!).\n");
   } else if(hub->adc) {
     char enc[40] = {};
     char res[24];
@@ -503,7 +503,7 @@ void hub_opencc(struct hub *hub, struct hub_user *u) {
   if(hub->adc)
     g_snprintf(token, 19, "%"G_GUINT32_FORMAT, g_random_int());
 
-  gboolean wanttls = conf_tls_policy(hub->id) == CONF_TLSP_PREFER ? TRUE : FALSE;
+  gboolean wanttls = var_get_int(hub->id, VAR_tls_policy) == VAR_TLSP_PREFER ? TRUE : FALSE;
   gboolean cantls = wanttls && u->hastls;
   char *adcproto = !cantls ? "ADC/1.0" : u->hasadc0 ? "ADCS/0.10" : "ADCS/1.0";
 
@@ -516,7 +516,7 @@ void hub_opencc(struct hub *hub, struct hub_user *u) {
       net_send(hub->net, c->str);
       g_string_free(c, TRUE);
     } else
-      net_sendf(hub->net, "$ConnectToMe %s %s:%d%s", u->name_hub, conf_hub_get(hub->id, "active_ip"), port, cantls ? "S" : "");
+      net_sendf(hub->net, "$ConnectToMe %s %s:%d%s", u->name_hub, var_get(hub->id, VAR_active_ip), port, cantls ? "S" : "");
 
   // we're passive, send RCM
   } else {
@@ -566,7 +566,7 @@ void hub_search(struct hub *hub, struct search_q *q) {
   // NMDC
   } else {
     char *dest = cc_listen
-      ? g_strdup_printf("%s:%d", conf_hub_get(hub->id, "active_ip"), cc_listen_port)
+      ? g_strdup_printf("%s:%d", var_get(hub->id, VAR_active_ip), cc_listen_port)
       : g_strdup_printf("Hub:%s", hub->nick_hub);
     if(q->type == 9) {
       char tth[40] = {};
@@ -604,9 +604,9 @@ void hub_send_nfo(struct hub *hub) {
   unsigned short port;
   gboolean sup_tls;
 
-  desc = conf_hub_get(hub->id, "description");
-  conn = conf_hub_get(hub->id, "connection");
-  mail = conf_hub_get(hub->id, "email");
+  desc = var_get(hub->id, VAR_description);
+  conn = var_get(hub->id, VAR_connection);
+  mail = var_get(hub->id, VAR_email);
 
   h_norm = h_reg = h_op = 0;
   GList *n;
@@ -627,11 +627,11 @@ void hub_send_nfo(struct hub *hub) {
     else
       h_norm++;
   }
-  slots = conf_slots();
-  ip4 = cc_listen ? ip4_pack(conf_hub_get(hub->id, "active_ip")) : 0;
+  slots = var_get_int(0, VAR_slots);
+  ip4 = cc_listen ? ip4_pack(var_get(hub->id, VAR_active_ip)) : 0;
   port = cc_listen ? cc_listen_port : 0;
   share = fl_local_list_size;
-  sup_tls = conf_tls_policy(hub->id) == CONF_TLSP_DISABLE ? FALSE : TRUE;
+  sup_tls = var_get_int(hub->id, VAR_tls_policy) == VAR_TLSP_DISABLE ? FALSE : TRUE;
 
   // check whether we need to make any further effort
   if(hub->nick_valid && streq(desc) && streq(conn) && streq(mail) && eq(slots)
@@ -645,10 +645,7 @@ void hub_send_nfo(struct hub *hub) {
     // send non-changing stuff in the IDENTIFY state
     gboolean f = hub->state == ADC_S_IDENTIFY;
     if(f) {
-      char cid[40] = {}, pid[40] = {};
-      base32_encode(db_pid, pid);
-      base32_encode(db_cid, cid);
-      g_string_append_printf(cmd, " ID%s PD%s VEncdc\\s%s", cid, pid, VERSION);
+      g_string_append_printf(cmd, " ID%s PD%s VEncdc\\s%s", var_get(0, VAR_cid), var_get(0, VAR_pid), VERSION);
       adc_append(cmd, "NI", hub->nick);
       // Always add our KP field, even if we're not active. Other clients may
       // validate our certificate even when we are the one connecting.
@@ -838,15 +835,15 @@ static void adc_sch(struct hub *hub, struct adc_cmd *cmd) {
   if(!i)
     goto adc_search_cleanup;
 
-  int slots = conf_slots();
+  int slots = var_get_int(0, VAR_slots);
   int slots_free = slots - cc_slots_in_use(NULL);
   if(slots_free < 0)
     slots_free = 0;
   char tth[40] = {};
-  char cid[40] = {};
+  char *cid = NULL;
   char *dest = NULL;
   if(u->hasudp4) {
-    base32_encode(db_cid, cid);
+    cid = var_get(0, VAR_cid);
     dest = g_strdup_printf("%s:%d", ip4_unpack(u->ip4), u->udp4);
   }
 
@@ -917,7 +914,7 @@ static void adc_handle(struct hub *hub, char *msg) {
     else {
       hub->sid = ADC_DFCC(cmd.argv[0]);
       hub->state = ADC_S_IDENTIFY;
-      hub->nick = g_strdup(conf_hub_get(hub->id, "nick"));
+      hub->nick = g_strdup(var_get(hub->id, VAR_nick));
       ui_hub_setnick(hub->tab);
       hub_send_nfo(hub);
     }
@@ -1023,7 +1020,7 @@ static void adc_handle(struct hub *hub, char *msg) {
   case ADCC_CTM:
     if(cmd.argc < 3 || cmd.type != 'D' || cmd.dest != hub->sid)
       g_warning("Invalid message from %s: %s", net_remoteaddr(hub->net), msg);
-    else if(conf_tls_policy(hub->id) == CONF_TLSP_DISABLE ? !is_adc_proto(cmd.argv[0]) : !is_valid_proto(cmd.argv[0])) {
+    else if(var_get_int(hub->id, VAR_tls_policy) == VAR_TLSP_DISABLE ? !is_adc_proto(cmd.argv[0]) : !is_valid_proto(cmd.argv[0])) {
       GString *r = adc_generate('D', ADCC_STA, hub->sid, cmd.source);
       g_string_append(r, " 141 Unknown\\protocol");
       adc_append(r, "PR", cmd.argv[0]);
@@ -1051,7 +1048,7 @@ static void adc_handle(struct hub *hub, char *msg) {
   case ADCC_RCM:
     if(cmd.argc < 2 || cmd.type != 'D' || cmd.dest != hub->sid)
       g_warning("Invalid message from %s: %s", net_remoteaddr(hub->net), msg);
-    else if(conf_tls_policy(hub->id) == CONF_TLSP_DISABLE ? !is_adc_proto(cmd.argv[0]) : !is_valid_proto(cmd.argv[0])) {
+    else if(var_get_int(hub->id, VAR_tls_policy) == VAR_TLSP_DISABLE ? !is_adc_proto(cmd.argv[0]) : !is_valid_proto(cmd.argv[0])) {
       GString *r = adc_generate('D', ADCC_STA, hub->sid, cmd.source);
       g_string_append(r, " 141 Unknown\\protocol");
       adc_append(r, "PR", cmd.argv[0]);
@@ -1195,7 +1192,7 @@ static void nmdc_search(struct hub *hub, char *from, int size_m, guint64 size, i
     return;
 
   char *hubaddr = net_remoteaddr(hub->net);
-  int slots = conf_slots();
+  int slots = var_get_int(0, VAR_slots);
   int slots_free = slots - cc_slots_in_use(NULL);
   if(slots_free < 0)
     slots_free = 0;
@@ -1259,7 +1256,7 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
       net_send(hub->net, "$Supports NoGetINFO NoHello UserIP2");
     char *key = nmdc_lock2key(lock);
     net_sendf(hub->net, "$Key %s", key);
-    hub->nick = g_strdup(conf_hub_get(hub->id, "nick"));
+    hub->nick = g_strdup(var_get(hub->id, VAR_nick));
     hub->nick_hub = charset_convert(hub, FALSE, hub->nick);
     ui_hub_setnick(hub->tab);
     net_sendf(hub->net, "$ValidateNick %s", hub->nick_hub);
@@ -1473,8 +1470,8 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
       // Unlike with ADC, the client sending the $RCTM can not indicate it
       // wants to use TLS or not, so the decision is with us. Let's require
       // tls_policy to be PREFER here.
-      int usetls = u->hastls && conf_tls_policy(hub->id) == CONF_TLSP_PREFER;
-      net_sendf(hub->net, "$ConnectToMe %s %s:%d%s", other, conf_hub_get(hub->id, "active_ip"),
+      int usetls = u->hastls && var_get_int(hub->id, VAR_tls_policy) == VAR_TLSP_PREFER;
+      net_sendf(hub->net, "$ConnectToMe %s %s:%d%s", other, var_get(hub->id, VAR_active_ip),
         usetls ? cc_listen_port+1 : cc_listen_port, usetls ? "S" : "");
       cc_expect_add(hub, u, NULL, FALSE);
     } else
@@ -1494,7 +1491,7 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
     char *query = g_match_info_fetch(nfo, 6);
     char test[40] = {};
     if(cc_listen)
-      g_snprintf(test, 40, "%s:%d", conf_hub_get(hub->id, "active_ip"), cc_listen_port);
+      g_snprintf(test, 40, "%s:%d", var_get(hub->id, VAR_active_ip), cc_listen_port);
     if(strncmp(from, "Hub:", 4) == 0 ? strcmp(from+4, hub->nick_hub) != 0 : strcmp(from, test) != 0)
       nmdc_search(hub, from, sizerestrict[0] == 'F' ? -2 : ismax[0] == 'T' ? -1 : 1, g_ascii_strtoull(size, NULL, 10), type[0]-'0', query);
     g_free(from);
@@ -1512,8 +1509,8 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
 
   // $BadPass
   if(strncmp(cmd, "$BadPass", 8) == 0) {
-    if(conf_exists(hub->id, "password"))
-      ui_m(hub->tab, 0, "Wrong password. Use '/set password <password>' to edit your password or '/unset password' to reset it.");
+    if(var_get(hub->id, VAR_password))
+      ui_m(hub->tab, 0, "Wrong password. Use '/hset password <password>' to edit your password or '/hunset password' to reset it.");
     else
       ui_m(hub->tab, 0, "Wrong password. Type /reconnect to try again.");
     hub_disconnect(hub, FALSE);
@@ -1623,7 +1620,7 @@ struct hub *hub_create(struct ui_tab *tab) {
   hub->id = db_vars_hubid(tab->name);
   if(!hub->id) {
     hub->id = rand_64();
-    db_vars_set(hub->id, "hubname", tab->name);
+    var_set(hub->id, VAR_hubname, tab->name, NULL);
   }
 
   // actual separator is set in handle_connect()
@@ -1665,12 +1662,12 @@ static gboolean handle_accept_cert(GTlsConnection *conn, GTlsCertificate *cert, 
   base32_encode_dat(raw, enc, 32);
 
   // Get configured keyprint
-  char *old = db_vars_get(hub->id, "hubkp");
+  char *old = var_get(hub->id, VAR_hubkp);
 
   // No keyprint? Then assume first-use trust and save it to the config file.
   if(!old) {
     ui_mf(hub->tab, 0, "No previous TLS keyprint known. Storing `%s' for future validation.", enc);
-    db_vars_set(hub->id, "hubkp", enc);
+    var_set(hub->id, VAR_hubkp, enc, NULL);
     return TRUE;
   }
 
@@ -1697,7 +1694,7 @@ static gboolean handle_accept_cert(GTlsConnection *conn, GTlsCertificate *cert, 
 
 
 void hub_connect(struct hub *hub) {
-  char *oaddr = conf_hub_get(hub->id, "hubaddr");
+  char *oaddr = var_get(hub->id, VAR_hubaddr);
   char *addr = oaddr;
   g_return_if_fail(addr);
   // The address should be in the form of "dchub://hostname:port/", but older

@@ -41,27 +41,26 @@
 
 #define COLOR_DEFAULT (-1)
 
-//  name            default fg       default bg       default attr
+//  name            default  value
 #define UI_COLORS \
-  C(list_default,   COLOR_DEFAULT,   COLOR_DEFAULT,   0)\
-  C(list_header,    COLOR_DEFAULT,   COLOR_DEFAULT,   A_BOLD)\
-  C(list_select,    COLOR_DEFAULT,   COLOR_DEFAULT,   A_BOLD)\
-  C(log_default,    COLOR_DEFAULT,   COLOR_DEFAULT,   0)\
-  C(log_highlight,  COLOR_YELLOW,    COLOR_DEFAULT,   A_BOLD)\
-  C(log_join,       COLOR_CYAN,      COLOR_DEFAULT,   A_BOLD)\
-  C(log_nick,       COLOR_DEFAULT,   COLOR_DEFAULT,   0)\
-  C(log_ownnick,    COLOR_DEFAULT,   COLOR_DEFAULT,   A_BOLD)\
-  C(log_quit,       COLOR_CYAN,      COLOR_DEFAULT,   0)\
-  C(log_time,       COLOR_BLACK,     COLOR_DEFAULT,   A_BOLD)\
-  C(separator,      COLOR_DEFAULT,   COLOR_DEFAULT,   A_REVERSE)\
-  C(tabprio_high,   COLOR_MAGENTA,   COLOR_DEFAULT,   A_BOLD)\
-  C(tabprio_low,    COLOR_BLACK,     COLOR_DEFAULT,   A_BOLD)\
-  C(tabprio_med,    COLOR_CYAN,      COLOR_DEFAULT,   A_BOLD)\
-  C(title,          COLOR_DEFAULT,   COLOR_DEFAULT,   A_REVERSE)
-
+  C(list_default,   "default")\
+  C(list_header,    "default,bold")\
+  C(list_select,    "default,bold")\
+  C(log_default,    "default")\
+  C(log_highlight,  "yellow,bold")\
+  C(log_join,       "cyan,bold")\
+  C(log_nick,       "default")\
+  C(log_ownnick,    "default,bold")\
+  C(log_quit,       "cyan")\
+  C(log_time,       "black,bold")\
+  C(separator,      "default,reverse")\
+  C(tabprio_high,   "magenta,bold")\
+  C(tabprio_low,    "black,bold")\
+  C(tabprio_med,    "cyan,bold")\
+  C(title,          "default,reverse")
 
 enum ui_coltype {
-#define C(n, fg, bg, attr) UIC_##n,
+#define C(n, d) UIC_##n,
   UI_COLORS
 #undef C
   UIC_NONE
@@ -69,7 +68,7 @@ enum ui_coltype {
 
 
 struct ui_color {
-  char name[16];
+  int var;
   short fg, bg, d_fg, d_bg;
   int x, d_x, a;
 };
@@ -86,10 +85,10 @@ struct ui_attr {
 
 
 struct ui_color ui_colors[] = {
-#define C(n, fg, bg, attr) { G_STRINGIFY(n), fg, bg, fg, bg, attr, attr, 0 },
+#define C(n, d) { VAR_color_##n },
   UI_COLORS
 #undef C
-  { "" }
+  { -1 }
 };
 
 
@@ -111,7 +110,7 @@ struct ui_attr ui_attr_names[] = {
 };
 
 
-struct ui_attr *ui_attr_by_name(const char *n) {
+static struct ui_attr *ui_attr_by_name(const char *n) {
   struct ui_attr *a = ui_attr_names;
   for(; *a->name; a++)
     if(strcmp(a->name, n) == 0)
@@ -120,20 +119,11 @@ struct ui_attr *ui_attr_by_name(const char *n) {
 }
 
 
-char *ui_name_by_attr(int n) {
+static char *ui_name_by_attr(int n) {
   struct ui_attr *a = ui_attr_names;
   for(; *a->name; a++)
     if(a->attr == n)
       return a->name;
-  return NULL;
-}
-
-
-struct ui_color *ui_color_by_name(const char *n) {
-  struct ui_color *c = ui_colors;
-  for(; *c->name; c++)
-    if(strcmp(c->name, n) == 0)
-      return c;
   return NULL;
 }
 
@@ -195,17 +185,10 @@ char *ui_color_str_gen(int fd, int bg, int x) {
 
 // TODO: re-use color pairs when we have too many (>64) color groups
 void ui_colors_update() {
-  char confname[50] = "color_";
   int pair = 0;
   struct ui_color *c = ui_colors;
-  for(; *c->name; c++) {
-    strcpy(confname+6, c->name);
-    char *conf = db_vars_get(0, confname);
-    if(!conf || !ui_color_str_parse(conf, &c->fg, &c->bg, &c->x, NULL)) {
-      c->fg = c->d_fg;
-      c->bg = c->d_bg;
-      c->x = c->d_x;
-    }
+  for(; c->var>=0; c++) {
+    g_warn_if_fail(ui_color_str_parse(var_get(0, c->var), &c->fg, &c->bg, &c->x, NULL));
     init_pair(++pair, c->fg, c->bg);
     c->a = c->x | COLOR_PAIR(pair);
   }
@@ -822,7 +805,7 @@ char *ui_textinput_reset(struct ui_textinput *ti) {
   char *str = ui_textinput_get(ti);
   ui_textinput_set(ti, "");
   if(ti->usehist) {
-    // as a special case, don't allow /password to be logged. /set password is
+    // as a special case, don't allow /password to be logged. /hset password is
     // okay, since it will be stored anyway.
     if(!strstr(str, "/password "))
       ui_cmdhist_add(str);

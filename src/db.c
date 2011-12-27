@@ -519,18 +519,6 @@ static void *db_queue_item_create(int flags, const char *q, ...) {
 
 // hashdata and hashfiles
 
-#if INTERFACE
-
-#define db_fl_getdone() (db_vars_get(0, "fl_done") ? TRUE : FALSE)
-
-#define db_fl_setdone(v) do {\
-    if(!!db_fl_getdone() != !!(v))\
-      db_vars_set(0, "fl_done", (v) ? "true" : NULL);\
-  } while(0)
-
-#endif
-
-
 // Adds a file to hashfiles and, if not present yet, hashdata. Returns the new hashfiles.id.
 gint64 db_fl_addhash(const char *path, guint64 size, time_t lastmod, const char *root, const char *tthl, int tthl_len) {
   char hash[40] = {};
@@ -982,6 +970,9 @@ void db_share_add(const char *name, const char *path) {
 // As with db_share*, the db_vars* functions are NOT thread-safe, and must be
 // accessed only from the main thread.
 
+// Try to avoid using the db_vars_(get|set) functions directly. Use the
+// higher-level vars.c abstraction instead.
+
 struct db_var_item { char *name; char *val; guint64 hub; };
 static GHashTable *db_vars_cache = NULL;
 
@@ -1113,84 +1104,9 @@ char **db_vars_hubs() {
 
 
 
-// conf_* macros and functions. These are provided here to ease the conversion
-// from the old glib key files to the new database format. These should be
-// replaced with a separate and better abstraction later on in a separate file
-// (vars.c, which will most likely replace set.c).
-
-#if INTERFACE
-
-#define conf_set_bool(h, n, v) db_vars_set(h, n, (v) ? "true" : "false")
-
-#define conf_set_int(h, n, v) do {\
-    char int_val[30];\
-    sprintf(int_val, "%d", (int)(v));\
-    db_vars_set(h, n, int_val);\
-  } while(0)
-
-#define conf_exists(h, n) (db_vars_get(h, n) ? TRUE : FALSE)
-
-#define conf_autorefresh() (!conf_exists(0, "autorefresh") ? 3600 : conf_get_int(0, "autorefresh"))
-
-#define conf_download_dir() (\
-  !conf_exists(0, "download_dir") ? g_build_filename(db_dir, "dl", NULL)\
-    : g_strdup(db_vars_get(0, "download_dir")))
-
-#define conf_download_slots() (!conf_exists(0, "download_slots") ? 3 : conf_get_int(0, "download_slots"))
-
-#define conf_encoding(hub) (\
-  conf_exists(hub, "encoding")   ? db_vars_get(hub, "encoding") \
-    : conf_exists(0, "encoding") ? db_vars_get(0, "encoding") : "UTF-8")
-
-#define conf_filelist_maxage() (!conf_exists(0, "filelist_maxage") ? (7*24*3600) : conf_get_int(0, "filelist_maxage"))
-
-#define conf_incoming_dir() (\
-  !conf_exists(0, "incoming_dir") ? g_build_filename(db_dir, "inc", NULL)\
-    : g_strdup(db_vars_get(0, "incoming_dir")))
-
-#define conf_minislots() (!conf_exists(0, "minislots") ? 3 : conf_get_int(0, "minislots"))
-
-#define conf_minislot_size() (!conf_exists(0, "minislot_size") ? 64*1024 : conf_get_int(0, "minislot_size"))
-
-#define conf_slots() (!conf_exists(0, "slots") ? 10 : conf_get_int(0, "slots"))
-
-#define conf_ui_time_format() (!conf_exists(0, "ui_time_format") ? "[%H:%M:%S]" : db_vars_get(0, "ui_time_format"))
-
-#define CONF_TLSP_DISABLE 0
-#define CONF_TLSP_ALLOW   1
-#define CONF_TLSP_PREFER  2
-
-#define conf_tls_policy(hub) (\
-  !db_certificate ? CONF_TLSP_DISABLE\
-    : conf_exists(hub, "tls_policy") ? conf_get_int(hub, "tls_policy")\
-    : conf_exists(0, "tls_policy")   ? conf_get_int(0, "tls_policy") : CONF_TLSP_ALLOW)
-
-#define conf_hub_get(hub, key) (conf_exists(hub, key) ? db_vars_get(hub, key) : db_vars_get(0, key))
-
-#endif
-
-char *conf_tlsp_list[] = { "disabled", "allow", "prefer" };
-
-gboolean conf_get_bool(guint64 hub, const char *name) {
-  char *v = db_vars_get(hub, name);
-  return v && strcmp(v, "true") == 0 ? TRUE : FALSE;
-}
-
-int conf_get_int(guint64 hub, const char *name) {
-  char *v = db_vars_get(hub, name);
-  if(!v)
-    return 0;
-  return g_ascii_strtoll(v, NULL, 0);
-}
-
-
-
-
 
 // Initialize the database directory and other stuff
 
-char db_cid[24];
-char db_pid[24];
 const char *db_dir = NULL;
 
 // Base32-encoded keyprint of our own certificate
@@ -1287,31 +1203,6 @@ static void db_load_cert() {
 }
 
 #endif // TLS_SUPPORT
-
-
-// Generates a PID/CID pair and stores it in the database.
-static void generate_pid() {
-  guint64 r = rand_64();
-
-  struct tiger_ctx t;
-  char pid[24];
-  tiger_init(&t);
-  tiger_update(&t, (char *)&r, 8);
-  tiger_final(&t, pid);
-
-  // now hash the PID so we have our CID
-  char cid[24];
-  tiger_init(&t);
-  tiger_update(&t, pid, 24);
-  tiger_final(&t, cid);
-
-  // encode and save
-  char enc[40] = {};
-  base32_encode(pid, enc);
-  db_vars_set(0, "pid", enc);
-  base32_encode(cid, enc);
-  db_vars_set(0, "cid", enc);
-}
 
 
 // Checks or creates the initial session directory, including subdirectories
@@ -1471,25 +1362,6 @@ void db_init() {
   db_thread = g_thread_create(db_thread_func, g_build_filename(db_dir, "db.sqlite3", NULL), TRUE, NULL);
 
   db_init_schema();
-
-  // load db_pid and db_cid
-  if(!db_vars_get(0, "pid"))
-    generate_pid();
-  base32_decode(db_vars_get(0, "pid"), db_pid);
-  base32_decode(db_vars_get(0, "cid"), db_cid);
-
-  // make sure a nick is set
-  if(!db_vars_get(0, "nick")) {
-    char *nick = g_strdup_printf("ncdc_%d", g_random_int_range(1, 9999));
-    db_vars_set(0, "nick", nick);
-    g_free(nick);
-  }
-
-  // load fadv_enabled
-  g_atomic_int_set(&fadv_enabled, conf_get_bool(0, "flush_file_cache"));
-
-  // load log_debug
-  log_debug = conf_get_bool(0, "log_debug");
 }
 
 

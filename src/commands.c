@@ -31,6 +31,7 @@
 
 #define DOC_CMD
 #define DOC_KEY
+#define DOC_SET
 #include "doc.h"
 
 struct cmd {
@@ -152,8 +153,16 @@ static void c_help(char *args) {
     ui_m(NULL, 0, "\nFor help on key bindings, use `/help keys'.\n");
 
   // list information on a setting
-  } else if(strcmp(args, "set") == 0 && sec) {
-    // TODO
+  } else if((strcmp(args, "set") == 0 || strcmp(args, "hset") == 0) && sec) {
+    sec = strncmp(sec, "color_", 6) == 0 ? "color_*" : sec;
+    struct doc_set *s = (struct doc_set *)doc_sets;
+    for(; s->name; s++)
+      if(strcmp(s->name, sec) == 0)
+        break;
+    if(!s->name)
+      ui_mf(NULL, 0, "\nUnknown setting '%s'.", sec);
+    else
+      ui_mf(NULL, 0, "\nSetting: %s.%s %s\n\n%s\n", s->hub ? "#hub" : "global", s->name, s->type, s->desc);
 
   // list available key sections
   } else if(strcmp(args, "keys") == 0 && !sec) {
@@ -194,9 +203,13 @@ static void c_help(char *args) {
 
 
 static void c_help_sug(char *args, char **sug) {
-  // help set ..
-  if(strncmp(args, "set ", 4) == 0) {
-    // TODO
+  // help h?set ..
+  if(strncmp(args, "set ", 4) == 0 || strncmp(args, "hset ", 5) == 0) {
+    char *sec = args + (*args == 'h' ? 5 : 4);
+    int i, n=0, len = strlen(sec);
+    for(i=0; i<VAR_END && n<20; i++)
+      if((vars[i].global || vars[i].hub) && strncmp(vars[i].name, sec, len) == 0 && strlen(vars[i].name) != len)
+        sug[n++] = g_strdup(vars[i].name);
     strv_prefix(sug, "set ", NULL);
     return;
   }

@@ -97,8 +97,9 @@ documentation.
 
 .SH SETTINGS
 The following is a list of configuration settings. These settings can be
-changed and queried using the `/set' command, and are stored in the db.sqlite3
-file in the session directory.
+changed and queried using the `/set' command for global settings and `/hset'
+for hub-local settings. All configuration data is stored in the db.sqlite3 file
+in the session directory.
 @settings@
 
 .SH KEY BINDINGS

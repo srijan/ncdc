@@ -102,6 +102,14 @@ static const struct doc_cmd {
   "To get information on a configuration setting, use /help set <setting>.\n"
   "To get help on key bindings, use /help keys.\n"
 },
+{ "hset", "[<key> [<value>]]", "Get or set per-hub configuration variables.",
+  "Get or set per-hub configuration variables. Works equivalent to the `/set'"
+  " command, but can only be used on hub tabs."
+},
+{ "hunset", "[<key>]", "Unset a per-hub configuration variable.",
+  "This command can be used to reset a per-hub configuration variable back to"
+  " its global value."
+},
 { "kick", "<user>", "Kick a user from the hub.",
   "Kick a user from the hub. This command only works on NMDC hubs, and you need"
   " to be an OP to be able to use it."
@@ -116,7 +124,7 @@ static const struct doc_cmd {
   "Send a private message to a user on the currently opened hub. If no"
   " message is given, the tab will be opened but no message will be sent."
 },
-{ "nick", "[<nick>]", "Alias for `/set nick'.",
+{ "nick", "[<nick>]", "Alias for `/hset nick' on hub tabs, and `/set nick' otherwise.",
   NULL
 },
 { "open", "[-n] <name> [<address>]", "Open a new hub tab and connect to the hub.",
@@ -131,7 +139,7 @@ static const struct doc_cmd {
 { "password", "<password>", "Send your password to the hub.",
   "This command can be used to send a password to the hub without saving it to"
   " the database. If you wish to login automatically without having to type"
-  " /password every time, use '/set password <password>'. Be warned, however,"
+  " /password every time, use '/hset password <password>'. Be warned, however,"
   " that your password will be saved unencrypted in that case."
 },
 { "pm", "<user> [<message>]", "Alias for /msg",
@@ -184,12 +192,14 @@ static const struct doc_cmd {
   "  8  dir      Directories.\n"
   "Note that file type matching is done using file extensions, and is not very reliable."
 },
-// TODO: document that some settings can be set on a per-hub basis?
-{ "set", "[<key> [<value>]]", "Get or set configuration variables.",
-  "Get or set configuration variables. Use without arguments to get a list of "
-  " all settings and their current value. Changes to the settings are"
-  " automatically saved to the config file, and will not be lost after"
-  " restarting ncdc.\n\n"
+{ "set", "[<key> [<value>]]", "Get or set global configuration variables.",
+  "Get or set global configuration variables. Use without arguments to get a"
+  " list of all global settings and their current value. Glob-style pattern"
+  " matching on the settings is also possible. Use, for example, `/set color*'"
+  " to list all color-related settings.\n\n"
+  "See the `/hset' command to manage configuration on a per-hub basis. Changes"
+  " to the settings are automatically saved to the database, and will not be lost"
+  " after restarting ncdc.\n\n"
   "To get information on a particular setting, use `/help set <key>'."
 },
 { "share", "[<name> <path>]", "Add a directory to your share.",
@@ -207,8 +217,8 @@ static const struct doc_cmd {
 { "ungrant", "[<username>|<id>]", "Revoke a granted slot.",
   NULL
 },
-{ "unset", "[<key>]", "Unset a configuration variable.",
-  "This command can be used to reset a configuration variable back to its default value."
+{ "unset", "[<key>]", "Unset a global configuration variable.",
+  "This command can be used to reset a global configuration variable back to its default value."
 },
 { "unshare", "[<name>]", "Remove a directory from your share.",
   "To remove a single directory from your share, use `/unshare <name>', to"

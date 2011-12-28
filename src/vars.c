@@ -373,9 +373,11 @@ static char *i_cid_pid() {
 // color_*
 
 static char *p_color(const char *val, GError **err) {
-  if(!ui_color_str_parse(val, NULL, NULL, NULL, err))
+  short fg, bg;
+  int x;
+  if(!ui_color_str_parse(val, &fg, &bg, &x, err))
     return NULL;
-  return g_strdup(val);
+  return g_strdup(ui_color_str_gen(fg, bg, x));
 }
 
 static void su_color(const char *old, const char *v, char **sug) {

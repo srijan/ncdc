@@ -515,7 +515,7 @@ static void fl_hash_thread(gpointer data, gpointer udata) {
   tth_init(&tth);
 
   struct fadv adv;
-  fadv_init(&adv, f, 0);
+  fadv_init(&adv, f, 0, VAR_FFC_HASH);
 
   int r;
   guint64 rd = 0;

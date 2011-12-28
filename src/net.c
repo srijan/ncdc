@@ -755,7 +755,7 @@ static void file_thread(gpointer dat, gpointer udat) {
     ? g_file_descriptor_based_get_fd(G_FILE_DESCRIPTOR_BASED(c->file)) : -1;
   struct fadv adv;
   if(fd > 0 && c->flush)
-    fadv_init(&adv, fd, c->offset);
+    fadv_init(&adv, fd, c->offset, VAR_FFC_UPLOAD);
 
   // sendfile()-based sending
 #ifdef HAVE_SENDFILE

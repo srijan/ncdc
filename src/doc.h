@@ -383,9 +383,9 @@ static const struct doc_set {
   " suffices are 's' for seconds, 'm' for minutes, 'h' for hours and 'd' for"
   " days. Set to 0 to disable the cache altogether."
 },
-{ "flush_file_cache", 0, "<boolean>",
+{ "flush_file_cache", 0, "<none|upload|hash>[,...]",
   "Tell the OS to flush the file (disk) cache for file contents read while"
-  " hashing and uploading. On one hand, this will avoid trashing your disk"
+  " hashing and/or uploading. On one hand, this will avoid trashing your disk"
   " cache with large files and thus improve the overall responsiveness of your"
   " system. On the other hand, ncdc may purge any shared files from the cache,"
   " even if they are still used by other applications. In general, it is a good"

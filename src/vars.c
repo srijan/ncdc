@@ -214,7 +214,6 @@ static char *flags_fmt(struct flag_option *o, int val) {
       if(s->str[0])
         g_string_append_c(s, ',');
       g_string_append(s, o->name);
-      break;
     }
   }
   return g_string_free(s, FALSE);
@@ -501,30 +500,79 @@ static char *p_connection(const char *val, GError **err) {
 
 // Special interface to allow quick and threaded access to the current value
 #if INTERFACE
-#define var_flush_file_cache_get() g_atomic_int_get(&var_flush_file_cache)
-#define var_flush_file_cache_set(v) g_atomic_int_set(&var_flush_file_cache, v)
+#define var_ffc_get() g_atomic_int_get(&var_ffc)
+#define var_ffc_set(v) g_atomic_int_set(&var_ffc, v)
 #endif
 
-int var_flush_file_cache = 0;
+int var_ffc = 0;
 
-static char *f_flush_file_cache(const char *raw) {
+#if INTERFACE
+#define VAR_FFC_NONE   1
+#define VAR_FFC_UPLOAD 2
+#define VAR_FFC_HASH   4
+#endif
+
+static struct flag_option var_ffc_ops[] = {
+  { VAR_FFC_NONE,   "none"   },
+  { VAR_FFC_UPLOAD, "upload" },
+  { VAR_FFC_HASH,   "hash"   },
+  { 0 }
+};
+
+static char *f_ffc(const char *raw) {
 #if HAVE_POSIX_FADVISE
-  return f_id(raw);
+  return flags_fmt(var_ffc_ops, int_raw(raw));
 #else
-  return g_strdup("false (not supported)");
+  return g_strdup("none (not supported)");
 #endif
 }
 
-static gboolean s_flush_file_cache(guint64 hub, const char *key, const char *val, GError **err) {
-  db_vars_set(hub, key, val);
-  var_flush_file_cache_set(bool_raw(val));
-  return TRUE;
+static char *p_ffc(const char *val, GError **err) {
+  int n = flags_raw(var_ffc_ops, TRUE, val, err);
+  if(n & VAR_FFC_NONE)
+    n = VAR_FFC_NONE;
+  return n ? g_strdup_printf("%d", n) : NULL;
 }
 
-static char *i_flush_file_cache() {
-  char *r = db_vars_get(0, "flush_file_cache");
-  var_flush_file_cache_set(bool_raw(r));
-  return "false";
+static void su_ffc(const char *old, const char *val, char **sug) {
+  flags_sug(var_ffc_ops, val, sug);
+}
+
+static char *g_ffc(guint64 hub, const char *key) {
+#ifndef HAVE_POSIX_FADVISE
+  return G_STRINGIFY(VAR_FFC_NONE);
+#else
+  char *r = db_vars_get(hub, key);
+  if(!r)
+    return NULL;
+  static char num[4];
+  // true/false check is for compatibility with old versions
+  g_snprintf(num, 4, "%d",
+       strcmp(r, "true") == 0 ? VAR_FFC_UPLOAD | VAR_FFC_HASH
+    : strcmp(r, "false") == 0 ? VAR_FFC_NONE
+                              : flags_raw(var_ffc_ops, TRUE, r, NULL)
+  );
+  return num;
+#endif
+}
+
+static gboolean s_ffc(guint64 hub, const char *key, const char *val, GError **err) {
+#ifndef HAVE_POSIX_FADVISE
+  g_set_error(err, 1, 0, "This option can't be modified: %s.", "posix_fadvise() not supported");
+  return FALSE;
+#else
+  char *r = flags_fmt(var_ffc_ops, int_raw(val));
+  db_vars_set(hub, key, r[0] ? r : NULL);
+  g_free(r);
+  var_ffc_set(int_raw(val));
+  return TRUE;
+#endif
+}
+
+static char *i_ffc() {
+  char *r = g_ffc(0, "flush_file_cache");
+  var_ffc_set(int_raw(r));
+  return G_STRINGIFY(VAR_FFC_NONE);
 }
 
 
@@ -666,7 +714,6 @@ static char *g_tls_policy(guint64 hub, const char *key) {
 }
 
 static gboolean s_tls_policy(guint64 hub, const char *key, const char *val, GError **err) {
-  g_debug("Setting %s", val);
   if(!db_certificate) {
     g_set_error(err, 1, 0, "This option can't be modified: %s.", !have_tls_support ? "no TLS support available" : "no client certificate available");
     return FALSE;
@@ -726,44 +773,44 @@ struct var {
 
 // name               g h  format              parse            suggest        getraw        setraw              default/init
 #define VARS\
-  V(active,           1,0, f_bool,             p_bool,          su_bool,       NULL,         s_active,           "false")\
-  V(active_bind,      1,0, f_id,               p_ip,            su_old,        NULL,         s_active_conf,      NULL)\
-  V(active_ip,        1,1, f_id,               p_ip,            su_old,        NULL,         s_active_conf,      NULL)\
-  V(active_port,      1,0, f_int,              p_active_port,   NULL,          NULL,         s_active_conf,      NULL)\
-  V(autoconnect,      0,1, f_bool,             p_bool,          su_bool,       NULL,         NULL,               "false")\
-  V(autorefresh,      1,0, f_autorefresh,      p_autorefresh,   NULL,          NULL,         NULL,               "3600")\
-  V(backlog,          1,1, f_backlog,          p_backlog,       NULL,          NULL,         NULL,               "0")\
-  V(chat_only,        1,1, f_bool,             p_bool,          su_bool,       NULL,         NULL,               "false")\
-  V(cid,              0,0, NULL,               NULL,            NULL,          NULL,         NULL,               i_cid_pid())\
+  V(active,           1,0, f_bool,         p_bool,          su_bool,       NULL,         s_active,        "false")\
+  V(active_bind,      1,0, f_id,           p_ip,            su_old,        NULL,         s_active_conf,   NULL)\
+  V(active_ip,        1,1, f_id,           p_ip,            su_old,        NULL,         s_active_conf,   NULL)\
+  V(active_port,      1,0, f_int,          p_active_port,   NULL,          NULL,         s_active_conf,   NULL)\
+  V(autoconnect,      0,1, f_bool,         p_bool,          su_bool,       NULL,         NULL,            "false")\
+  V(autorefresh,      1,0, f_autorefresh,  p_autorefresh,   NULL,          NULL,         NULL,            "3600")\
+  V(backlog,          1,1, f_backlog,      p_backlog,       NULL,          NULL,         NULL,            "0")\
+  V(chat_only,        1,1, f_bool,         p_bool,          su_bool,       NULL,         NULL,            "false")\
+  V(cid,              0,0, NULL,           NULL,            NULL,          NULL,         NULL,            i_cid_pid())\
   UI_COLORS \
-  V(connection,       1,1, f_id,               p_connection,    su_old,        NULL,         s_hubinfo,          NULL)\
-  V(description,      1,1, f_id,               p_id,            su_old,        NULL,         s_hubinfo,          NULL)\
-  V(download_dir,     1,0, f_id,               p_id,            su_path,       NULL,         s_dl_inc_dir,       i_dl_inc_dir(TRUE))\
-  V(download_exclude, 1,0, f_id,               p_regex,         su_old,        NULL,         NULL,               NULL)\
-  V(download_slots,   1,0, f_int,              p_int,           NULL,          NULL,         s_download_slots,   "3")\
-  V(email,            1,1, f_id,               p_id,            su_old,        NULL,         s_hubinfo,          NULL)\
-  V(encoding,         1,1, f_id,               p_encoding,      su_encoding,   NULL,         NULL,               "UTF-8")\
-  V(filelist_maxage,  1,0, f_interval,         p_interval,      su_old,        NULL,         NULL,               "604800")\
-  V(flush_file_cache, 1,0, f_flush_file_cache, p_bool,          su_bool,       NULL,         s_flush_file_cache, i_flush_file_cache())\
-  V(fl_done,          0,0, NULL,               NULL,            NULL,          NULL,         NULL,               "false")\
-  V(hubaddr,          0,0, NULL,               NULL,            NULL,          NULL,         NULL,               NULL)\
-  V(hubkp,            0,0, NULL,               NULL,            NULL,          NULL,         NULL,               NULL)\
-  V(hubname,          0,1, f_id,               p_hubname,       su_old,        NULL,         s_hubname,          NULL)\
-  V(incoming_dir,     1,0, f_id,               p_id,            su_path,       NULL,         s_dl_inc_dir,       i_dl_inc_dir(FALSE))\
-  V(log_debug,        1,0, f_bool,             p_bool,          su_bool,       NULL,         s_log_debug,        i_log_debug())\
-  V(log_downloads,    1,0, f_bool,             p_bool,          su_bool,       NULL,         NULL,               "true")\
-  V(log_uploads,      1,0, f_bool,             p_bool,          su_bool,       NULL,         NULL,               "true")\
-  V(minislots,        1,0, f_int,              p_int_ge1,       NULL,          NULL,         NULL,               "3")\
-  V(minislot_size,    1,0, f_minislot_size,    p_minislot_size, NULL,          NULL,         NULL,               "65536")\
-  V(nick,             1,1, f_id,               p_nick,          su_old,        NULL,         s_nick,             i_nick())\
-  V(password,         0,1, f_password,         p_id,            NULL,          NULL,         s_password,         NULL)\
-  V(pid,              0,0, NULL,               NULL,            NULL,          NULL,         NULL,               i_cid_pid())\
-  V(share_exclude,    1,0, f_id,               p_regex,         su_old,        NULL,         NULL,               NULL)\
-  V(share_hidden,     1,0, f_bool,             p_bool,          su_bool,       NULL,         NULL,               "false")\
-  V(show_joinquit,    1,1, f_bool,             p_bool,          su_bool,       NULL,         NULL,               "false")\
-  V(slots,            1,0, f_int,              p_int_ge1,       NULL,          NULL,         s_hubinfo,          "10")\
-  V(tls_policy,       1,1, f_tls_policy,       p_tls_policy,    su_tls_policy, g_tls_policy, s_tls_policy,       G_STRINGIFY(VAR_TLSP_ALLOW))\
-  V(ui_time_format,   1,0, f_id,               p_id,            su_old,        NULL,         NULL,               "[%H:%M:%S]")
+  V(connection,       1,1, f_id,           p_connection,    su_old,        NULL,         s_hubinfo,       NULL)\
+  V(description,      1,1, f_id,           p_id,            su_old,        NULL,         s_hubinfo,       NULL)\
+  V(download_dir,     1,0, f_id,           p_id,            su_path,       NULL,         s_dl_inc_dir,    i_dl_inc_dir(TRUE))\
+  V(download_exclude, 1,0, f_id,           p_regex,         su_old,        NULL,         NULL,            NULL)\
+  V(download_slots,   1,0, f_int,          p_int,           NULL,          NULL,         s_download_slots,"3")\
+  V(email,            1,1, f_id,           p_id,            su_old,        NULL,         s_hubinfo,       NULL)\
+  V(encoding,         1,1, f_id,           p_encoding,      su_encoding,   NULL,         NULL,            "UTF-8")\
+  V(filelist_maxage,  1,0, f_interval,     p_interval,      su_old,        NULL,         NULL,            "604800")\
+  V(flush_file_cache, 1,0, f_ffc,          p_ffc,           su_ffc,        g_ffc,        s_ffc,           i_ffc())\
+  V(fl_done,          0,0, NULL,           NULL,            NULL,          NULL,         NULL,            "false")\
+  V(hubaddr,          0,0, NULL,           NULL,            NULL,          NULL,         NULL,            NULL)\
+  V(hubkp,            0,0, NULL,           NULL,            NULL,          NULL,         NULL,            NULL)\
+  V(hubname,          0,1, f_id,           p_hubname,       su_old,        NULL,         s_hubname,       NULL)\
+  V(incoming_dir,     1,0, f_id,           p_id,            su_path,       NULL,         s_dl_inc_dir,    i_dl_inc_dir(FALSE))\
+  V(log_debug,        1,0, f_bool,         p_bool,          su_bool,       NULL,         s_log_debug,     i_log_debug())\
+  V(log_downloads,    1,0, f_bool,         p_bool,          su_bool,       NULL,         NULL,            "true")\
+  V(log_uploads,      1,0, f_bool,         p_bool,          su_bool,       NULL,         NULL,            "true")\
+  V(minislots,        1,0, f_int,          p_int_ge1,       NULL,          NULL,         NULL,            "3")\
+  V(minislot_size,    1,0, f_minislot_size,p_minislot_size, NULL,          NULL,         NULL,            "65536")\
+  V(nick,             1,1, f_id,           p_nick,          su_old,        NULL,         s_nick,          i_nick())\
+  V(password,         0,1, f_password,     p_id,            NULL,          NULL,         s_password,      NULL)\
+  V(pid,              0,0, NULL,           NULL,            NULL,          NULL,         NULL,            i_cid_pid())\
+  V(share_exclude,    1,0, f_id,           p_regex,         su_old,        NULL,         NULL,            NULL)\
+  V(share_hidden,     1,0, f_bool,         p_bool,          su_bool,       NULL,         NULL,            "false")\
+  V(show_joinquit,    1,1, f_bool,         p_bool,          su_bool,       NULL,         NULL,            "false")\
+  V(slots,            1,0, f_int,          p_int_ge1,       NULL,          NULL,         s_hubinfo,       "10")\
+  V(tls_policy,       1,1, f_tls_policy,   p_tls_policy,    su_tls_policy, g_tls_policy, s_tls_policy,    G_STRINGIFY(VAR_TLSP_ALLOW))\
+  V(ui_time_format,   1,0, f_id,           p_id,            su_old,        NULL,         NULL,            "[%H:%M:%S]")
 
 enum var_names {
 #define V(n, gl, h, f, p, su, g, s, d) VAR_##n,

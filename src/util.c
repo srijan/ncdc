@@ -1051,15 +1051,17 @@ void logfile_global_reopen() {
 struct fadv {
   int fd;
   int chunk;
+  int flag;
   guint64 offset;
 };
 
 #ifdef HAVE_POSIX_FADVISE
 
-#define fadv_init(a, f, o) do {\
+#define fadv_init(a, f, o, l) do {\
     (a)->fd = f;\
     (a)->chunk = 0;\
     (a)->offset = o;\
+    (a)->flag = l;\
   } while(0)
 
 #define fadv_close(a) fadv_purge(a, -1)
@@ -1083,8 +1085,9 @@ void fadv_purge(struct fadv *a, int length) {
   if(length > 0)
     a->chunk += length;
   // flush every 5MB. Some magical value, don't think too much into it.
-  if(var_flush_file_cache_get() && (a->chunk > 5*1024*1024 || (length < 0 && a->chunk > 0))) {
-    posix_fadvise(a->fd, a->offset, a->chunk, POSIX_FADV_DONTNEED);
+  if(a->chunk > 5*1024*1024 || (length < 0 && a->chunk > 0)) {
+    if(var_ffc_get() & a->flag)
+      posix_fadvise(a->fd, a->offset, a->chunk, POSIX_FADV_DONTNEED);
     a->offset += a->chunk;
     a->chunk = 0;
   }

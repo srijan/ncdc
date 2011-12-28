@@ -507,15 +507,17 @@ static char *p_connection(const char *val, GError **err) {
 int var_ffc = 0;
 
 #if INTERFACE
-#define VAR_FFC_NONE   1
-#define VAR_FFC_UPLOAD 2
-#define VAR_FFC_HASH   4
+#define VAR_FFC_NONE     1
+#define VAR_FFC_DOWNLOAD 2
+#define VAR_FFC_UPLOAD   4
+#define VAR_FFC_HASH     8
 #endif
 
 static struct flag_option var_ffc_ops[] = {
-  { VAR_FFC_NONE,   "none"   },
-  { VAR_FFC_UPLOAD, "upload" },
-  { VAR_FFC_HASH,   "hash"   },
+  { VAR_FFC_NONE,     "none"     },
+  { VAR_FFC_DOWNLOAD, "download" },
+  { VAR_FFC_UPLOAD,   "upload"   },
+  { VAR_FFC_HASH,     "hash"     },
   { 0 }
 };
 

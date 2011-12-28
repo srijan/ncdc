@@ -1021,6 +1021,7 @@ struct recv_ctx {
   guint64 uid;
   char *err_msg, *uerr_msg;
   char err, uerr;
+  struct fadv adv;
 };
 
 
@@ -1048,6 +1049,7 @@ void *dl_recv_create(guint64 uid, const char *tth) {
   struct recv_ctx *c = g_slice_new0(struct recv_ctx);
   c->uid = uid;
   c->dl = dl;
+  fadv_init(&c->adv, dl->incfd, dl->have, VAR_FFC_DOWNLOAD);
 
   return c;
 }
@@ -1055,6 +1057,8 @@ void *dl_recv_create(guint64 uid, const char *tth) {
 
 void dl_recv_done(void *dat) {
   struct recv_ctx *c = dat;
+
+  fadv_close(&c->adv);
 
   // Indicate that the dl thread has stopped
   c->dl->dlthread = FALSE;
@@ -1142,6 +1146,7 @@ gboolean dl_recv_data(struct net *n, char *buf, int length, int left, void *dat)
       c->err_msg = g_strdup(g_strerror(errno));
       return FALSE;
     }
+    fadv_purge(&c->adv, r);
 
     // check hash
     int fail = c->dl->islist ? -1 : dl_recv_update(c->dl, r, buf);

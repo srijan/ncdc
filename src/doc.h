@@ -383,15 +383,15 @@ static const struct doc_set {
   " suffices are 's' for seconds, 'm' for minutes, 'h' for hours and 'd' for"
   " days. Set to 0 to disable the cache altogether."
 },
-{ "flush_file_cache", 0, "<none|upload|hash>[,...]",
+{ "flush_file_cache", 0, "<none|upload|download|hash>[,...]",
   "Tell the OS to flush the file (disk) cache for file contents read while"
-  " hashing and/or uploading. On one hand, this will avoid trashing your disk"
-  " cache with large files and thus improve the overall responsiveness of your"
-  " system. On the other hand, ncdc may purge any shared files from the cache,"
-  " even if they are still used by other applications. In general, it is a good"
-  " idea to enable this if you also use your system for other things besides"
-  " ncdc, you share large files (>100MB) and people are not constantly"
-  " downloading the same file from you."
+  " hashing and/or uploading or written to while downloading. On one hand, this"
+  " will avoid trashing your disk cache with large files and thus improve the"
+  " overall responsiveness of your system. On the other hand, ncdc may purge any"
+  " shared files from the cache, even if they are still used by other"
+  " applications. In general, it is a good idea to enable this if you also use"
+  " your system for other things besides ncdc, you share large files (>100MB)"
+  " and people are not constantly downloading the same file from you."
 },
 { "hubname", 1, "<string>",
   "The name of the currently opened hub tab. This is a user-assigned name, and"

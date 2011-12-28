@@ -870,6 +870,7 @@ static void c_nick(char *args) {
     g_free(r);
     return;
   }
+  g_free(r);
   ui_mf(NULL, 0, "Nick changed.");
 }
 

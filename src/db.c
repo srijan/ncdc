@@ -1036,7 +1036,8 @@ char *db_vars_get(guint64 hub, const char *name) {
 
 // Unset a value (remove it)
 void db_vars_rm(guint64 hub, const char *name) {
-  db_vars_cacheget();
+  if(!db_vars_get(hub, name))
+    return;
 
   // Update cache
   struct db_var_item i;
@@ -1056,7 +1057,10 @@ void db_vars_set(guint64 hub, const char *name, const char *val) {
     db_vars_rm(hub, name);
     return;
   }
-  db_vars_cacheget();
+
+  char *old = db_vars_get(hub, name);
+  if(old && strcmp(val, old) == 0)
+    return;
 
   // Update cache
   struct db_var_item *i = g_slice_new(struct db_var_item);;

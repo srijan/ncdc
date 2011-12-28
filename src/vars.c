@@ -427,7 +427,7 @@ static gboolean s_dl_inc_dir(guint64 hub, const char *key, const char *val, GErr
   g_free(tmp);
 
   // make sure it exists
-  if(!g_mkdir_with_parents(nval, 0777)) {
+  if(g_mkdir_with_parents(nval, 0777)) {
     g_set_error(err, 1, 0, "Error creating the directory: %s", g_strerror(errno));
     return FALSE;
   }

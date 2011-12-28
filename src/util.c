@@ -331,7 +331,7 @@ int str_parseinterval(const char *str) {
         sec += num*3600*24;
       else
         return -1;
-      str = e+1;
+      str = *e ? e+1 : e;
     } else
       return -1;
   }

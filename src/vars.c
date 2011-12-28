@@ -194,8 +194,8 @@ static int flags_raw(struct flag_option *ops, gboolean multi, const char *val, G
       }
     }
     if(!o->num) {
-      g_strfreev(args);
       g_set_error(err, 1, 0, "Unknown flag: %s", *arg);
+      g_strfreev(args);
       return 0;
     }
   }

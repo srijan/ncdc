@@ -298,11 +298,14 @@ static char *p_backlog(const char *val, GError **err) {
 
 
 // nick
-// TODO: nick change without reconnect on ADC?
 
 static char *p_nick(const char *val, GError **err) {
   if(strlen(val) > 32) {
     g_set_error_literal(err, 1, 0, "Too long nick name.");
+    return NULL;
+  }
+  if(strlen(val) < 1) {
+    g_set_error_literal(err, 1, 0, "Too short nick name.");
     return NULL;
   }
 
@@ -320,6 +323,7 @@ static char *p_nick(const char *val, GError **err) {
 }
 
 static gboolean s_nick(guint64 hub, const char *key, const char *val, GError **err) {
+  // TODO: nick change without reconnect on ADC?
   if(!val && !hub) {
     g_set_error_literal(err, 1, 0, "May not be unset.");
     return FALSE;

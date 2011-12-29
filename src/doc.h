@@ -441,6 +441,11 @@ static const struct doc_set {
   " `/password' command instead. Passwords are saved unencrypted in the config"
   " file."
 },
+{ "sendfile", 0, "<boolean>",
+  "Whether or not to use the sendfile() system call to upload files, if"
+  " supported. Using sendfile() allows less resource usage while uploading, but"
+  " may not work well on all systems."
+},
 { "share_exclude", 0, "<regex>",
   "Any file or directory with a name that matches this regular expression will"
   " not be shared. A file list refresh is required for this setting to be"

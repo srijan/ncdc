@@ -671,6 +671,29 @@ static gboolean s_password(guint64 hub, const char *key, const char *val, GError
 }
 
 
+// sendfile
+
+static char *f_sendfile(const char *val) {
+#ifdef HAVE_SENDFILE
+  return f_id(val);
+#else
+  return g_strdup("false (not supported)");
+#endif
+}
+
+static char *p_sendfile(const char *val, GError **err) {
+  char *r = p_bool(val, err);
+#ifndef HAVE_SENDFILE
+  if(r && bool_raw(val)) {
+    g_set_error(err, 1, 0, "This option can't be modified: %s.", "sendfile() not supported");
+    g_free(r);
+    r = NULL;
+  }
+#endif
+  return r;
+}
+
+
 // tls_policy
 
 #if INTERFACE
@@ -773,7 +796,7 @@ struct var {
 };
 
 
-// name               g h  format              parse            suggest        getraw        setraw              default/init
+// name               g h  format          parse            suggest        getraw        setraw           default/init
 #define VARS\
   V(active,           1,0, f_bool,         p_bool,          su_bool,       NULL,         s_active,        "false")\
   V(active_bind,      1,0, f_id,           p_ip,            su_old,        NULL,         s_active_conf,   NULL)\
@@ -807,6 +830,7 @@ struct var {
   V(nick,             1,1, f_id,           p_nick,          su_old,        NULL,         s_nick,          i_nick())\
   V(password,         0,1, f_password,     p_id,            NULL,          NULL,         s_password,      NULL)\
   V(pid,              0,0, NULL,           NULL,            NULL,          NULL,         NULL,            i_cid_pid())\
+  V(sendfile,         1,0, f_sendfile,     p_sendfile,      su_bool,       NULL,         NULL,            "true")\
   V(share_exclude,    1,0, f_id,           p_regex,         su_old,        NULL,         NULL,            NULL)\
   V(share_hidden,     1,0, f_bool,         p_bool,          su_bool,       NULL,         NULL,            "false")\
   V(show_joinquit,    1,1, f_bool,         p_bool,          su_bool,       NULL,         NULL,            "false")\

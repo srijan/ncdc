@@ -866,7 +866,7 @@ static void file_start(struct net *n) {
   n->file_busy = TRUE;
 
 #if TLS_SUPPORT
-  if(!n->tls && !G_IS_TCP_WRAPPER_CONNECTION(n->conn)) {
+  if(var_get_bool(0, VAR_sendfile) && !n->tls && !G_IS_TCP_WRAPPER_CONNECTION(n->conn)) {
 #endif
     c->sock = g_socket_connection_get_socket(n->conn);
     g_object_ref(c->sock);

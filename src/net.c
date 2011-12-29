@@ -50,6 +50,7 @@ struct ratecalc net_in, net_out;
 
 #define NET_RECV_BUF 1024
 #define NET_DL_BUF   32768
+#define NET_UL_BUF   32768
 #define NET_MAX_CMD  1048576
 
 struct net {
@@ -742,7 +743,6 @@ static gboolean file_done(gpointer dat) {
 // Inspired by glib:gio/goutputstream.c:g_output_stream_real_splice().
 static void file_thread(gpointer dat, gpointer udat) {
   struct file_ctx *c = dat;
-  char buf[8192];
 
   if(g_cancellable_is_cancelled(c->can)) {
     g_set_error_literal(&c->err, 1, G_IO_ERROR_CANCELLED, "Operation cancelled");
@@ -808,9 +808,10 @@ static void file_thread(gpointer dat, gpointer udat) {
   gboolean res = left > 0 && !c->err;
   if(res && !g_seekable_seek(G_SEEKABLE(c->file), c->offset+(total-left), G_SEEK_SET, NULL, &c->err))
     res = FALSE;
+  char *buf = res ? g_malloc(NET_UL_BUF) : NULL;
   int r, w;
   while(res && left > 0) {
-    r = g_input_stream_read(G_INPUT_STREAM(c->file), buf, MIN(left, sizeof(buf)), c->can, &c->err);
+    r = g_input_stream_read(G_INPUT_STREAM(c->file), buf, MIN(left, NET_UL_BUF), c->can, &c->err);
     if(r < 0)
       break;
     if(fd > 0 && c->flush)
@@ -838,6 +839,7 @@ static void file_thread(gpointer dat, gpointer udat) {
       g_atomic_int_compare_and_exchange(&c->n->file_left, left+w, left);
     }
   }
+  g_free(buf);
 
   if(fd > 0 && c->flush)
     fadv_close(&adv);

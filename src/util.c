@@ -1037,7 +1037,7 @@ void logfile_global_reopen() {
 // Usage:
 //   int fd = open(..);
 //   struct fadv a;
-//   fadv_init(&a, fd, offset);
+//   fadv_init(&a, fd, offset, flag);
 //   while((int len = read(..)) > 0)
 //     fadv_purge(&a, len);
 //   fadv_close(&a);
@@ -1070,7 +1070,7 @@ struct fadv {
 
 // Some pointless assignments to make sure the compiler doesn't complain about
 // unused variables.
-#define fadv_init(a, f, o) ((a)->fd = 0)
+#define fadv_init(a,f,o,l) ((a)->fd = 0)
 #define fadv_purge(a, l)   ((a)->fd = 0)
 #define fadv_close(a)      ((a)->fd = 0)
 

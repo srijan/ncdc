@@ -428,7 +428,7 @@ int fl_search_rec(struct fl_list *parent, struct fl_search *s, struct fl_list **
   // weed out stuff from 'and' if it's already matched in parent (I'm assuming
   // that stuff matching the parent of parent has already been removed)
   GRegex **o = s->and;
-  GRegex *nand[fl_search_and_len(o)];
+  GRegex *nand[fl_search_and_len(o)+1];
   int i = 0;
   for(; o&&*o; o++)
     if(G_LIKELY(!parent->parent || !g_regex_match(*o, parent->name, 0, NULL)))

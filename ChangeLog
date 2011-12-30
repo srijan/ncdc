@@ -1,3 +1,14 @@
+1.7 - 2011-12-30
+	- Split /set command in a /set (global) and /hset (hub)
+	- File downloads are performed in a background thread
+	- Added glob-style matching on /set and /hset keys
+	- Added UTF-8 locale check
+	- Added 'sendfile' setting
+	- Added finer granularity for the flush_file_cache setting
+	- Allow flush_file_cache to be enabled for downloads
+	- Fix sending of $MyINFO with wrong public hub count
+	- Fix incorrect inclusion of gdbm.h
+
 1.6 - 2011-12-07
 	- Use SQLite3 for storage instead of GDBM
 	- Converted config.ini to SQLite3 database

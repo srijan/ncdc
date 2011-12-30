@@ -378,8 +378,12 @@ int main(int argc, char **argv) {
   g_option_context_free(optx);
 
   // check that the current locale is UTF-8. Things aren't going to work otherwise
-  if(!g_get_charset(NULL))
-    g_error("Please set your locale to UTF-8.");
+  if(!g_get_charset(NULL)) {
+    puts("WARNING: Your current locale is not set to UTF-8.");
+    puts("Non-ASCII characters may not display correctly.");
+    puts("Hit Ctrl+c to abort ncdc, or the return key to continue anyway.");
+    getchar();
+  }
 
   // init stuff
   g_thread_init(NULL);

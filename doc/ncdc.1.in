@@ -169,7 +169,7 @@ running, making sure that no two ncdc instances work with the same session
 directory at the same time.
 
 .SH LICENSE
-Copyright (C) 2011 Yoran Heling <projects@yorhel.nl>
+Copyright (C) 2011-2012 Yoran Heling <projects@yorhel.nl>
 .br
 ncdc is distributed under the MIT license, please read the COPYING file for
 more information.

@@ -92,7 +92,7 @@ static const struct doc_cmd {
   "To get a list of users whom you have granted a slot, use `/grant' without"
   " arguments or with `-list'. Be warned that using `/grant' without arguments on"
   " a PM tab will grant the slot to the user you are talking with. Make sure to"
-  " use `-all' in that case.\n\n"
+  " use `-list' in that case.\n\n"
   "Note that a granted slot is specific to a single hub. If the same user is"
   " also on other hubs, he/she will not be granted a slot on those hubs."
 },

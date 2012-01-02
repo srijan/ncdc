@@ -1598,7 +1598,7 @@ static void handle_error(struct net *n, int action, GError *err) {
 
   switch(action) {
   case NETERR_CONN:
-    ui_mf(hub->tab, 0, "Could not connect to hub: %s. Wating 30 seconds before retrying.", err->message);
+    ui_mf(hub->tab, 0, "Could not connect to hub: %s. Waiting 30 seconds before retrying.", err->message);
     hub->reconnect_timer = g_timeout_add_seconds(30, reconnect_timer, hub);
     break;
   case NETERR_RECV:

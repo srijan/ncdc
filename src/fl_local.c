@@ -858,12 +858,8 @@ static gboolean fl_refresh_scanned(gpointer dat) {
   g_queue_pop_head(fl_refresh_queue);
   if(fl_refresh_queue->head)
     fl_refresh_process();
-  else {
-    // force a flush when all queued refreshes have been processed
+  else // force a flush when all queued refreshes have been processed
     fl_flush(NULL);
-    if(fl_local_list && fl_local_list->sub && fl_local_list->sub->len)
-      ui_mf(ui_main, UIM_NOTIFY, "File list refresh finished.");
-  }
   return FALSE;
 }
 

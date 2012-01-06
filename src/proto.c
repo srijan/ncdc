@@ -552,17 +552,26 @@ struct search_r *search_parse_nmdc(struct hub *hub, char *msg) {
   // For active search results: figure out the hub
   if(!hub) {
     tmp = strchr(hubaddr, ':') ? g_strdup(hubaddr) : g_strdup_printf("%s:411", hubaddr);
+    int colon = strchr(tmp, ':') - tmp;
     GList *n;
-    struct ui_tab *t;
     for(n=ui_tabs; n; n=n->next) {
-      t = n->data;
-      if(t->type == UIT_HUB && t->hub->nick_valid && !t->hub->adc && strcmp(tmp, net_remoteaddr(t->hub->net)) == 0)
+      struct ui_tab *t = n->data;
+      if(t->type != UIT_HUB || !t->hub->nick_valid || t->hub->adc)
+        continue;
+      // Excact hub:ip match, stop searching
+      if(strcmp(tmp, net_remoteaddr(t->hub->net)) == 0) {
+        hub = t->hub;
         break;
+      }
+      // Otherwise, try a fuzzy search (ignoring the port)
+      tmp[colon] = 0;
+      if(strncmp(tmp, net_remoteaddr(t->hub->net), colon) == 0)
+        hub = t->hub;
+      tmp[colon] = ':';
     }
     g_free(tmp);
-    if(!n)
+    if(!hub)
       return NULL;
-    hub = t->hub;
   }
 
   // Figure out r.uid

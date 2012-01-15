@@ -1261,9 +1261,9 @@ void ui_fl_queue(guint64 uid, gboolean force, const char *sel, struct ui_tab *pa
     if(open)
       ui_tab_cur = n;
     if(sel) {
-      if(!t->fl_loading)
+      if(!t->fl_loading && t->fl_list)
         ui_fl_dosel(n->data, t->fl_list, sel);
-      else {
+      else if(t->fl_loading) {
         g_free(t->fl_sel);
         t->fl_sel = g_strdup(sel);
       }

@@ -35,46 +35,49 @@
 #include "../src/doc.h"
 
 
-static void out_string(const char *str) {
-  const char *m;
-  for(m=str; *m; m++) {
-    if(*m == '\n')
-      fputs("\n.br\n", stdout);
-    else if(*m == '\\')
-      fputs("\\\\", stdout);
-    else
-      fputc(*m, stdout);
-  }
-}
-
-
 static void gen_cmd() {
   const struct doc_cmd *c = doc_cmds;
+  printf("=over\n\n");
   for(; *c->name; c++) {
-    printf(".TP\n\\fB/%s\\fP %s\n.br\n", c->name, c->args ? c->args : "");
-    out_string(c->desc ? c->desc : c->sum);
-    printf("\n");
+    printf("=item B<%s>", c->name);
+    if(c->args)
+      printf(" %s", c->args);
+    fputs("\n\n", stdout);
+    fputs(c->desc ? c->desc : c->sum, stdout);
+    fputs("\n\n", stdout);
   }
+  printf("=back\n\n");
 }
 
 
 static void gen_set() {
   const struct doc_set *s = doc_sets;
+  printf("=over\n\n");
   for(; s->name; s++) {
-    printf(".TP\n\\fB%s\\fP %s\n.br\n", s->name, s->type);
-    out_string(s->desc);
-    printf("\n");
+    printf("=item B<%s> %s\n\n", s->name, s->type);
+    fputs(s->desc, stdout);
+    fputs("\n\n", stdout);
   }
+  printf("=back\n\n");
 }
 
 
 static void gen_key() {
   const struct doc_key *k = doc_keys;
+  printf("=over\n\n");
   for(; k->sect; k++) {
-    printf(".TP\n\\fB%s\\fP\n.br\n", k->title);
-    out_string(k->desc);
-    printf("\n");
+    printf("=item B<%s>\n\n  ", k->title);
+    // TODO: It would be nicer to have this in POD rather than as verbatim paragraphs
+    const char *m = k->desc;
+    for(; *m; m++) {
+      if(*m == '\n')
+        fputs("\n  ", stdout);
+      else
+        fputc(*m, stdout);
+    }
+    fputs("\n\n", stdout);
   }
+  printf("=back\n\n");
 }
 
 
@@ -99,9 +102,6 @@ int main(int argc, char **argv) {
       } else if(strncmp(m, "@keys@", 6) == 0) {
         gen_key();
         t += 6;
-      } else if(strncmp(m, "@version@", 9) == 0) {
-        printf("%s-%s", PACKAGE, VERSION);
-        t += 9;
       } else {
         fputc('@', stdout);
         t++;

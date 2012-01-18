@@ -20,5 +20,6 @@ stamp-h1
 src/ncdc
 doc/gendoc
 doc/*.1
+doc/ncdc.pod
 util/ncdc-db-upgrade
 INSTALL

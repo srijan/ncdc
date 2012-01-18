@@ -1,12 +1,14 @@
-.TH ncdc-db-upgrade 1 "December 2011" "@version@"
-.SH NAME
-ncdc-db-upgrade \- Upgrade the ncdc session directory to a later version
 
-.SH SYNOPSIS
-.B ncdc-db-upgrade
-[-c directory] [--backup]
+=head1 NAME
 
-.SH DESCRIPTION
+ncdc-db-upgrade - Upgrade the ncdc session directory to a later version
+
+=head1 SYNOPSIS
+
+ncdc-db-upgrade [-c I<directory>] [--backup]
+
+=head1 DESCRIPTION
+
 ncdc-db-upgrade will upgrade a session directory in the format used by older
 versions of ncdc to the format used in later versions. Specifically, it will
 allow you to upgrade to ncdc 1.6 and later without losing the data and
@@ -14,14 +16,14 @@ configuration you had with version 1.5 or earlier.
 
 The path to the session directory can be given with the -c argument. If this
 argument is not given or empty, $NCDC_DIR or "$HOME/.ncdc" will be used
-instead. This is equivalent to the behaviour of ncdc(1).
+instead. This is equivalent to the behaviour of L<ncdc(1)>.
 
-.SH AUTHOR
+=head1 AUTHOR
+
 ncdc is written by Yoran Heling <projects@yorhel.nl>
-.br
-Web:
-.UR
-http://dev.yorhel.nl/ncdc
 
-.SH SEE ALSO
-ncdc(1)
+Web: L<http://dev.yorhel.nl/ncdc>
+
+=head1 SEE ALSO
+
+L<ncdc(1)>

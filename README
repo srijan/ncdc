@@ -33,6 +33,7 @@ BUILDING FROM A RELEASE TARBALL
   the following to build ncdc:
   - A C compiler
   - GNU make
+  - pod2man (comes with a default Perl installation)
   - Header files for the above REQUIREMENTS
 
   And the usual commands will get you up and running:

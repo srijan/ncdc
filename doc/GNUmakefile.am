@@ -1,10 +1,13 @@
 man_MANS=ncdc.1 ncdc-gen-cert.1 ncdc-db-upgrade.1
-EXTRA_DIST=$(man_MANS:.1=.1.in)
-CLEANFILES=${man_MANS}
+EXTRA_DIST=$(man_MANS:.1=.pod) ncdc.pod.in
+CLEANFILES=${man_MANS} ncdc.pod
 
 noinst_PROGRAMS=gendoc
 gendoc_SOURCES=gendoc.c
 
-${man_MANS}: %.1: %.1.in gendoc
+ncdc.pod: ncdc.pod.in gendoc
 	./gendoc <$< >$@
+
+${man_MANS}: %.1: %.pod GNUmakefile
+	pod2man --center "ncdc manual" --release "@PACKAGE@-@VERSION@" $< >$@
 

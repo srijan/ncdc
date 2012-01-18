@@ -1,189 +1,219 @@
-.TH ncdc 1 "December 2011" "@version@"
-.SH NAME
-ncdc \- Ncurses Direct Connect Client
 
-.SH SYNOPSIS
-.B ncdc
-.RI [ option... ]
+=head1 NAME
 
-.SH DESCRIPTION
+ncdc - Ncurses Direct Connect Client
+
+=head1 SYNOPSIS
+
+ncdc [options]
+
+=head1 DESCRIPTION
+
 Ncdc is a modern and lightweight direct connect client with a friendly ncurses
 interface.
 
-.SH GETTING STARTED
+=head1 GETTING STARTED
+
 This is a basic introduction for those who are new to ncdc. See the chapters
 below for a more detailed description of the available functionality.
-.PP
+
 What you see when starting up ncdc is an input line where you can input
 commands and a log window where the results are displayed, much like a regular
-terminal. Commands within ncdc start with a slash (e.g. `/help') and have
-tab completion to help you.
-.PP
+terminal. Commands within ncdc start with a slash (e.g. C</help>) and have tab
+completion to help you.
+
 The first thing you will want to do after starting ncdc for the first time is
 to setup some basic information and settings:
-.br
-  /set nick \fBMyNick\fP
-.br
-  /set description \fBncdc is awesome!\fP
-.br
-  /set connection \fB10\fP
-.br
-  /share \fB"My Awesome Files" /path/to/files\fP
-.PP
+
+  /set nick MyNick
+  /set description ncdc is awesome!
+  /set connection 10
+  /share "My Awesome Files" /path/to/files
+
 And if you have a direct connection to the internet or if your router allows
 port forwarding, you may also want to enable active mode:
-.br
-  /set active_ip \fB13.33.33.7\fP
-.br
-  /set active_port \fB34194\fP
-.br
-  /set active \fBtrue\fP
-.PP
+
+  /set active_ip 13.33.33.7
+  /set active_port 34194
+  /set active true
+
 See the help text for each of the commands and settings for more information.
 Of course, all of the above settings are saved to the database and will be used
 again on the next run.
-.PP
+
 To connect to a hub, use /open:
-.br
-  /open \fBncdc adc://dc.blicky.net:2780/\fP
-.br
-Here `ncdc' is the personal name you give to the hub, and the second argument
+
+  /open ncdc adc://dc.blicky.net:2780/
+
+Here I<ncdc> is the personal name you give to the hub, and the second argument
 the URL. This URL will be saved in the database, so the next time you want to
-connect to this hub, you can simply do:
-.br
-  /open \fBncdc\fP
-.br
-See the help text for '/open' and '/connect' for more information. If you want
-to automatically connect to a hub when ncdc starts up, use the `autoconnect'
-setting.
-.PP
+connect to this hub, you can simply do C</open ncdc>. See the help text for
+C</open> and C</connect> for more information. If you want to automatically
+connect to a hub when ncdc starts up, use the C<autoconnect> setting.
+
 Ncdc uses a tabbed interface: every hub opens in a new tab, and there are
 several other kinds of tabs available as well. The type of tab is indicated in
 the tab list on the bottom of the screen with a character prefix. Hubs, for
-example, are prefixed with a `#'. If a tab needs your attention, a colored
+example, are prefixed with a C<#>. If a tab needs your attention, a colored
 exclamation mark is displayed before the tab name, different colors are used
 for different types of activity.
-.PP
-Everything else should be fairly self-explanatory: To search for files, use the
-`/search' command. To browse through the user list of a hub, use `/userlist' or
-hit Alt+u. To browse someone's file list, use `/browse' or hit the 'b' key in
-the user list. And to monitor your upload and download connections, use
-`/connections' or hit Alt+n.
 
-.SH OPTIONS
-.TP
-.B \-c, \-\-session-dir=<dir>
-.br
+Everything else should be fairly self-explanatory: To search for files, use the
+C</search> command. To browse through the user list of a hub, use C</userlist> or
+hit Alt+u. To browse someone's file list, use C</browse> or hit the 'b' key in
+the user list. And to monitor your upload and download connections, use
+C</connections> or hit Alt+n.
+
+
+=head1 OPTIONS
+
+=over
+
+=item B<-c, --session-dir=> I<dir>
+
 Use a different session directory. Defaults to the contents of the environment
 variable `$NCDC_DIR' or if this is unset to `$HOME/.ncdc'.
-.TP
-.B \-h, \-\-help
-.br
+
+=item B<-h, --help>
+
 Display summary of options.
-.TP
-.B \-n, \-\-no\-autoconnect
-.br
-Don't automatically connect to hubs with the `autoconnect' option set.
-.TP
-.B \-v, \-\-version
-.br
+
+=item B<-n, --no-autoconnect>
+
+Don't automatically connect to hubs with the C<autoconnect> option set.
+
+=item B<-v, --version>
+
 Display ncdc version.
 
-.SH INTERACTIVE COMMANDS
+=back
+
+
+=head1 INTERACTIVE COMMANDS
+
 The following is the list of commands that can be used within ncdc. The /help
 command can also be used get a list of available commands and to access this
 documentation.
+
 @commands@
 
-.SH SETTINGS
+
+=head1 SETTINGS
+
 The following is a list of configuration settings. These settings can be
-changed and queried using the `/set' command for global settings and `/hset'
+changed and queried using the C</set> command for global settings and C</hset>
 for hub-local settings. All configuration data is stored in the db.sqlite3 file
 in the session directory.
+
 @settings@
 
-.SH KEY BINDINGS
+
+=head1 KEY BINDINGS
+
 On any tab without the text input line, you can press `?' to get the key
 bindings for that tab. The list of key bindings is available through the
-`/help keys' command, and is reproduced below.
+C</help keys> command, and is reproduced below.
+
 @keys@
 
-.SH ENVIRONMENT
-$NCDC_DIR is used to determine the session dir, it is only honoured if \fB-c\fP
-is not set on the command line.
 
-.SH FILES
-$NCDC_DIR corresponds to the session dir set via -c, environment variable
+=head1 ENVIRONMENT
+
+$NCDC_DIR is used to determine the session dir, it is only honoured if I<-c> is
+not set on the command line.
+
+
+=head1 FILES
+
+$NCDC_DIR corresponds to the session dir set via I<-c>, environment variable
 $NCDC_DIR or $HOME/.ncdc.
-.TP
-.I $NCDC_DIR/cert/
+
+=over
+
+=item $NCDC_DIR/cert/
+
 Directory where the client certificates are stored. Must contain a private key
 file (client.key) and public certificate (client.crt). These should be
 generated automatically when ncdc starts up the first time, but can be
-generated manually using ncdc-gen-cert(1).
-.TP
-.I $NCDC_DIR/db.sqlite3
+generated manually using L<ncdc-gen-cert(1)>.
+
+=item $NCDC_DIR/db.sqlite3
+
 The database. This stores all configuration variables, hash data of shared
 files, download queue information and other state information. Manually editing
 this file with the `sqlite3' commandline tool is possible but discouraged. Any
 changes made to the database while ncdc is running will not be read, and may
 even get overwritten by ncdc.
-.TP
-.I $NCDC_DIR/dl/
+
+=item $NCDC_DIR/dl/
+
 Directory where completed downloads are moved to by default. Can be changed
-with the `download_dir' configuration option.
-.TP
-.I $NCDC_DIR/files.xml.bz2
+with the C<download_dir> configuration option.
+
+=item $NCDC_DIR/files.xml.bz2
+
 Filelist containing a listing of all shared files.
-.TP
-.I $NCDC_DIR/fl/
+
+=item $NCDC_DIR/fl/
+
 Directory where downloaded file lists from other users are stored. The names of
 the files are hex-encoded user IDs that are used internally by ncdc. Old file
 lists are deleted automatically after a configurable interval. See the
-`filelist_maxage' configuration option.
-.TP
-.I $NCDC_DIR/history
+C<filelist_maxage> configuration option.
+
+
+=item $NCDC_DIR/history
+
 Command history.
-.TP
-.I $NCDC_DIR/inc/
+
+=item $NCDC_DIR/inc/
+
 Default location for incomplete downloads. Can be changed with the
-`incoming_dir' setting. The file names in this directory are the base32-encoded
-TTH root of the completed file.
-.TP
-.I $NCDC_DIR/logs/
+C<incoming_dir> setting. The file names in this directory are the
+base32-encoded TTH root of the completed file.
+
+=item $NCDC_DIR/logs/
+
 Directory where all the log files are stored. File names starting with `#' are
 hub logs and `~' are user (PM) logs. Special log files are transfers.log and
 main.log.
-.br
+
 ncdc does not have built-in functionality to rotate or compress log files
 automatically. When rotating log files manually (e.g. via a cron job), make
 sure to send the SIGUSR1 signal afterwards to force ncdc to flush the old logs
 and create or open the new log files.
-.TP
-.I $NCDC_DIR/stderr.log
+
+=item $NCDC_DIR/stderr.log
+
 Error/debug log. This file is cleared every time ncdc starts up.
-.TP
-.I $NCDC_DIR/version
+
+=item $NCDC_DIR/version
+
 Version of the data directory. This file locked while an ncdc instance is
 running, making sure that no two ncdc instances work with the same session
 directory at the same time.
 
-.SH LICENSE
+=back
+
+
+=head1 LICENSE
+
 Copyright (C) 2011-2012 Yoran Heling <projects@yorhel.nl>
-.br
+
 ncdc is distributed under the MIT license, please read the COPYING file for
 more information.
 
-.SH BUGS
+=head1 BUGS
+
 Please report bugs or feature requests to projects@yorhel.nl or connect to the
 development hub at adc://dc.blicky.net:2780/.
 
-.SH AUTHOR
-ncdc is written by Yoran Heling <projects@yorhel.nl>
-.br
-Web:
-.UR
-http://dev.yorhel.nl/ncdc
+=head1 AUTHOR
 
-.SH SEE ALSO
-ncdc-gen-cert(1), ncdc-db-upgrade(1).
+ncdc is written by Yoran Heling <projects@yorhel.nl>
+
+Web: L<http://dev.yorhel.nl/ncdc>
+
+=head1 SEE ALSO
+
+L<ncdc-gen-cert(1)>, L<ncdc-db-upgrade(1)>.

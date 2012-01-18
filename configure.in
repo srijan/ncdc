@@ -18,6 +18,12 @@ AC_SYS_LARGEFILE
 m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
 
 
+# Check for pod2man (TODO: make this optional for tarball releases?)
+AC_CHECK_PROG([have_pod2man],[pod2man],[yes],[no])
+if test "x$have_pod2man" = "xno"; then
+  AC_MSG_ERROR([Could not find the pod2man program.])
+fi
+
 # Check for makeheaders. Not having makeheaders is fatal if no header files are
 # present in this distribution. (Only main.h is checked, though)
 AC_CHECK_PROG([have_mh],[makeheaders],[yes],[no])

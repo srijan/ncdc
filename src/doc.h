@@ -61,9 +61,9 @@ static const struct doc_cmd {
   " adcs hub and the SHA256 keyprint is known, you can attach this to the url as"
   " `?kp=SHA256/<base32-encoded-keyprint>'\n\n"
   "Note that this command can only be used on hub tabs. If you want to open a new"
-  " connection to a hub, you need to use /open first. For example:\n"
+  " connection to a hub, you need to use /open first. For example:\n\n"
   "  /open testhub\n"
-  "  /connect dchub://dc.some-test-hub.com/\n"
+  "  /connect dchub://dc.some-test-hub.com/\n\n"
   "See the /open command for more information."
 },
 { "connections", NULL, "Open the connections tab.",
@@ -115,7 +115,7 @@ static const struct doc_cmd {
   " to be an OP to be able to use it."
 },
 { "me", "<message>", "Chat in third person.",
-  "This allows you to talk in third person. Most clients will display your message as something like:\n"
+  "This allows you to talk in third person. Most clients will display your message as something like:\n\n"
   "  ** Nick is doing something\n\n"
   "Note that this command only works correctly on ADC hubs. The NMDC protocol"
   " does not have this feature, and your message will be sent as-is, including the /me."
@@ -173,7 +173,7 @@ static const struct doc_cmd {
 },
 { "search", "[options] <query>", "Search for files.",
   "Performs a file search, opening a new tab with the results.\n\n"
-  "Available options:\n"
+  "Available options:\n\n"
   "  -hub      Search the current hub only. (default)\n"
   "  -all      Search all connected hubs, except those with `chat_only' set.\n"
   "  -le  <s>  Size of the file must be less than <s>.\n"
@@ -181,7 +181,7 @@ static const struct doc_cmd {
   "  -t   <t>  File must be of type <t>. (see below)\n"
   "  -tth <h>  TTH root of this file must match <h>.\n\n"
   "File sizes (<s> above) accept the following suffixes: G (GiB), M (MiB) and K (KiB).\n\n"
-  "The following file types can be used with the -t option:\n"
+  "The following file types can be used with the -t option:\n\n"
   "  1  any      Any file or directory. (default)\n"
   "  2  audio    Audio files.\n"
   "  3  archive  (Compressed) archives.\n"
@@ -189,7 +189,7 @@ static const struct doc_cmd {
   "  5  exe      Windows executables.\n"
   "  6  img      Image files.\n"
   "  7  video    Video files.\n"
-  "  8  dir      Directories.\n"
+  "  8  dir      Directories.\n\n"
   "Note that file type matching is done using file extensions, and is not very reliable."
 },
 { "set", "[<key> [<value>]]", "Get or set global configuration variables.",
@@ -206,9 +206,9 @@ static const struct doc_cmd {
   "Use /share without arguments to get a list of shared directories.\n"
   "When called with a name and a path, the path will be added to your share."
   " Note that shell escaping may be used in the name. For example, to add a"
-  " directory with the name `Fun Stuff', you could do the following:\n"
-  "  /share \"Fun Stuff\" /path/to/fun/stuff\n"
-  "Or:\n"
+  " directory with the name `Fun Stuff', you could do the following:\n\n"
+  "  /share \"Fun Stuff\" /path/to/fun/stuff\n\n"
+  "Or:\n\n"
   "  /share Fun\\ Stuff /path/to/fun/stuff\n\n"
   "The full path to the directory will not be visible to others, only the name"
   " you give it will be public. An initial `/refresh' is done automatically on"
@@ -302,7 +302,7 @@ static const struct doc_set {
 // Note: the setting list isn't alphabetic here, but in a more intuitive order
 { "color_*", 0, "<color>",
   "The settings starting with the `color_' prefix allow you to change the"
-  " interface colors. The following is a list of available color settings:\n"
+  " interface colors. The following is a list of available color settings:\n\n"
   "  list_default  - default item in a list\n"
   "  list_header   - header of a list\n"
   "  list_select   - selected item in a list\n"
@@ -367,7 +367,7 @@ static const struct doc_set {
 },
 { "encoding", 1, "<string>",
   "The character set/encoding to use for hub and PM messages. This setting is"
-  " only used on NMDC hubs, ADC always uses UTF-8. Some common values are:\n"
+  " only used on NMDC hubs, ADC always uses UTF-8. Some common values are:\n\n"
   "  CP1250      (Central Europe)\n"
   "  CP1251      (Cyrillic)\n"
   "  CP1252      (Western Europe)\n"
@@ -577,9 +577,10 @@ static const struct doc_key {
   "x            Clear error state for the selected user for this file.\n"
   "X            Clear error state for the selected user for all files.\n"
   "\n"
-  "Note: when an item in the queue has `ERR' indicated in the priority column,"
-  " you have two choices: You can remove the item from the queue using `d', or"
-  " attempt to continue the download by increasing its priority using `+'."
+  "Note: when an item in the queue has `ERR' indicated in the\n"
+  "priority column, you have two choices: You can remove the\n"
+  "item from the queue using `d', or attempt to continue the\n"
+  "download by increasing its priority using `+'."
 },
 { "search", "Search results tab",
   LISTING_KEYS

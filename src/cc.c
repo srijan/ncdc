@@ -794,9 +794,13 @@ static void handle_adcget(struct cc *cc, char *type, char *id, guint64 start, gi
     if(f)
       memcpy(cc->last_hash, f->tth, 24);
     char *tmp = adc_escape(id, !cc->adc);
+    // Note: For >=2GB chunks, we tell the other client that we're sending them
+    // more than 2GB, but in actuality we stop transfering stuff at 2GB. Other
+    // DC clients (DC++, notabily) don't like it when you reply with a
+    // different byte count than they requested. :-(
     net_sendf(cc->net,
-      cc->adc ? "CSND file %s %"G_GUINT64_FORMAT" %d" : "$ADCSND file %s %"G_GUINT64_FORMAT" %d",
-      tmp, start, cc->last_length);
+      cc->adc ? "CSND file %s %"G_GUINT64_FORMAT" %"G_GUINT64_FORMAT : "$ADCSND file %s %"G_GUINT64_FORMAT" %"G_GUINT64_FORMAT,
+      tmp, start, bytes);
     cc->state = CCS_TRANSFER;
     time(&cc->last_start);
     net_sendfile(cc->net, path, start, cc->last_length, strcmp(vpath, "files.xml.bz2") == 0 ? FALSE : TRUE, handle_sendcomplete);

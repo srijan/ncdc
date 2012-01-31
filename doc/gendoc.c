@@ -39,7 +39,7 @@ static void gen_cmd() {
   const struct doc_cmd *c = doc_cmds;
   printf("=over\n\n");
   for(; *c->name; c++) {
-    printf("=item B<%s>", c->name);
+    printf("=item B</%s>", c->name);
     if(c->args)
       printf(" %s", c->args);
     fputs("\n\n", stdout);

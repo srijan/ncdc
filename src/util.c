@@ -961,6 +961,8 @@ void ratecalc_calc() {
     }
     if(rc->burst < maxburst[rc->reg])
       nums[rc->reg]++;
+    else
+      rc->burst = maxburst[rc->reg];
     g_static_mutex_unlock(&rc->lock);
   }
 

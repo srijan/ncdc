@@ -179,7 +179,7 @@ char *str_formatsize(guint64 size) {
   double r = size;
   char c = ' ';
   if(r < 1000.0f)      { }
-  else if(r < 1023e3f) { c = 'k'; r/=1024.0f; }
+  else if(r < 1023e3f) { c = 'K'; r/=1024.0f; }
   else if(r < 1023e6f) { c = 'M'; r/=1048576.0f; }
   else if(r < 1023e9f) { c = 'G'; r/=1073741824.0f; }
   else if(r < 1023e12f){ c = 'T'; r/=1099511627776.0f; }
@@ -278,7 +278,7 @@ guint64 str_parsesize(const char *str) {
     num *= 1024*1024*1024;
   else if(*e == 'M' || *e == 'm')
     num *= 1024*1024;
-  else if(*e == 'K' || *e == 'K')
+  else if(*e == 'K' || *e == 'k')
     num *= 1024;
   else
     return G_MAXUINT64;
@@ -938,8 +938,10 @@ gint64 ratecalc_total(struct ratecalc *rc) {
 void ratecalc_calc() {
   GSList *n;
   // Bytes allocated to each class
-  // TODO: initialize from config variables
   int maxburst[RCC_MAX+1] = {INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX};
+  maxburst[RCC_UP] = var_get_int(0, VAR_upload_rate);
+  if(maxburst[RCC_UP] == 0)
+    maxburst[RCC_UP] = INT_MAX;
 
   int left[RCC_MAX+1]; // Number of bytes left to distribute
   int nums[RCC_MAX+1] = {}; // Number of rc structs with burst < max

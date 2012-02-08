@@ -750,6 +750,7 @@ static void file_thread(gpointer dat, gpointer udat) {
   }
   int total = g_atomic_int_get(&c->n->file_left);
   int left = total;
+  int canwr;
 
   int fd = G_IS_FILE_DESCRIPTOR_BASED(c->file)
     ? g_file_descriptor_based_get_fd(G_FILE_DESCRIPTOR_BASED(c->file)) : -1;
@@ -760,6 +761,9 @@ static void file_thread(gpointer dat, gpointer udat) {
   // sendfile()-based sending
 #ifdef HAVE_SENDFILE
   while(c->sock && fd > 0 && left > 0) {
+    // Request bandwidth
+    if((canwr = ratecalc_request(c->n->rate_out, c->can)) <= 0)
+      break;
     // Wait for the socket to be writable, to ensure that sendfile() won't
     // block for too long. sendfile() isn't cancellable, after all.
     if(!g_socket_condition_wait(c->sock, G_IO_OUT, c->can, &c->err))
@@ -768,10 +772,10 @@ static void file_thread(gpointer dat, gpointer udat) {
     // call sendfile()
     off_t off = c->offset+(total-left);
 #ifdef HAVE_LINUX_SENDFILE
-    ssize_t r = sendfile(g_socket_get_fd(c->sock), fd, &off, left);
+    ssize_t r = sendfile(g_socket_get_fd(c->sock), fd, &off, MIN(canwr, left));
 #elif HAVE_BSD_SENDFILE
     off_t len = 0;
-    gint64 r = sendfile(fd, g_socket_get_fd(c->sock), off, (size_t)left, NULL, &len, 0);
+    gint64 r = sendfile(fd, g_socket_get_fd(c->sock), off, (size_t)MIN(canwr, left), NULL, &len, 0);
     // a partial write results in an EAGAIN error on BSD, even though this isn't
     // really an error condition at all.
     if(r != -1 || (r == -1 && errno == EAGAIN))
@@ -826,7 +830,11 @@ static void file_thread(gpointer dat, gpointer udat) {
     // calculation and file_left.
     char *p = buf;
     while(r > 0) {
-      w = g_output_stream_write(c->out, p, r, c->can, &c->err);
+      if((canwr = ratecalc_request(c->n->rate_out, c->can)) <= 0) {
+        res = FALSE;
+        break;
+      }
+      w = g_output_stream_write(c->out, p, MIN(r, canwr), c->can, &c->err);
       if(w <= 0) {
         res = FALSE;
         break;

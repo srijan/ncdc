@@ -60,6 +60,10 @@ static char *f_interval(const char *val) {
   return g_strdup(str_formatinterval(int_raw(val)));
 }
 
+static char *f_speed(const char *val) {
+  return g_strdup_printf("%s/s", str_formatsize(int_raw(val)));
+}
+
 static char *p_id(const char *val, GError **err) {
   return g_strdup(val);
 }
@@ -123,7 +127,6 @@ static char *p_ip(const char *val, GError **err) {
   return g_strdup(val);
 }
 
-
 static char *p_regex(const char *val, GError **err) {
   GRegex *r = g_regex_new(val, 0, 0, err);
   if(!r)
@@ -132,6 +135,17 @@ static char *p_regex(const char *val, GError **err) {
     g_regex_unref(r);
     return g_strdup(val);
   }
+}
+
+static char *p_speed(const char *val, GError **err) {
+  char *v = strlen(val) > 3 && strcmp(val+strlen(val)-2, "/s") == 0 ? g_strndup(val, strlen(val)-2) : g_strdup(val);
+  guint64 size = str_parsesize(v);
+  g_free(v);
+  if(size == G_MAXUINT64) {
+    g_set_error_literal(err, 1, 0, "Invalid speed.");
+    return NULL;
+  }
+  return g_strdup_printf("%"G_GUINT64_FORMAT, size);
 }
 
 // Only suggests "true" or "false" regardless of the input. There are only two
@@ -836,7 +850,8 @@ struct var {
   V(show_joinquit,    1,1, f_bool,         p_bool,          su_bool,       NULL,         NULL,            "false")\
   V(slots,            1,0, f_int,          p_int_ge1,       NULL,          NULL,         s_hubinfo,       "10")\
   V(tls_policy,       1,1, f_tls_policy,   p_tls_policy,    su_tls_policy, g_tls_policy, s_tls_policy,    G_STRINGIFY(VAR_TLSP_ALLOW))\
-  V(ui_time_format,   1,0, f_id,           p_id,            su_old,        NULL,         NULL,            "[%H:%M:%S]")
+  V(ui_time_format,   1,0, f_id,           p_id,            su_old,        NULL,         NULL,            "[%H:%M:%S]")\
+  V(upload_rate,      1,0, f_speed,        p_speed,         su_old,        NULL,         NULL,            NULL)
 
 enum var_names {
 #define V(n, gl, h, f, p, su, g, s, d) VAR_##n,

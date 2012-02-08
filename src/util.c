@@ -1130,7 +1130,7 @@ void logfile_add(struct logfile *l, const char *msg) {
 
   int len = strlen(line);
   int wr = 0;
-  int r;
+  int r = 1;
   while(wr < len && (r = write(l->file, line+wr, len-wr)) > 0)
     wr += r;
 

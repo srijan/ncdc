@@ -857,9 +857,10 @@ char *darray_get_dat(char *v, int *l) {
 #if INTERFACE
 
 // Rate calc classes
-#define RCC_HASH 1
-#define RCC_UP   2
-#define RCC_DOWN 3
+#define RCC_NONE 1
+#define RCC_HASH 2
+#define RCC_UP   3
+#define RCC_DOWN 4
 #define RCC_MAX  RCC_DOWN
 
 struct ratecalc {
@@ -938,7 +939,7 @@ void ratecalc_calc() {
   GSList *n;
   // Bytes allocated to each class
   // TODO: initialize from config variables
-  int maxburst[RCC_MAX+1] = {INT_MAX, INT_MAX, INT_MAX, INT_MAX};
+  int maxburst[RCC_MAX+1] = {INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX};
 
   int left[RCC_MAX+1]; // Number of bytes left to distribute
   int nums[RCC_MAX+1] = {}; // Number of rc structs with burst < max
@@ -961,14 +962,16 @@ void ratecalc_calc() {
     g_static_mutex_unlock(&rc->lock);
   }
 
+  //g_debug("Num: %d - %d - %d", nums[2], nums[3], nums[4]);
+
   // Pass 2..i+1: distribute bandwidth from left[] among the ratecalc structures.
   // (The i variable is to limit the number of passes, otherwise it easily gets into an infinite loop)
-  int i = 2;
-  while(--i) {
+  int i = 3;
+  while(i--) {
     int bwp[RCC_MAX+1] = {}; // average bandwidth-per-item
     gboolean c = FALSE;
     int j;
-    for(j=1; i<=RCC_MAX; i++) {
+    for(j=2; j<=RCC_MAX; j++) {
       bwp[j] = nums[j] ? left[j]/nums[j] : 0;
       if(bwp[j] > 0)
         c = TRUE;
@@ -982,17 +985,18 @@ void ratecalc_calc() {
       if(bwp[rc->reg] > 0) {
         g_static_mutex_lock(&rc->lock);
         int alloc = MIN(maxburst[rc->reg]-rc->burst, bwp[rc->reg]);
-        //g_debug("Allocing class %d, %d new bytes to %d", rc->reg, alloc, rc->burst);
+        //g_debug("Allocing class %d(num=%d), %d new bytes to %d", rc->reg, nums[rc->reg], alloc, rc->burst);
         rc->burst += alloc;
         left[rc->reg] -= alloc;
         g_static_mutex_unlock(&rc->lock);
-        if(alloc < bwp[rc->reg])
-          nums[j]--;
+        if(alloc > 0 && alloc < bwp[rc->reg])
+          nums[rc->reg]--;
       }
     }
+    //g_debug("Left after #%d: %d - %d - %d", 3-i, left[2], left[3], left[4]);
   }
 
-  //g_debug("Left after distribution: %d - %d - %d", left[1], left[2], left[3]);
+  //g_debug("Left after distribution: %d - %d - %d", left[2], left[3], left[4]);
   // TODO: distribute the last remaining BW on a first-find basis?
 }
 
@@ -1013,7 +1017,7 @@ int ratecalc_request(struct ratecalc *rc, GCancellable *can) {
     // time is "thrown away". I don't expect this to be much of an issue,
     // however.
     r = g_poll(poll_fd, 1, 250);
-    g_return_val_if_fail(r == 0 || (r == -1 && errno == EINTR), -1);
+    g_return_val_if_fail(r >= 0 || errno == EINTR, -1);
   }
   g_cancellable_release_fd(can);
   return r > 1 ? 0 : b;

@@ -1086,8 +1086,9 @@ void net_udp_sendf(const char *dest, const char *fmt, ...) {
 void net_init_global() {
   ratecalc_init(&net_in);
   ratecalc_init(&net_out);
-  ratecalc_register(&net_in, RCC_DOWN);
-  ratecalc_register(&net_out, RCC_UP);
+  // Don't group these with RCC_UP or RCC_DOWN, otherwise bandwidth will be counted twice.
+  ratecalc_register(&net_in, RCC_NONE);
+  ratecalc_register(&net_out, RCC_NONE);
 
   recv_pool = g_thread_pool_new(recv_thread, NULL, -1, FALSE, NULL);
   file_pool = g_thread_pool_new(file_thread, NULL, -1, FALSE, NULL);

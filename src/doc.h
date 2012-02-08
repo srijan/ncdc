@@ -338,7 +338,9 @@ static const struct doc_set {
   " previously mentioned formats, otherwise no upload speed will be"
   " broadcasted. This setting is broadcasted as-is on NMDC hubs, to allow for"
   " using old-style connection values (e.g. `DSL' or `Cable') on hubs that"
-  " require this."
+  " require this.\n\n"
+  "This setting is ignored if `upload_rate' has been set. If it is, that value"
+  " is broadcasted instead."
 },
 { "description", 1, "<string>",
   "A short public description that will be displayed in the user list of a hub."
@@ -357,6 +359,13 @@ static const struct doc_set {
   " added to the download queue.\n\n"
   "This regex is not checked when adding individual files from either the file"
   " list browser or the search results."
+},
+{ "download_rate", 0, "<speed>",
+  "Maximum combined transfer rate of all downloads. The total download speed"
+  " will be limited to this value. The suffixes `G', 'M', and 'K' can be used"
+  " for GiB/s, MiB/s and KiB/s, respectively. Note that, similar to"
+  " upload_rate, TCP and TLS overhead are not counted towards this limit, so"
+  " the actual bandwidth usage might be a little higher."
 },
 { "download_slots", 0, "<integer>",
   "Maximum number of simultaneous downloads."
@@ -476,7 +485,9 @@ static const struct doc_set {
   " performance when uploading and downloading, but is quite effective at"
   " avoiding protocol-specific traffic shaping that some ISPs may do. Also note"
   " that, even if you set this to `prefer', TLS will only be used if the"
-  " connecting party also supports it."
+  " connecting party also supports it.\n\n"
+  "Enabling TLS may result in less accurate traffic shaping when the"
+  " `download_rate' or `upload_rate' settings are used."
 },
 { "ui_time_format", 0, "<string>",
   "The format of the time displayed in the lower-left of the screen. Set `-' to"
@@ -486,6 +497,11 @@ static const struct doc_set {
   " for more information. Note that this setting does not influence the"
   " date/time format used in other places, such as the chat window or log"
   " files."
+},
+{ "upload_rate", 0, "<speed>",
+  "Maximum combined transfer rate of all uploads. See the `download_rate'"
+  " setting for more information on rate limiting. Note that this setting also"
+  " overrides any `connection' setting."
 },
 
 { NULL }

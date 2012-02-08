@@ -594,7 +594,7 @@ static void fl_hash_process() {
     return;
   }
   var_set_bool(0, VAR_fl_done, FALSE);
-  ratecalc_register(&fl_hash_rate);
+  ratecalc_register(&fl_hash_rate, RCC_HASH);
 
   // get one item from fl_hash_queue
   GHashTableIter iter;

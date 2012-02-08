@@ -527,8 +527,8 @@ void net_setconn(struct net *n, GSocketConnection *conn, gboolean tls, gboolean 
 
   ratecalc_reset(n->rate_in);
   ratecalc_reset(n->rate_out);
-  ratecalc_register(n->rate_in);
-  ratecalc_register(n->rate_out);
+  ratecalc_register(n->rate_in, RCC_DOWN);
+  ratecalc_register(n->rate_out, RCC_UP);
 
   // get/cache address
   GInetSocketAddress *addr = G_INET_SOCKET_ADDRESS(g_socket_connection_get_remote_address(n->conn, NULL));
@@ -1086,8 +1086,8 @@ void net_udp_sendf(const char *dest, const char *fmt, ...) {
 void net_init_global() {
   ratecalc_init(&net_in);
   ratecalc_init(&net_out);
-  ratecalc_register(&net_in);
-  ratecalc_register(&net_out);
+  ratecalc_register(&net_in, RCC_DOWN);
+  ratecalc_register(&net_out, RCC_UP);
 
   recv_pool = g_thread_pool_new(recv_thread, NULL, -1, FALSE, NULL);
   file_pool = g_thread_pool_new(file_thread, NULL, -1, FALSE, NULL);

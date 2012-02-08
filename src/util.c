@@ -835,17 +835,19 @@ char *darray_get_dat(char *v, int *l) {
 
 
 
-// Transfer / hashing rate calculation
+// Transfer / hashing rate calculation and limiting
 
 /* How to use this:
  * From main thread:
  *   struct ratecalc thing;
  *   ratecalc_init(&thing);
- *   ratecalc_register(&thing);
+ *   ratecalc_register(&thing, class);
  * From any thread (usually some worker thread):
+ *   ratecalc_request(&thing, cancel);
  *   ratecalc_add(&thing, bytes);
+ * From any other thread (usually main thread):
+ *   rate = ratecalc_rate(&thing);
  * From main thread:
- *   rate = ratecalc_get(&thing);
  *   ratecalc_reset(&thing);
  *   ratecalc_unregister(&thing);
  *
@@ -854,23 +856,24 @@ char *darray_get_dat(char *v, int *l) {
 
 #if INTERFACE
 
+// Rate calc classes
+#define RCC_HASH 1
+#define RCC_UP   2
+#define RCC_DOWN 3
+#define RCC_MAX  RCC_DOWN
+
 struct ratecalc {
-  GStaticMutex lock; // protects total, last and rate
+  GStaticMutex lock; // protects total, last, rate and burst
   gint64 total;
   gint64 last;
+  int burst;
   int rate;
-  char isreg;
+  int reg; // 0 = not registered, >1 = registered with class #n
 };
-
-#define ratecalc_add(rc, b) do {\
-    g_static_mutex_lock(&((rc)->lock));\
-    (rc)->total += b;\
-    g_static_mutex_unlock(&((rc)->lock));\
-  } while(0)
 
 #define ratecalc_reset(rc) do {\
     g_static_mutex_lock(&((rc)->lock));\
-    (rc)->total = (rc)->last = (rc)->rate = 0;\
+    (rc)->total = (rc)->last = (rc)->rate = (rc)->burst = 0;\
     g_static_mutex_unlock(&((rc)->lock));\
   } while(0)
 
@@ -880,14 +883,17 @@ struct ratecalc {
     ratecalc_reset(rc);\
   } while(0)
 
-#define ratecalc_register(rc) do { if(!(rc)->isreg) {\
+// TODO: get some burst allocated upon registering? Otherwise a transfer will
+// block until _calc() has assigned some bandwidth to it...
+#define ratecalc_register(rc, n) do { if(!(rc)->reg) {\
     ratecalc_list = g_slist_prepend(ratecalc_list, rc);\
-    (rc)->isreg = 1;\
+    (rc)->reg = n;\
   } } while(0)
 
+// TODO: give rc->burst back to the class? (in particular the negative ones)
 #define ratecalc_unregister(rc) do {\
     ratecalc_list = g_slist_remove(ratecalc_list, rc);\
-    (rc)->isreg = (rc)->rate = 0;\
+    (rc)->reg = (rc)->rate = (rc)->burst = 0;\
   } while(0)
 
 #endif
@@ -895,9 +901,25 @@ struct ratecalc {
 GSList *ratecalc_list = NULL;
 
 
+void ratecalc_add(struct ratecalc *rc, int b) {
+  g_static_mutex_lock(&rc->lock);
+  rc->total += b;
+  rc->burst -= b;
+  g_static_mutex_unlock(&rc->lock);
+}
+
+
 int ratecalc_rate(struct ratecalc *rc) {
   g_static_mutex_lock(&rc->lock);
   int r = rc->rate;
+  g_static_mutex_unlock(&rc->lock);
+  return r;
+}
+
+
+static int ratecalc_burst(struct ratecalc *rc) {
+  g_static_mutex_lock(&rc->lock);
+  int r = rc->burst;
   g_static_mutex_unlock(&rc->lock);
   return r;
 }
@@ -911,17 +933,92 @@ gint64 ratecalc_total(struct ratecalc *rc) {
 }
 
 
+// Calculates rc->rate and rc->burst.
 void ratecalc_calc() {
   GSList *n;
+  // Bytes allocated to each class
+  // TODO: initialize from config variables
+  int maxburst[RCC_MAX+1] = {INT_MAX, INT_MAX, INT_MAX, INT_MAX};
+
+  int left[RCC_MAX+1]; // Number of bytes left to distribute
+  int nums[RCC_MAX+1] = {}; // Number of rc structs with burst < max
+  memcpy(left, maxburst, (RCC_MAX+1)*sizeof(int));
+
+  // Pass one: calculate rc->rate, substract negative burst values from left[] and calculate nums[].
   for(n=ratecalc_list; n; n=n->next) {
     struct ratecalc *rc = n->data;
     g_static_mutex_lock(&rc->lock);
     gint64 diff = rc->total - rc->last;
     rc->rate = diff + ((rc->rate - diff) / 2);
     rc->last = rc->total;
+    if(rc->burst < 0) {
+      int sub = MIN(left[rc->reg], -rc->burst);
+      left[rc->reg] -= sub;
+      rc->burst += sub;
+    }
+    if(rc->burst < maxburst[rc->reg])
+      nums[rc->reg]++;
     g_static_mutex_unlock(&rc->lock);
   }
+
+  // Pass 2..i+1: distribute bandwidth from left[] among the ratecalc structures.
+  // (The i variable is to limit the number of passes, otherwise it easily gets into an infinite loop)
+  int i = 2;
+  while(--i) {
+    int bwp[RCC_MAX+1] = {}; // average bandwidth-per-item
+    gboolean c = FALSE;
+    int j;
+    for(j=1; i<=RCC_MAX; i++) {
+      bwp[j] = nums[j] ? left[j]/nums[j] : 0;
+      if(bwp[j] > 0)
+        c = TRUE;
+    }
+    // If there's nothing to distribute, stop.
+    if(!c)
+      break;
+    // Loop through the ratecalc structs and assign it some BW
+    for(n=ratecalc_list; n; n=n->next) {
+      struct ratecalc *rc = n->data;
+      if(bwp[rc->reg] > 0) {
+        g_static_mutex_lock(&rc->lock);
+        int alloc = MIN(maxburst[rc->reg]-rc->burst, bwp[rc->reg]);
+        //g_debug("Allocing class %d, %d new bytes to %d", rc->reg, alloc, rc->burst);
+        rc->burst += alloc;
+        left[rc->reg] -= alloc;
+        g_static_mutex_unlock(&rc->lock);
+        if(alloc < bwp[rc->reg])
+          nums[j]--;
+      }
+    }
+  }
+
+  //g_debug("Left after distribution: %d - %d - %d", left[1], left[2], left[3]);
+  // TODO: distribute the last remaining BW on a first-find basis?
 }
+
+
+// Inquire whether this ratecalc object is being rate-limited or whether it can
+// still do something. Will block until either the cancellable is cancelled or
+// burst > 0. Returns the number of bytes that are allowed to be processed
+// before calling this function again, or 0 when it has been cancelled.
+int ratecalc_request(struct ratecalc *rc, GCancellable *can) {
+  // This waiting loop is based on g_socket_condition_wait()
+  GPollFD poll_fd[1];
+  g_cancellable_make_pollfd(can, &poll_fd[0]);
+  int r = 0;
+  int b;
+  while(r <= 0 && (b = ratecalc_burst(rc)) <= 0) {
+    // Wake up 4 times per second. If the resource is CPU or HDD I/O
+    // constrained, then this means that at most 1/4th of the possible usage
+    // time is "thrown away". I don't expect this to be much of an issue,
+    // however.
+    r = g_poll(poll_fd, 1, 250);
+    g_return_val_if_fail(r == 0 || (r == -1 && errno == EINTR), -1);
+  }
+  g_cancellable_release_fd(can);
+  return r > 1 ? 0 : b;
+}
+
 
 // calculates an ETA and formats it into a "?d ?h ?m ?s" thing
 char *ratecalc_eta(struct ratecalc *rc, guint64 left) {

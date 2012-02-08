@@ -850,7 +850,7 @@ struct var {
   V(share_hidden,     1,0, f_bool,         p_bool,          su_bool,       NULL,         NULL,            "false")\
   V(show_joinquit,    1,1, f_bool,         p_bool,          su_bool,       NULL,         NULL,            "false")\
   V(slots,            1,0, f_int,          p_int_ge1,       NULL,          NULL,         s_hubinfo,       "10")\
-  V(tls_policy,       1,1, f_tls_policy,   p_tls_policy,    su_tls_policy, g_tls_policy, s_tls_policy,    G_STRINGIFY(VAR_TLSP_ALLOW))\
+  V(tls_policy,       1,1, f_tls_policy,   p_tls_policy,    su_tls_policy, g_tls_policy, s_tls_policy,    G_STRINGIFY(VAR_TLSP_DISABLE))\
   V(ui_time_format,   1,0, f_id,           p_id,            su_old,        NULL,         NULL,            "[%H:%M:%S]")\
   V(upload_rate,      1,0, f_speed,        p_speed,         NULL,          NULL,         NULL,            NULL)
 

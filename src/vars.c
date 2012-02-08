@@ -826,7 +826,7 @@ struct var {
   V(description,      1,1, f_id,           p_id,            su_old,        NULL,         s_hubinfo,       NULL)\
   V(download_dir,     1,0, f_id,           p_id,            su_path,       NULL,         s_dl_inc_dir,    i_dl_inc_dir(TRUE))\
   V(download_exclude, 1,0, f_id,           p_regex,         su_old,        NULL,         NULL,            NULL)\
-  V(download_rate,    1,0, f_speed,        p_speed,         su_old,        NULL,         NULL,            NULL)\
+  V(download_rate,    1,0, f_speed,        p_speed,         NULL,          NULL,         NULL,            NULL)\
   V(download_slots,   1,0, f_int,          p_int,           NULL,          NULL,         s_download_slots,"3")\
   V(email,            1,1, f_id,           p_id,            su_old,        NULL,         s_hubinfo,       NULL)\
   V(encoding,         1,1, f_id,           p_encoding,      su_encoding,   NULL,         NULL,            "UTF-8")\
@@ -852,7 +852,7 @@ struct var {
   V(slots,            1,0, f_int,          p_int_ge1,       NULL,          NULL,         s_hubinfo,       "10")\
   V(tls_policy,       1,1, f_tls_policy,   p_tls_policy,    su_tls_policy, g_tls_policy, s_tls_policy,    G_STRINGIFY(VAR_TLSP_ALLOW))\
   V(ui_time_format,   1,0, f_id,           p_id,            su_old,        NULL,         NULL,            "[%H:%M:%S]")\
-  V(upload_rate,      1,0, f_speed,        p_speed,         su_old,        NULL,         NULL,            NULL)
+  V(upload_rate,      1,0, f_speed,        p_speed,         NULL,          NULL,         NULL,            NULL)
 
 enum var_names {
 #define V(n, gl, h, f, p, su, g, s, d) VAR_##n,

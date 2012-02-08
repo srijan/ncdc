@@ -855,20 +855,27 @@ char *darray_get_dat(char *v, int *l) {
 #if INTERFACE
 
 struct ratecalc {
-  int counter;
+  GStaticMutex lock; // protects total, last and rate
+  gint64 total;
+  gint64 last;
   int rate;
-  guint64 total;
   char isreg;
 };
 
-#define ratecalc_add(rc, b) g_atomic_int_add(&((rc)->counter), b)
+#define ratecalc_add(rc, b) do {\
+    g_static_mutex_lock(&((rc)->lock));\
+    (rc)->total += b;\
+    g_static_mutex_unlock(&((rc)->lock));\
+  } while(0)
 
 #define ratecalc_reset(rc) do {\
-    g_atomic_int_set(&((rc)->counter), 0);\
-    (rc)->rate = (rc)->total = 0;\
+    g_static_mutex_lock(&((rc)->lock));\
+    (rc)->total = (rc)->last = (rc)->rate = 0;\
+    g_static_mutex_unlock(&((rc)->lock));\
   } while(0)
 
 #define ratecalc_init(rc) do {\
+    g_static_mutex_init(&((rc)->lock));\
     ratecalc_unregister(rc);\
     ratecalc_reset(rc);\
   } while(0)
@@ -883,28 +890,42 @@ struct ratecalc {
     (rc)->isreg = (rc)->rate = 0;\
   } while(0)
 
-#define ratecalc_get(rc) ((rc)->rate)
-
-#define ratecalc_calc() do {\
-    GSList *n; int cur; struct ratecalc *rc;\
-    for(n=ratecalc_list; n; n=n->next) {\
-      rc = n->data;\
-      do {\
-        cur = g_atomic_int_get(&(rc->counter));\
-      } while(!g_atomic_int_compare_and_exchange(&(rc->counter), cur, 0));\
-      rc->total += cur;\
-      rc->rate = cur + ((rc->rate - cur) / 2);\
-    }\
-  } while(0)
-
 #endif
 
 GSList *ratecalc_list = NULL;
 
 
+int ratecalc_rate(struct ratecalc *rc) {
+  g_static_mutex_lock(&rc->lock);
+  int r = rc->rate;
+  g_static_mutex_unlock(&rc->lock);
+  return r;
+}
+
+
+gint64 ratecalc_total(struct ratecalc *rc) {
+  g_static_mutex_lock(&rc->lock);
+  gint64 r = rc->total;
+  g_static_mutex_unlock(&rc->lock);
+  return r;
+}
+
+
+void ratecalc_calc() {
+  GSList *n;
+  for(n=ratecalc_list; n; n=n->next) {
+    struct ratecalc *rc = n->data;
+    g_static_mutex_lock(&rc->lock);
+    gint64 diff = rc->total - rc->last;
+    rc->rate = diff + ((rc->rate - diff) / 2);
+    rc->last = rc->total;
+    g_static_mutex_unlock(&rc->lock);
+  }
+}
+
 // calculates an ETA and formats it into a "?d ?h ?m ?s" thing
 char *ratecalc_eta(struct ratecalc *rc, guint64 left) {
-  int sec = left / MAX(1, ratecalc_get(rc));
+  int sec = left / MAX(1, ratecalc_rate(rc));
   return sec > 356*24*3600 ? "-" : str_formatinterval(sec);
 }
 

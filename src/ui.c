@@ -971,7 +971,7 @@ static void ui_conn_draw_row(struct ui_listing *list, GSequenceIter *iter, int r
   if(cc->timeout_src)
     mvaddstr(row, 50, "     -");
   else
-    mvprintw(row, 50, "%6d", ratecalc_get(cc->dl ? cc->net->rate_in : cc->net->rate_out)/1024);
+    mvprintw(row, 50, "%6d", ratecalc_rate(cc->dl ? cc->net->rate_in : cc->net->rate_out)/1024);
 
   if(cc->err) {
     mvaddstr(row, 58, "Disconnected: ");
@@ -1025,8 +1025,8 @@ static void ui_conn_draw_details(int l) {
     cc->state == CCS_HANDSHAKE ? "Handshake" :
     cc->state == CCS_IDLE      ? "Idle" : cc->dl ? "Downloading" : "Uploading");
   // line 3
-  mvprintw(l+3, 13, "%d KiB/s (%s)", ratecalc_get(cc->net->rate_out)/1024, str_formatsize(cc->net->rate_out->total));
-  mvprintw(l+3, 47, "%d KiB/s (%s)", ratecalc_get(cc->net->rate_in)/1024, str_formatsize(cc->net->rate_in->total));
+  mvprintw(l+3, 13, "%d KiB/s (%s)", ratecalc_rate(cc->net->rate_out)/1024, str_formatsize(ratecalc_total(cc->net->rate_out)));
+  mvprintw(l+3, 47, "%d KiB/s (%s)", ratecalc_rate(cc->net->rate_in)/1024, str_formatsize(ratecalc_total(cc->net->rate_in)));
   // size / offset / chunk (line 4/5/6)
   mvaddstr(l+4, 13, cc->last_size ? str_formatsize(cc->last_size) : "-");
   mvaddstr(l+5, 13, cc->last_size ? str_formatsize(cc->last_offset) : "-");
@@ -2497,8 +2497,8 @@ static void ui_draw_status() {
     mvaddstr(winrows-1, 0, "[Refreshing share]");
   else if(fl_hash_queue && g_hash_table_size(fl_hash_queue))
     mvprintw(winrows-1, 0, "[Hashing: %d / %s / %.2f MiB/s]",
-      g_hash_table_size(fl_hash_queue), str_formatsize(fl_hash_queue_size), ((float)ratecalc_get(&fl_hash_rate))/(1024.0f*1024.0f));
-  mvprintw(winrows-1, wincols-37, "[U/D:%6d/%6d KiB/s]", ratecalc_get(&net_out)/1024, ratecalc_get(&net_in)/1024);
+      g_hash_table_size(fl_hash_queue), str_formatsize(fl_hash_queue_size), ((float)ratecalc_rate(&fl_hash_rate))/(1024.0f*1024.0f));
+  mvprintw(winrows-1, wincols-37, "[U/D:%6d/%6d KiB/s]", ratecalc_rate(&net_out)/1024, ratecalc_rate(&net_in)/1024);
   mvprintw(winrows-1, wincols-11, "[S:%3d/%3d]", cc_slots_in_use(NULL), var_get_int(0, VAR_slots));
 
   ui_m_updated = FALSE;

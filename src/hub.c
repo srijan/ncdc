@@ -605,7 +605,7 @@ void hub_send_nfo(struct hub *hub) {
   gboolean sup_tls;
 
   desc = var_get(hub->id, VAR_description);
-  conn = var_get(hub->id, VAR_connection);
+  conn = var_get_int(0, VAR_upload_rate) ? g_strdup_printf("%d KiB/s", var_get_int(0, VAR_upload_rate)/1024) : var_get(hub->id, VAR_connection);
   mail = var_get(hub->id, VAR_email);
 
   h_norm = h_reg = h_op = 0;

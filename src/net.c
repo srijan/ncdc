@@ -308,10 +308,12 @@ static void recv_thread(gpointer dat, gpointer udat) {
 
   int total = g_atomic_int_get(&c->n->recv_left);
   int left = total;
-  int r = 0, len;
+  int r = 0, len, canrd;
 
   while(!c->err && left > 0) {
-    r = g_input_stream_read(c->in, buf, MIN(left, NET_DL_BUF), c->can, &c->err);
+    if((canrd = ratecalc_request(c->n->rate_in, c->can)) <= 0)
+      break;
+    r = g_input_stream_read(c->in, buf, MIN(canrd, MIN(left, NET_DL_BUF)), c->can, &c->err);
     if(r < 0)
       break;
 

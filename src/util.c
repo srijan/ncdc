@@ -938,10 +938,13 @@ gint64 ratecalc_total(struct ratecalc *rc) {
 void ratecalc_calc() {
   GSList *n;
   // Bytes allocated to each class
-  int maxburst[RCC_MAX+1] = {INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX};
-  maxburst[RCC_UP] = var_get_int(0, VAR_upload_rate);
-  if(maxburst[RCC_UP] == 0)
-    maxburst[RCC_UP] = INT_MAX;
+  int maxburst[RCC_MAX+1] = {};
+  maxburst[RCC_UP]   = var_get_int(0, VAR_upload_rate);
+  maxburst[RCC_DOWN] = var_get_int(0, VAR_download_rate);
+  int i;
+  for(i=0; i<=RCC_MAX; i++)
+    if(!maxburst[i])
+      maxburst[i] = INT_MAX;
 
   int left[RCC_MAX+1]; // Number of bytes left to distribute
   int nums[RCC_MAX+1] = {}; // Number of rc structs with burst < max
@@ -970,7 +973,7 @@ void ratecalc_calc() {
 
   // Pass 2..i+1: distribute bandwidth from left[] among the ratecalc structures.
   // (The i variable is to limit the number of passes, otherwise it easily gets into an infinite loop)
-  int i = 3;
+  i = 3;
   while(i--) {
     int bwp[RCC_MAX+1] = {}; // average bandwidth-per-item
     gboolean c = FALSE;

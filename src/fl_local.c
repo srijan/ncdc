@@ -46,7 +46,7 @@ static GThreadPool *fl_hash_pool;
 GHashTable            *fl_hash_queue = NULL; // set of files-to-hash
 guint64                fl_hash_queue_size = 0;
 static struct fl_list *fl_hash_cur = NULL;   // most recent file initiated for hashing
-static int             fl_hash_reset = 0;    // increased when fl_hash_cur is removed from the queue
+static GCancellable   *fl_hash_reset = NULL; // when fl_hash_cur is removed from the queue (to stop current hash operation)
 struct ratecalc        fl_hash_rate;
 
 #define TTH_BUFSIZE (512*1024)
@@ -417,7 +417,7 @@ struct fl_hash_args {
   time_t lastmod;    // set by hash thread
   gint64 id;         // set by hash thread
   gdouble time;      // set by hash thread
-  int resetnum;      // used by hash thread to validate that *file is still in the queue
+  GCancellable *can; // used by hash thread to validate that *file is still in the queue
 };
 
 // Maximum number of levels, including root (level 0).  The ADC docs specify
@@ -459,8 +459,11 @@ struct fl_hash_args {
     if((fl)->isfile && g_hash_table_lookup(fl_hash_queue, fl)) {\
       fl_hash_queue_size -= fl->size;\
       g_hash_table_remove(fl_hash_queue, fl);\
-      if((fl) == fl_hash_cur)\
-        g_atomic_int_inc(&fl_hash_reset);\
+      if((fl) == fl_hash_cur) {\
+        g_cancellable_cancel(fl_hash_reset);\
+        g_object_unref(fl_hash_reset);\
+        fl_hash_reset = g_cancellable_new();\
+      }\
     }\
   } while(0)
 
@@ -526,7 +529,7 @@ static void fl_hash_thread(gpointer data, gpointer udata) {
     rd += r;
     fadv_purge(&adv, r);
     // no need to hash any further? quit!
-    if(g_atomic_int_get(&fl_hash_reset) != args->resetnum)
+    if(g_cancellable_is_cancelled(args->can))
       goto finish;
     // file has been modified. time to back out
     if(rd > args->filesize) {
@@ -610,7 +613,8 @@ static void fl_hash_process() {
   args->path = g_filename_from_utf8(tmp, -1, NULL, NULL, NULL);
   g_free(tmp);
   args->filesize = file->size;
-  args->resetnum = g_atomic_int_get(&fl_hash_reset);
+  args->can = fl_hash_reset;
+  g_object_ref(args->can);
   g_thread_pool_push(fl_hash_pool, args, NULL);
 }
 
@@ -628,7 +632,6 @@ static gboolean fl_hash_done(gpointer dat) {
 
   if(args->err) {
     ui_mf(ui_main, UIP_MED, "Error hashing \"%s\": %s", args->path, args->err->message);
-    g_error_free(args->err);
     goto fl_hash_done_f;
   }
 
@@ -641,7 +644,10 @@ static gboolean fl_hash_done(gpointer dat) {
   fl_needflush = TRUE;
 
 fl_hash_done_f:
+  if(args->err)
+    g_error_free(args->err);
   g_free(args->path);
+  g_object_unref(args->can);
   g_free(args);
   // Hash next file in the queue
   fl_hash_process();
@@ -959,6 +965,7 @@ void fl_init() {
   fl_scan_pool = g_thread_pool_new(fl_scan_thread, NULL, 1, FALSE, NULL);
   fl_hash_pool = g_thread_pool_new(fl_hash_thread, NULL, 1, FALSE, NULL);
   fl_hash_queue = g_hash_table_new(g_direct_hash, g_direct_equal);
+  fl_hash_reset = g_cancellable_new();
   // Even though the keys are the tth roots, we can just use g_int_hash. The
   // first four bytes provide enough unique data anyway.
   fl_hash_index = g_hash_table_new(g_int_hash, tiger_hash_equal);

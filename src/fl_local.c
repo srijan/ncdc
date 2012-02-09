@@ -520,12 +520,14 @@ static void fl_hash_thread(gpointer data, gpointer udata) {
   struct fadv adv;
   fadv_init(&adv, f, 0, VAR_FFC_HASH);
 
-  int r;
+  int r, nr;
   guint64 rd = 0;
   int block_cur = 0;
   guint64 block_len = 0;
 
-  while((r = read(f, buf, TTH_BUFSIZE)) > 0) {
+  if((nr = ratecalc_request(&fl_hash_rate, args->can)) <= 0)
+    goto finish;
+  while((r = read(f, buf, MIN(nr, TTH_BUFSIZE))) > 0) {
     rd += r;
     fadv_purge(&adv, r);
     // no need to hash any further? quit!
@@ -552,6 +554,8 @@ static void fl_hash_thread(gpointer data, gpointer udata) {
         block_len = 0;
       }
     }
+    if((nr = ratecalc_request(&fl_hash_rate, args->can)) <= 0)
+      goto finish;
   }
   if(r < 0) {
     g_set_error(&args->err, 1, 0, "Error reading file: %s", g_strerror(errno));

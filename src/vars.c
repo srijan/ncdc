@@ -833,6 +833,7 @@ struct var {
   V(filelist_maxage,  1,0, f_interval,     p_interval,      su_old,        NULL,         NULL,            "604800")\
   V(flush_file_cache, 1,0, f_ffc,          p_ffc,           su_ffc,        g_ffc,        s_ffc,           i_ffc())\
   V(fl_done,          0,0, NULL,           NULL,            NULL,          NULL,         NULL,            "false")\
+  V(hash_rate,        1,0, f_speed,        p_speed,         NULL,          NULL,         NULL,            NULL)\
   V(hubaddr,          0,0, NULL,           NULL,            NULL,          NULL,         NULL,            NULL)\
   V(hubkp,            0,0, NULL,           NULL,            NULL,          NULL,         NULL,            NULL)\
   V(hubname,          0,1, f_id,           p_hubname,       su_old,        NULL,         s_hubname,       NULL)\

@@ -402,6 +402,10 @@ static const struct doc_set {
   " your system for other things besides ncdc, you share large files (>100MB)"
   " and people are not constantly downloading the same file from you."
 },
+{ "hash_rate", 0, "<speed>",
+  "Maximum file hashing speed. See the `download_rate' setting for allowed"
+  " formats for this setting."
+},
 { "hubname", 1, "<string>",
   "The name of the currently opened hub tab. This is a user-assigned name, and"
   " is only used within ncdc itself. This is the same name as given to the"

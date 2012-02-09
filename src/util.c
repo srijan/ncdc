@@ -939,6 +939,7 @@ void ratecalc_calc() {
   GSList *n;
   // Bytes allocated to each class
   int maxburst[RCC_MAX+1] = {};
+  maxburst[RCC_HASH] = var_get_int(0, VAR_hash_rate);
   maxburst[RCC_UP]   = var_get_int(0, VAR_upload_rate);
   maxburst[RCC_DOWN] = var_get_int(0, VAR_download_rate);
   int i;

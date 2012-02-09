@@ -472,7 +472,7 @@ static void c_close(char *args) {
   case UIT_MSG:      ui_msg_close(tab);      break;
   case UIT_CONN:     ui_conn_close();        break;
   case UIT_FL:       ui_fl_close(tab);       break;
-  case UIT_DL:       ui_dl_close(tab);       break;
+  case UIT_DL:       ui_dl_close();          break;
   case UIT_SEARCH:   ui_search_close(tab);   break;
   default:
     g_return_if_reached();

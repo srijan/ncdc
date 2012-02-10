@@ -10,10 +10,10 @@ noinst_PROGRAMS=gendoc
 gendoc_SOURCES=gendoc.c
 
 ncdc.pod: ncdc.pod.in gendoc
-	./gendoc <$< >$@
+	$(AM_V_GEN)./gendoc <$< >$@
 
 ${man_MANS}: %.1: %.pod GNUmakefile
 if USE_POD2MAN
-	pod2man --center "ncdc manual" --release "@PACKAGE@-@VERSION@" $< >$@
+	$(AM_V_GEN)pod2man --center "ncdc manual" --release "@PACKAGE@-@VERSION@" $< >$@
 endif
 

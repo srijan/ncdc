@@ -1,5 +1,9 @@
-man_MANS=ncdc.1 ncdc-gen-cert.1 ncdc-db-upgrade.1
-EXTRA_DIST=$(man_MANS:.1=.pod) ncdc.pod.in
+man_MANS=ncdc.1 ncdc-gen-cert.1
+if HAVE_GDBM
+man_MANS+=ncdc-db-upgrade.1
+endif
+
+EXTRA_DIST=ncdc-db-upgrade.pod ncdc-gen-cert.pod ncdc.pod.in
 CLEANFILES=${man_MANS} ncdc.pod
 
 noinst_PROGRAMS=gendoc

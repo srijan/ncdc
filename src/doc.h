@@ -581,6 +581,7 @@ static const struct doc_key {
   "d            Disconnect selected connection.\n"
   "i/Return     Toggle information box.\n"
   "f            Find user in user list.\n"
+  "m            Send a PM to the selected user.\n"
   "q            Find file in download queue."
 },
 { "queue", "Download queue",

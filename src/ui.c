@@ -1103,6 +1103,26 @@ static void ui_conn_key(guint64 key) {
     else if(!ui_hub_finduser(cc->hub->tab, cc->uid, NULL, FALSE))
       ui_m(NULL, 0, "User has left the hub.");
     break;
+  case INPT_CHAR('m'): // m - /msg user
+    if(!cc)
+      ui_m(NULL, 0, "Nothing selected.");
+    else if(!cc->hub || !cc->uid)
+      ui_m(NULL, 0, "User or hub unknown.");
+    else {
+      struct ui_tab *t = g_hash_table_lookup(ui_msg_tabs, &cc->uid);
+      if(t) {
+        ui_tab_cur = g_list_find(ui_tabs, t);
+      } else {
+        struct hub_user *u = g_hash_table_lookup(hub_uids, &cc->uid);
+        if(!u) {
+          ui_m(NULL, 0, "User has left the hub.");
+        } else {
+          t = ui_msg_create(cc->hub, u);
+          ui_tab_open(t, TRUE, ui_conn);
+        }
+      }
+    }
+    break;
   case INPT_CHAR('d'): // d - disconnect
     if(!cc)
       ui_m(NULL, 0, "Nothing selected.");

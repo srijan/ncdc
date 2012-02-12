@@ -643,6 +643,7 @@ static char **file_read_lines(int fd, int skip, int n) {
 char **file_tail(const char *fn, int n) {
   if(n <= 0)
     return g_new0(char *, 1);
+  char **ret = NULL;
 
   int fd = open(fn, O_RDONLY);
   if(fd < 0)
@@ -652,29 +653,33 @@ char **file_tail(const char *fn, int n) {
   while((offset = lseek(fd, -backbytes, SEEK_END)) != (off_t)-1) {
     int lines = file_count_lines(fd);
     if(lines < 0)
-      return NULL;
+      goto done;
     // not enough lines, try seeking back further
     if(offset > 0 && lines < n)
       backbytes *= 2;
     // otherwise, if we have enough lines seek again and fetch them
     else if(lseek(fd, offset, SEEK_SET) == (off_t)-1)
-      return NULL;
-    else
-      return file_read_lines(fd, MAX(0, lines-n), MIN(lines+1, n));
+      goto done;
+    else {
+      ret = file_read_lines(fd, MAX(0, lines-n), MIN(lines+1, n));
+      goto done;
+    }
   }
 
   // offset is -1 if we reach this. we may have been seeking to a negative
   // offset, so let's try from the beginning.
   if(errno == EINVAL) {
     if(lseek(fd, 0, SEEK_SET) == (off_t)-1)
-      return NULL;
+      goto done;
     int lines = file_count_lines(fd);
     if(lines < 0 || lseek(fd, 0, SEEK_SET) == (off_t)-1)
-      return NULL;
-    return file_read_lines(fd, MAX(0, lines-n), MIN(lines+1, n));
+      goto done;
+    ret = file_read_lines(fd, MAX(0, lines-n), MIN(lines+1, n));
   }
 
-  return NULL;
+done:
+  close(fd);
+  return ret;
 }
 
 

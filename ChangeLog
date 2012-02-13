@@ -1,3 +1,15 @@
+1.8 - 2012-02-13
+	- Added bandwidth limiting (upload_rate and download_rate settings)
+	- Added hash speed limiting (hash_rate setting)
+	- Added 'm' key to connection tab to /msg selected user
+	- Disable client-to-client TLS by default
+	- Don't throw away some search results on NMDC
+	- (Partially) fixed uploading of >2GB chunks
+	- Fixed file descriptor leak when using the backlog feature
+	- Fixed crash when opening invalid filelist from search twice
+	- Use POD for the manual pages
+	- Minor typo fixes
+
 1.7 - 2011-12-30
 	- Split /set command in a /set (global) and /hset (hub)
 	- File downloads are performed in a background thread

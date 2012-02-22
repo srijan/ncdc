@@ -621,7 +621,7 @@ static void ui_userlist_calc_widths(struct ui_tab *tab, struct ui_userlist_draw_
   w -= 12;
 
   // IP column as well
-  o->cw_ip = tab->user_hide_ip ? 0 : 15;
+  o->cw_ip = tab->user_hide_ip ? 0 : 16;
   w -= o->cw_ip;
 
   // User column has a minimum size (but may grow a bit later on, so will still be counted as a column)

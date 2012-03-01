@@ -824,6 +824,7 @@ struct var {
   UI_COLORS \
   V(connection,       1,1, f_id,           p_connection,    su_old,        NULL,         s_hubinfo,       NULL)\
   V(description,      1,1, f_id,           p_id,            su_old,        NULL,         s_hubinfo,       NULL)\
+  V(disconnect_offline,1,1,f_bool,         p_bool,          su_bool,       NULL,         NULL,            "false")\
   V(download_dir,     1,0, f_id,           p_id,            su_path,       NULL,         s_dl_inc_dir,    i_dl_inc_dir(TRUE))\
   V(download_exclude, 1,0, f_id,           p_regex,         su_old,        NULL,         NULL,            NULL)\
   V(download_rate,    1,0, f_speed,        p_speed,         NULL,          NULL,         NULL,            NULL)\

@@ -378,7 +378,7 @@ struct cc {
 GSequence *cc_list;
 
 
-void cc_init_global() {
+void cc_global_init() {
   cc_expected = g_queue_new();
   cc_list = g_sequence_new(NULL);
   cc_granted = g_hash_table_new_full(g_int64_hash, g_int64_equal, g_free, NULL);
@@ -390,7 +390,7 @@ void cc_init_global() {
 
 // Calls cc_disconnect() on every open cc connection. This makes sure that any
 // current transfers are aborted and logged to the transfer log.
-void cc_close_global() {
+void cc_global_close() {
   GSequenceIter *i = g_sequence_get_begin_iter(cc_list);
   for(; !g_sequence_iter_is_end(i); i=g_sequence_iter_next(i)) {
     struct cc *c = g_sequence_get(i);
@@ -398,6 +398,24 @@ void cc_close_global() {
       cc_disconnect(c);
   }
 }
+
+
+// Should be called periodically. Walks through the list of opened connections
+// and checks that we're not connected to someone who's not online on any hubs.
+// Closes the connection otherwise.
+// I suspect that this is more efficient than checking with the cc list every
+// time someone joins/quits a hub.
+void cc_global_onlinecheck() {
+  GSequenceIter *i = g_sequence_get_begin_iter(cc_list);
+  for(; !g_sequence_iter_is_end(i); i=g_sequence_iter_next(i)) {
+    struct cc *c = g_sequence_get(i);
+    if((c->state == CCS_IDLE || c->state == CCS_TRANSFER) // idle or transfer mode
+        && !g_hash_table_lookup(hub_uids, &c->uid) // user offline
+        && var_get_bool(c->hub?c->hub->id:0, VAR_disconnect_offline)) // 'disconnect_offline' enabled
+      cc_disconnect(c);
+  }
+}
+
 
 
 // When a hub tab is closed (not just disconnected), make sure all hub fields

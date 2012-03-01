@@ -345,6 +345,11 @@ static const struct doc_set {
 { "description", 1, "<string>",
   "A short public description that will be displayed in the user list of a hub."
 },
+{ "disconnect_offline", 1, "<boolean>",
+  "Automatically disconnect any upload or download transfers when a user leaves"
+  " the hub, or when you leave the hub. Setting this to `true' ensures that you"
+  " are only connected with people who are online on the same hubs as you are."
+},
 { "download_dir", 0, "<path>",
   "The directory where finished downloads are moved to. Finished downloads are"
   " by default stored in <session directory>/dl/. It is possible to set this to"

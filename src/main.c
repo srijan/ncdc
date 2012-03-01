@@ -169,6 +169,9 @@ static gboolean one_second_timer(gpointer dat) {
     strcpy(pday, cday);
   }
 
+  // Disconnect offline users
+  cc_global_onlinecheck();
+
   // And draw the UI
   ui_draw();
   return TRUE;
@@ -420,7 +423,7 @@ int main(int argc, char **argv) {
   // Init more stuff
   hub_init_global();
   net_init_global();
-  cc_init_global();
+  cc_global_init();
   dl_init_global();
   ui_cmdhist_init("history");
   ui_init();
@@ -480,7 +483,7 @@ int main(int argc, char **argv) {
     fflush(stdout);
   }
   ui_cmdhist_close();
-  cc_close_global();
+  cc_global_close();
   fl_flush(NULL);
   dl_close_global();
   db_close();

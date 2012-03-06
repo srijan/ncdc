@@ -178,7 +178,7 @@ static gboolean s_active_conf(guint64 hub, const char *key, const char *val, GEr
   if(!val && !hub && strcmp(key, "active_ip") == 0)
     var_set_bool(0, VAR_active, FALSE);
   if(!hub)
-    cc_listen_start();
+    listen_start();
   else
     hub_global_nfochange();
   return TRUE;

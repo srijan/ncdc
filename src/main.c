@@ -452,7 +452,7 @@ int main(int argc, char **argv) {
     g_error("Can't setup SIGUSR1: %s", g_strerror(errno));
 
   fl_init();
-  cc_listen_start();
+  listen_start();
   if(auto_open)
     open_autoconnect();
 

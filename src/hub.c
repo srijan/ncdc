@@ -109,7 +109,7 @@ struct hub {
   unsigned char nfo_slots, nfo_h_norm, nfo_h_reg, nfo_h_op;
   guint64 nfo_share;
   guint32 nfo_ip4;
-  unsigned short nfo_port;
+  guint16 nfo_udp_port;
   gboolean nfo_sup_tls;
 
   // userlist fetching detection
@@ -503,20 +503,21 @@ void hub_opencc(struct hub *hub, struct hub_user *u) {
   if(hub->adc)
     g_snprintf(token, 19, "%"G_GUINT32_FORMAT, g_random_int());
 
-  gboolean wanttls = var_get_int(hub->id, VAR_tls_policy) == VAR_TLSP_PREFER ? TRUE : FALSE;
-  gboolean cantls = wanttls && u->hastls;
-  char *adcproto = !cantls ? "ADC/1.0" : u->hasadc0 ? "ADCS/0.10" : "ADCS/1.0";
+  guint16 tlsport = var_get_int(hub->id, VAR_tls_policy) == VAR_TLSP_PREFER ? listen_hub_tls(hub->id) : 0;
+  guint16 tcpport = listen_hub_tcp(hub->id);
+  gboolean usetls = tlsport && u->hastls;
+  char *adcproto = !usetls ? "ADC/1.0" : u->hasadc0 ? "ADCS/0.10" : "ADCS/1.0";
 
   // we're active, send CTM
-  if(var_get_bool(hub->id, VAR_active)) {
-    int port = cantls ? cc_listen_port+1 : cc_listen_port;
+  if(tcpport) {
+    int port = usetls ? tlsport : tcpport;
     if(hub->adc) {
       GString *c = adc_generate('D', ADCC_CTM, hub->sid, u->sid);
       g_string_append_printf(c, " %s %d %s", adcproto, port, token);
       net_send(hub->net, c->str);
       g_string_free(c, TRUE);
     } else
-      net_sendf(hub->net, "$ConnectToMe %s %s:%d%s", u->name_hub, var_get(hub->id, VAR_active_ip), port, cantls ? "S" : "");
+      net_sendf(hub->net, "$ConnectToMe %s %s:%d%s", u->name_hub, ip4_unpack(listen_hub_ip(hub->id)), port, usetls ? "S" : "");
 
   // we're passive, send RCM
   } else {
@@ -539,7 +540,7 @@ void hub_search(struct hub *hub, struct search_q *q) {
   if(hub->adc) {
     // TODO: use FSCH to only get results from active users when we are passive?
     GString *cmd = adc_generate('B', ADCC_SCH, hub->sid, 0);
-    if(var_get_bool(hub->id, VAR_active))
+    if(listen_hub_active(hub->id))
       g_string_append_printf(cmd, " TO%"G_GUINT64_FORMAT, hub->id);
     if(q->type == 9) {
       char tth[40] = {};
@@ -565,8 +566,9 @@ void hub_search(struct hub *hub, struct search_q *q) {
 
   // NMDC
   } else {
-    char *dest = var_get_bool(hub->id, VAR_active)
-      ? g_strdup_printf("%s:%d", var_get(hub->id, VAR_active_ip), cc_listen_port)
+    guint16 udpport = listen_hub_udp(hub->id);
+    char *dest = udpport
+      ? g_strdup_printf("%s:%d", ip4_unpack(listen_hub_ip(hub->id)), udpport)
       : g_strdup_printf("Hub:%s", hub->nick_hub);
     if(q->type == 9) {
       char tth[40] = {};
@@ -601,7 +603,7 @@ void hub_send_nfo(struct hub *hub) {
   unsigned char slots, h_norm, h_reg, h_op;
   guint64 share;
   guint32 ip4;
-  unsigned short port;
+  guint16 udp_port;
   gboolean sup_tls;
 
   desc = var_get(hub->id, VAR_description);
@@ -628,14 +630,14 @@ void hub_send_nfo(struct hub *hub) {
       h_norm++;
   }
   slots = var_get_int(0, VAR_slots);
-  ip4 = var_get_bool(hub->id, VAR_active) ? ip4_pack(var_get(hub->id, VAR_active_ip)) : 0;
-  port = var_get_bool(hub->id, VAR_active) ? cc_listen_port : 0;
+  ip4 = listen_hub_ip(hub->id);
+  udp_port = listen_hub_udp(hub->id);
   share = fl_local_list_size;
-  sup_tls = var_get_int(hub->id, VAR_tls_policy) == VAR_TLSP_DISABLE ? FALSE : TRUE;
+  sup_tls = !!listen_hub_tcp(hub->id);
 
   // check whether we need to make any further effort
   if(hub->nick_valid && streq(desc) && streq(conn) && streq(mail) && eq(slots)
-      && eq(h_norm) && eq(h_reg) && eq(h_op) && eq(share) && eq(ip4) && eq(port) && beq(sup_tls))
+      && eq(h_norm) && eq(h_reg) && eq(h_op) && eq(share) && eq(ip4) && eq(udp_port) && beq(sup_tls))
     return;
 
   char *nfo;
@@ -660,9 +662,9 @@ void hub_send_nfo(struct hub *hub) {
         ip4 && sup_tls ? "," : "",
         sup_tls ? "ADC0" : "");
     }
-    if((f || !eq(port))) {
-      if(port)
-        g_string_append_printf(cmd, " U4%d", port);
+    if((f || !eq(udp_port))) {
+      if(udp_port)
+        g_string_append_printf(cmd, " U4%d", udp_port);
       else
         g_string_append(cmd, " U4");
     }
@@ -714,7 +716,7 @@ void hub_send_nfo(struct hub *hub) {
   hub->nfo_h_op = h_op;
   hub->nfo_share = share;
   hub->nfo_ip4 = ip4;
-  hub->nfo_port = port;
+  hub->nfo_udp_port = udp_port;
   hub->nfo_sup_tls = sup_tls;
 }
 
@@ -897,7 +899,7 @@ static void adc_handle(struct hub *hub, char *msg) {
     return;
 
   int feats[2] = {};
-  if(var_get_bool(hub->id, VAR_active))
+  if(listen_hub_active(hub->id))
     feats[0] = ADC_DFCC("TCP4");
 
   adc_parse(msg, &cmd, feats, &err);
@@ -1048,14 +1050,14 @@ static void adc_handle(struct hub *hub, char *msg) {
   case ADCC_RCM:
     if(cmd.argc < 2 || cmd.type != 'D' || cmd.dest != hub->sid)
       g_warning("Invalid message from %s: %s", net_remoteaddr(hub->net), msg);
-    else if(var_get_int(hub->id, VAR_tls_policy) == VAR_TLSP_DISABLE ? !is_adc_proto(cmd.argv[0]) : !is_valid_proto(cmd.argv[0])) {
+    else if(!listen_hub_tls(hub->id) ? !is_adc_proto(cmd.argv[0]) : !is_valid_proto(cmd.argv[0])) {
       GString *r = adc_generate('D', ADCC_STA, hub->sid, cmd.source);
       g_string_append(r, " 141 Unknown\\protocol");
       adc_append(r, "PR", cmd.argv[0]);
       adc_append(r, "TO", cmd.argv[1]);
       net_send(hub->net, r->str);
       g_string_free(r, TRUE);
-    } else if(!var_get_bool(hub->id, VAR_active)) {
+    } else if(!listen_hub_active(hub->id)) {
       GString *r = adc_generate('D', ADCC_STA, hub->sid, cmd.source);
       g_string_append(r, " 142 Not\\sactive");
       adc_append(r, "PR", cmd.argv[0]);
@@ -1069,7 +1071,7 @@ static void adc_handle(struct hub *hub, char *msg) {
       else {
         GString *r = adc_generate('D', ADCC_CTM, hub->sid, cmd.source);
         adc_append(r, NULL, cmd.argv[0]);
-        g_string_append_printf(r, " %d", is_adcs_proto(cmd.argv[0]) ? cc_listen_port+1 : cc_listen_port);
+        g_string_append_printf(r, " %d", is_adcs_proto(cmd.argv[0]) ? listen_hub_tls(hub->id) : listen_hub_tcp(hub->id));
         adc_append(r, NULL, cmd.argv[1]);
         net_send(hub->net, r->str);
         g_string_free(r, TRUE);
@@ -1466,13 +1468,14 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
       g_warning("Received a $RevConnectToMe for someone else (to %s from %s)", me, other);
     else if(!u)
       g_message("Received a $RevConnectToMe from someone not on the hub.");
-    else if(var_get_bool(hub->id, VAR_active)) {
+    else if(listen_hub_active(hub->id)) {
       // Unlike with ADC, the client sending the $RCTM can not indicate it
       // wants to use TLS or not, so the decision is with us. Let's require
       // tls_policy to be PREFER here.
-      int usetls = u->hastls && var_get_int(hub->id, VAR_tls_policy) == VAR_TLSP_PREFER;
-      net_sendf(hub->net, "$ConnectToMe %s %s:%d%s", other, var_get(hub->id, VAR_active_ip),
-        usetls ? cc_listen_port+1 : cc_listen_port, usetls ? "S" : "");
+      guint16 tlsport = listen_hub_tls(hub->id);
+      int usetls = u->hastls && tlsport && var_get_int(hub->id, VAR_tls_policy) == VAR_TLSP_PREFER;
+      net_sendf(hub->net, "$ConnectToMe %s %s:%d%s", other, ip4_unpack(listen_hub_ip(hub->id)),
+        usetls ? tlsport : listen_hub_tcp(hub->id), usetls ? "S" : "");
       cc_expect_add(hub, u, NULL, FALSE);
     } else
       g_message("Received a $RevConnectToMe, but we're not active.");
@@ -1490,8 +1493,8 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
     char *type = g_match_info_fetch(nfo, 5);
     char *query = g_match_info_fetch(nfo, 6);
     char test[40] = {};
-    if(var_get_bool(hub->id, VAR_active))
-      g_snprintf(test, 40, "%s:%d", var_get(hub->id, VAR_active_ip), cc_listen_port);
+    if(listen_hub_active(hub->id))
+      g_snprintf(test, 40, "%s:%d", ip4_unpack(listen_hub_ip(hub->id)), listen_hub_udp(hub->id));
     if(strncmp(from, "Hub:", 4) == 0 ? strcmp(from+4, hub->nick_hub) != 0 : strcmp(from, test) != 0)
       nmdc_search(hub, from, sizerestrict[0] == 'F' ? -2 : ismax[0] == 'T' ? -1 : 1, g_ascii_strtoull(size, NULL, 10), type[0]-'0', query);
     g_free(from);

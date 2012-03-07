@@ -26,13 +26,39 @@
 #include "ncdc.h"
 
 
-guint16 cc_listen_port = 0;   // Port used for both UDP and TCP (TODO: remove / make static)
-
 static GSocketListener *listen = NULL;     // TCP and TLS listen object. NULL if we aren't active.
 static GSocket         *listen_udp = NULL; // UDP listen socket.
 
+static guint16 listen_port = 0;   // Port used for both UDP and TCP
 static GCancellable *listen_tcp_can = NULL;
 static int listen_udp_src = 0;
+
+
+// Public interface to fetch current listen configuration
+// (TODO: These should actually use hub-specific configuration)
+
+gboolean listen_hub_active(guint64 hub) {
+  return !!listen;
+}
+
+// These all returns 0 if passive or disabled
+guint32 listen_hub_ip(guint64 hub) {
+  listen_hub_active(hub) ? ip4_pack(var_get(hub, VAR_active_ip)) : 0;
+}
+
+guint16 listen_hub_tcp(guint64 hub) {
+  return listen_port;
+}
+
+guint16 listen_hub_tls(guint64 hub) {
+  return var_get_int(hub, VAR_tls_policy) == VAR_TLSP_DISABLE ? 0 : listen_port+1;
+}
+
+guint16 listen_hub_udp(guint64 hub) {
+  return listen_port;
+}
+
+
 
 
 static void listen_stop() {
@@ -266,14 +292,13 @@ gboolean listen_start() {
   // set global variables
   listen = tcp;
   listen_udp = udp;
-  cc_listen_port = port;
+  listen_port = port;
 
   if(db_certificate)
-    ui_mf(ui_main, 0, "Listening on TCP+UDP port %d and TCP port %d, remote IP is %s.", cc_listen_port, cc_listen_port+1, var_get(0, VAR_active_ip));
+    ui_mf(ui_main, 0, "Listening on TCP+UDP port %d and TCP port %d, remote IP is %s.", listen_port, listen_port+1, var_get(0, VAR_active_ip));
   else
-    ui_mf(ui_main, 0, "Listening on TCP+UDP port %d, remote IP is %s.", cc_listen_port, var_get(0, VAR_active_ip));
+    ui_mf(ui_main, 0, "Listening on TCP+UDP port %d, remote IP is %s.", listen_port, var_get(0, VAR_active_ip));
   hub_global_nfochange();
   return TRUE;
 }
-
 

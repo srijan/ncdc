@@ -550,6 +550,7 @@ struct search_r *search_parse_nmdc(struct hub *hub, char *msg) {
     *tmp = 0;
 
   // For active search results: figure out the hub
+  // TODO: Use the hub list associated with the incoming port of listen.c?
   if(!hub) {
     tmp = strchr(hubaddr, ':') ? g_strdup(hubaddr) : g_strdup_printf("%s:411", hubaddr);
     int colon = strchr(tmp, ':') - tmp;

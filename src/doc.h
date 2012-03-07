@@ -254,8 +254,8 @@ static const struct doc_set {
 } doc_sets[] = {
 
 { "active", 0, "<boolean>",
-  "Enables or disables active mode. Make sure to set `active_ip' and"
-  " `active_port' before enabling active mode."
+  "Enables or disables active mode. Make sure to set `active_ip' before"
+  " enabling active mode."
 },
 { "active_bind", 0, "<string>",
   "IP address to bind to in active mode. When unset, ncdc will bind to all"
@@ -265,17 +265,14 @@ static const struct doc_set {
   "Your public IP address for use in active mode. It is important that other"
   " clients can reach you using this IP address. If you connect to a hub on the"
   " internet, this should be your internet (WAN) IP. Likewise, if you connect"
-  " to a hub on your LAN, this should be your LAN IP.\n\n"
-  "Unlike the other connection-related settings, this can be changed on a"
-  " per-hub basis, allowing you to have a different public IP address per hub."
+  " to a hub on your LAN, this should be your LAN IP."
 },
 { "active_port", 0, "<integer>",
   "The listen port for incoming connections in active mode. Set to `0' to"
   " automatically assign a random port. If TLS support is available, another"
-  " TCP port will be opened on the configured port + 1. Ncdc will tell you"
-  " exactly on which ports it is listening for incoming packets. If you are"
-  " behind a router or firewall, make sure that you have configured it to"
-  " forward and allow these ports."
+  " TCP port will be opened on the configured port + 1. If you are behind a"
+  " router or firewall, make sure that you have configured it to forward and"
+  " allow these ports."
 },
 { "autoconnect", 1, "<boolean>",
   "Set to true to automatically connect to the current hub when ncdc starts up."

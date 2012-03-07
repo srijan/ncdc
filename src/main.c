@@ -267,6 +267,7 @@ static void open_autoconnect() {
   for(hub=hubs; *hub; hub++)
     if(var_get_bool(db_vars_hubid(*hub), VAR_autoconnect))
       ui_tab_open(ui_hub_create(*hub+1, TRUE), FALSE, NULL);
+  listen_refresh();
   g_strfreev(hubs);
 }
 
@@ -423,6 +424,7 @@ int main(int argc, char **argv) {
   // Init more stuff
   hub_init_global();
   net_init_global();
+  listen_global_init();
   cc_global_init();
   dl_init_global();
   ui_cmdhist_init("history");
@@ -452,7 +454,6 @@ int main(int argc, char **argv) {
     g_error("Can't setup SIGUSR1: %s", g_strerror(errno));
 
   fl_init();
-  listen_start();
   if(auto_open)
     open_autoconnect();
 

@@ -748,7 +748,7 @@ void base32_decode(const char *from, char *to) {
 
 guint32 ip4_pack(const char *str) {
   unsigned char ipraw[4];
-  if(sscanf(str, "%hhu.%hhu.%hhu.%hhu", ipraw, ipraw+1, ipraw+2, ipraw+3) != 4)
+  if(!str || sscanf(str, "%hhu.%hhu.%hhu.%hhu", ipraw, ipraw+1, ipraw+2, ipraw+3) != 4)
     return 0;
   guint32 ip;
   memcpy(&ip, ipraw, 4); // ip is now in network byte order

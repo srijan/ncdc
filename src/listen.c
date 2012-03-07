@@ -26,77 +26,114 @@
 #include "ncdc.h"
 
 
-static GSocketListener *listen = NULL;     // TCP and TLS listen object. NULL if we aren't active.
-static GSocket         *listen_udp = NULL; // UDP listen socket.
+#define LBT_TLS 0
+#define LBT_UDP 1
+#define LBT_TCP 2
 
-static guint16 listen_port = 0;   // Port used for both UDP and TCP
-static GCancellable *listen_tcp_can = NULL;
-static int listen_udp_src = 0;
+// port + ip4 are "cached" for convenience.
+struct listen_bind {
+  guint16 type; // LBT_*
+  guint16 port;
+  guint32 ip4;
+  int src; // glib event source
+  GSocket *sock;
+  GSList *hubs; // hubs that use this bind
+};
+
+
+struct listen_hub_bind {
+  guint64 hubid;
+  struct listen_bind *tcp, *udp, *tls;
+  guint32 ip4; // public IP (stored here to allow it to be different from the active_ip setting)
+};
+
+
+static GList      *binds     = NULL; // List of currently used binds
+static GHashTable *binds_hub = NULL; // Map of &hubid to listen_hub_bind
+
 
 
 // Public interface to fetch current listen configuration
-// (TODO: These should actually use hub-specific configuration)
 
 gboolean listen_hub_active(guint64 hub) {
-  return !!listen;
+  struct listen_hub_bind *b = g_hash_table_lookup(binds_hub, &hub);
+  return b && b->tcp;
 }
 
 // These all returns 0 if passive or disabled
 guint32 listen_hub_ip(guint64 hub) {
-  listen_hub_active(hub) ? ip4_pack(var_get(hub, VAR_active_ip)) : 0;
+  struct listen_hub_bind *b = g_hash_table_lookup(binds_hub, &hub);
+  return b && b->tcp ? b->ip4 : 0;
 }
 
 guint16 listen_hub_tcp(guint64 hub) {
-  return listen_port;
+  struct listen_hub_bind *b = g_hash_table_lookup(binds_hub, &hub);
+  return b && b->tcp ? b->tcp->port : 0;
 }
 
 guint16 listen_hub_tls(guint64 hub) {
-  return var_get_int(hub, VAR_tls_policy) == VAR_TLSP_DISABLE ? 0 : listen_port+1;
+  struct listen_hub_bind *b = g_hash_table_lookup(binds_hub, &hub);
+  return b && b->tls ? b->tls->port : 0;
 }
 
 guint16 listen_hub_udp(guint64 hub) {
-  return listen_port;
+  struct listen_hub_bind *b = g_hash_table_lookup(binds_hub, &hub);
+  return b && b->udp ? b->udp->port : 0;
 }
 
 
 
+void listen_global_init() {
+  binds_hub = g_hash_table_new_full(g_int64_hash, g_int64_equal, NULL, g_free);
+}
 
+
+// Closes all listen sockets and clears *binds and *binds_hub.
 static void listen_stop() {
-  if(!listen)
-    return;
-
-  g_cancellable_cancel(listen_tcp_can);
-  g_object_unref(listen_tcp_can);
-  listen_tcp_can = NULL;
-  g_socket_listener_close(listen);
-  g_object_unref(listen);
-  listen = NULL;
-
-  g_source_remove(listen_udp_src);
-  g_object_unref(listen_udp);
-  listen_udp = NULL;
+  g_debug("listen: Stopping.");
+  g_hash_table_remove_all(binds_hub);
+  GList *n, *b = binds;
+  while(b) {
+    n = b->next;
+    struct listen_bind *lb = b->data;
+    if(lb->src)
+      g_source_remove(lb->src);
+    if(lb->sock) {
+      g_socket_close(lb->sock, NULL);
+      g_object_unref(lb->sock);
+    }
+    g_slist_free(lb->hubs);
+    g_free(lb);
+    g_list_free_1(b);
+    b = n;
+  }
+  binds = NULL;
 }
 
 
-static void listen_tcp_handle(GObject *src, GAsyncResult *res, gpointer dat) {
-  GSocketListener *tcp = dat;
+static gboolean listen_tcp_handle(GSocket *sock, GIOCondition cond, gpointer dat) {
+  struct listen_bind *b = dat;
   GError *err = NULL;
-  GObject *istls = NULL;
-  GSocketConnection *s = g_socket_listener_accept_finish(G_SOCKET_LISTENER(src), res, &istls, &err);
+  GSocket *c = g_socket_accept(sock, NULL, &err);
 
-  if(!s) {
-    if(listen && err->code != G_IO_ERROR_CANCELLED && err->code != G_IO_ERROR_CLOSED) {
-      ui_mf(ui_main, 0, "Listen error: %s. Switching to passive mode.", err->message);
-      listen_stop();
-      hub_global_nfochange();
+  // handle error
+  if(!c) {
+    if(err->code == G_IO_ERROR_WOULD_BLOCK) {
+      g_error_free(err);
+      return TRUE;
     }
+    ui_mf(ui_main, 0, "TCP accept error on %s:%d: %s. Switching to passive mode.",
+      ip4_unpack(b->ip4), b->port, err->message);
+    listen_stop();
+    hub_global_nfochange();
     g_error_free(err);
-  } else {
-    cc_incoming(cc_create(NULL), s, istls ? TRUE : FALSE);
-    g_socket_listener_accept_async(listen, listen_tcp_can, listen_tcp_handle, tcp);
-    g_object_ref(tcp);
+    return FALSE;
   }
-  g_object_unref(tcp);
+
+  // Create connection
+  cc_incoming(cc_create(NULL), g_socket_connection_factory_create_connection(c), b->type == LBT_TLS);
+  g_object_unref(c);
+  return TRUE;
 }
 
 
@@ -133,17 +170,21 @@ static void listen_udp_handle_msg(char *addr, char *msg, gboolean adc) {
 
 static gboolean listen_udp_handle(GSocket *sock, GIOCondition cond, gpointer dat) {
   static char buf[5000]; // can be static, this function is only called in the main thread.
+  struct listen_bind *b = dat;
   GError *err = NULL;
   GSocketAddress *addr = NULL;
   int r = g_socket_receive_from(sock, &addr, buf, 5000, NULL, &err);
 
   // handle error
   if(r < 0) {
-    if(err->code != G_IO_ERROR_WOULD_BLOCK) {
-      ui_mf(ui_main, 0, "UDP read error: %s. Switching to passive mode.", err->message);
-      listen_stop();
-      hub_global_nfochange();
+    if(err->code == G_IO_ERROR_WOULD_BLOCK) {
+      g_error_free(err);
+      return TRUE;
     }
+    ui_mf(ui_main, 0, "UDP read error on %s:%d: %s. Switching to passive mode.",
+      ip4_unpack(b->ip4), b->port, err->message);
+    listen_stop();
+    hub_global_nfochange();
     g_error_free(err);
     return FALSE;
   }
@@ -182,123 +223,155 @@ static gboolean listen_udp_handle(GSocket *sock, GIOCondition cond, gpointer dat
 }
 
 
-static GSocket *listen_udp_create(GInetAddress *ia, int port, GError **err) {
-  GError *tmperr = NULL;
-
-  // create the socket
-  GSocket *s = g_socket_new(G_SOCKET_FAMILY_IPV4, G_SOCKET_TYPE_DATAGRAM, G_SOCKET_PROTOCOL_UDP, NULL);
-  g_socket_set_blocking(s, FALSE);
-
-  // bind to the address
-  GSocketAddress *saddr = G_SOCKET_ADDRESS(g_inet_socket_address_new(ia, port));
-  g_socket_bind(s, saddr, TRUE, &tmperr);
-  g_object_unref(saddr);
-  if(tmperr) {
-    g_propagate_error(err, tmperr);
-    g_object_unref(s);
-    return NULL;
-  }
-
-  return s;
-}
+#define bind_hub_add(lb, h) do {\
+    if((lb)->type == LBT_TCP)\
+      (h)->tcp = lb;\
+    else if((lb)->type == LBT_UDP)\
+      (h)->udp = lb;\
+    else\
+      (h)->tls = lb;\
+    (lb)->hubs = g_slist_prepend((lb)->hubs, h);\
+  } while(0)
 
 
-static GSocketListener *listen_tcp_create(GInetAddress *ia, int *port, GError **err) {
-  GSocketListener *s = g_socket_listener_new();
-  GSocketAddress *newaddr = NULL;
-
-  // TCP port
-  GSocketAddress *saddr = G_SOCKET_ADDRESS(g_inet_socket_address_new(ia, *port));
-  gboolean r = g_socket_listener_add_address(s, saddr, G_SOCKET_TYPE_STREAM, G_SOCKET_PROTOCOL_TCP, NULL, &newaddr, err);
-  g_object_unref(saddr);
-  if(!r) {
-    g_object_unref(s);
-    return NULL;
-  }
-
-  // Get effective port, in case our requested port was 0
-  *port = g_inet_socket_address_get_port(G_INET_SOCKET_ADDRESS(newaddr));
-  g_object_unref(newaddr);
-
-  // TLS port (use a bogus GCancellable object to differenciate betwen the two)
-  if(s && db_certificate) {
-    saddr = G_SOCKET_ADDRESS(g_inet_socket_address_new(ia, *port+1));
-    GCancellable *t = g_cancellable_new();
-    r = g_socket_listener_add_address(s, saddr, G_SOCKET_TYPE_STREAM, G_SOCKET_PROTOCOL_TCP, G_OBJECT(t), NULL, err);
-    g_object_unref(t);
-    g_object_unref(saddr);
-    if(!r) {
-      g_object_unref(s);
-      return NULL;
+// TODO: handle port == 0 (i.e. a randomly assigned one)
+//  A single port for every "random port"? Or use a port based on the hub id?
+static void bind_add(struct listen_hub_bind *b, int type, guint32 ip, guint16 port) {
+  g_debug("Listen: Adding %s %s:%d", type == LBT_TCP ? "TCP" : type == LBT_UDP ? "UDP" : "TLS", ip4_unpack(ip), port);
+  // First: look if we can re-use an existing bind and look for any unresolvable conflicts.
+  GList *c;
+  for(c=binds; c; c=c->next) {
+    struct listen_bind *i = c->data;
+    // Same? Just re-use.
+    if(i->type == type && (i->ip4 == ip || !i->ip4) && i->port == port) {
+      g_debug("Listen: Re-using!");
+      bind_hub_add(i, b);
+      return;
+    }
+    // Clashing IP/port but different type? conflict!
+    if(((type == LBT_TLS && i->type == LBT_TCP) || (type == LBT_TCP && i->type == LBT_TLS))
+        && i->port == port && (!i->ip4 || !ip || i->ip4 == ip)) {
+      char tmp[20];
+      strcpy(tmp, ip4_unpack(ip));
+      ui_mf(ui_main, UIP_MED, "Active configuration error: %s %s:%d conflicts with %s %s:%d. Switching to passive mode.",
+        (type==LBT_TCP?"TCP":type==LBT_UDP?"UDP":"TLS"), tmp, port,
+        (i->type==LBT_TCP?"TCP":i->type==LBT_UDP?"UDP":"TLS"), ip4_unpack(i->ip4), i->port);
+      listen_stop();
+      return;
     }
   }
-  return s;
+
+  // Create and add bind item
+  struct listen_bind *lb = g_new0(struct listen_bind, 1);
+  lb->type = type;
+  lb->ip4 = ip;
+  lb->port = port;
+  bind_hub_add(lb, b);
+
+  // Look for existing binds that should be merged.
+  GList *n;
+  for(c=binds; !lb->ip4&&c; c=n) {
+    n = c->next;
+    struct listen_bind *i = c->data;
+    if(i->port != lb->port || i->type != lb->type)
+      continue;
+    g_debug("Listen: Merging!");
+    // Move over all hubs to *lb
+    GSList *in;
+    for(in=i->hubs; in; in=in->next)
+      bind_hub_add(lb, (struct listen_hub_bind *)in->data);
+    g_slist_free(i->hubs);
+    // And remove this bind
+    g_free(i);
+    binds = g_list_delete_link(binds, c);
+  }
+
+  binds = g_list_prepend(binds, lb);
 }
 
 
-// more like a "restart()"
-gboolean listen_start() {
+static void bind_create(struct listen_bind *b) {
+  g_debug("Listen: binding %s %s:%d", b->type == LBT_TCP ? "TCP" : b->type == LBT_UDP ? "UDP" : "TLS", ip4_unpack(b->ip4), b->port);
   GError *err = NULL;
 
-  listen_stop();
-  if(!var_get_bool(0, VAR_active)) {
-    hub_global_nfochange();
-    return FALSE;
-  }
+  // Get local address object
+  GInetAddress *laddr = b->ip4
+    ? g_inet_address_new_from_string(ip4_unpack(b->ip4))
+    : g_inet_address_new_any(G_SOCKET_FAMILY_IPV4);
+  g_return_if_fail(laddr != NULL);
 
-  // can be 0, in which case it'll be randomly assigned
-  int port = var_get_int(0, VAR_active_port);
+  // create the socket
+  GSocket *s = b->type == LBT_UDP
+    ? g_socket_new(G_SOCKET_FAMILY_IPV4, G_SOCKET_TYPE_DATAGRAM, G_SOCKET_PROTOCOL_UDP, NULL)
+    : g_socket_new(G_SOCKET_FAMILY_IPV4, G_SOCKET_TYPE_STREAM, G_SOCKET_PROTOCOL_TCP, NULL);
+  g_socket_set_blocking(s, FALSE);
 
-  // local addr
-  char *bind = var_get(0, VAR_active_bind);
-  GInetAddress *laddr = NULL;
-  if(bind && *bind && !(laddr = g_inet_address_new_from_string(bind)))
-    ui_m(ui_main, 0, "Error parsing `active_bind' setting, binding to all interfaces instead.");
-  if(!laddr)
-    laddr = g_inet_address_new_any(G_SOCKET_FAMILY_IPV4);
-
-  // Open TCP listen socket (and determine the port if it was 0)
-  GSocketListener *tcp = listen_tcp_create(laddr, &port, &err);
-  if(!tcp) {
-    ui_mf(ui_main, 0, "Error creating TCP listen socket: %s", err->message);
-    g_object_unref(laddr);
-    g_error_free(err);
-    return FALSE;
-  }
-
-  // Open UDP listen socket
-  GSocket *udp = listen_udp_create(laddr, port, &err);
-  if(!udp) {
-    ui_mf(ui_main, 0, "Error creating UDP listen socket: %s", err->message);
-    g_object_unref(laddr);
-    g_object_unref(tcp);
-    g_error_free(err);
-    return FALSE;
-  }
-
+  // bind
+  GSocketAddress *saddr = G_SOCKET_ADDRESS(g_inet_socket_address_new(laddr, b->port));
+  g_socket_bind(s, saddr, TRUE, &err);
   g_object_unref(laddr);
+  g_object_unref(saddr);
 
-  // start accepting incoming TCP connections
-  listen_tcp_can = g_cancellable_new();
-  g_socket_listener_accept_async(tcp, listen_tcp_can, listen_tcp_handle, tcp);
-  g_object_ref(tcp);
+  // listen
+  if(!err && b->type != LBT_UDP)
+    g_socket_listen(s, &err);
 
-  // start receiving incoming UDP messages
-  GSource *src = g_socket_create_source(udp, G_IO_IN, NULL);
-  g_source_set_callback(src, (GSourceFunc)listen_udp_handle, NULL, NULL);
-  listen_udp_src = g_source_attach(src, NULL);
+  // Bind failed? Abandon ship! (This may be a bit extreme, but at least it
+  // avoids any other problems that may arise from a partially activated
+  // configuration).
+  if(err) {
+    ui_mf(ui_main, UIP_MED, "Error binding to %s %s:%d, %s. Switching to passive mode.",
+      b->type == LBT_UDP ? "UDP" : "TCP", ip4_unpack(b->ip4), b->port, err->message);
+    g_error_free(err);
+    listen_stop();
+  }
+  b->sock = s;
+
+  // Start accepting incoming connections or handling incoming messages
+  GSource *src = g_socket_create_source(s, G_IO_IN, NULL);
+  g_source_set_callback(src, (GSourceFunc)(b->type == LBT_UDP ? listen_udp_handle : listen_tcp_handle), b, NULL);
+  b->src = g_source_attach(src, NULL);
   g_source_unref(src);
+}
 
-  // set global variables
-  listen = tcp;
-  listen_udp = udp;
-  listen_port = port;
 
-  if(db_certificate)
-    ui_mf(ui_main, 0, "Listening on TCP+UDP port %d and TCP port %d, remote IP is %s.", listen_port, listen_port+1, var_get(0, VAR_active_ip));
-  else
-    ui_mf(ui_main, 0, "Listening on TCP+UDP port %d, remote IP is %s.", listen_port, var_get(0, VAR_active_ip));
-  hub_global_nfochange();
-  return TRUE;
+// Should be called every time a hub is opened/closed or an active_ config
+// variable has changed.
+void listen_refresh() {
+  listen_stop();
+  g_debug("listen: Refreshing");
+
+  // Walk through ui_tabs to get a list of hubs and their config
+  GList *l;
+  for(l=ui_tabs; l; l=l->next) {
+    struct ui_tab *t = l->data;
+    // We only look at hubs on which we are active
+    if(t->type != UIT_HUB || !var_get_bool(t->hub->id, VAR_active))
+      continue;
+    // Add to binds_hub
+    struct listen_hub_bind *b = g_new0(struct listen_hub_bind, 1);
+    b->hubid = t->hub->id;
+    b->ip4 = ip4_pack(var_get(b->hubid, VAR_active_ip));
+    g_hash_table_insert(binds_hub, &b->hubid, b);
+    // And add the required binds for this hub (Due to the conflict resolution in binds_add(), this is O(n^2))
+    // Note: bind_add() can call listen_stop() on error, detect this on whether binds_hub is empty or not.
+    guint32 localip = ip4_pack(var_get(b->hubid, VAR_active_bind));
+    guint16 port = var_get_int(b->hubid, VAR_active_port);
+    bind_add(b, LBT_TCP, localip, port);
+    if(!g_hash_table_size(binds_hub))
+      break;
+    bind_add(b, LBT_UDP, localip, port);
+    if(!g_hash_table_size(binds_hub))
+      break;
+    if(var_get_int(b->hubid, VAR_tls_policy) > VAR_TLSP_DISABLE) {
+      bind_add(b, LBT_TLS, localip, port ? port+1 : 0);
+      if(!g_hash_table_size(binds_hub))
+        break;
+    }
+  }
+
+  // Now walk through *binds and actually create the listen sockets
+  for(l=binds; l; binds ? (l=l->next) : (l=NULL))
+    bind_create((struct listen_bind *)l->data);
 }
 

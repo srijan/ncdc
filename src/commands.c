@@ -434,6 +434,7 @@ static void c_open(char *args) {
     if(!n) {
       tab = ui_hub_create(name, addr ? FALSE : conn);
       ui_tab_open(tab, TRUE, NULL);
+      listen_refresh();
     } else if(n != ui_tab_cur) {
       ui_tab_cur = n;
       tab = n->data;
@@ -467,7 +468,7 @@ static void c_close(char *args) {
   struct ui_tab *tab = ui_tab_cur->data;
   switch(tab->type) {
   case UIT_MAIN:     ui_m(NULL, 0, "Main tab cannot be closed."); break;
-  case UIT_HUB:      ui_hub_close(tab);      break;
+  case UIT_HUB:      ui_hub_close(tab); listen_refresh(); break;
   case UIT_USERLIST: ui_userlist_close(tab); break;
   case UIT_MSG:      ui_msg_close(tab);      break;
   case UIT_CONN:     ui_conn_close();        break;

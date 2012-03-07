@@ -177,10 +177,8 @@ static gboolean s_active_conf(guint64 hub, const char *key, const char *val, GEr
   db_vars_set(hub, key, val);
   if(!val && !hub && strcmp(key, "active_ip") == 0)
     var_set_bool(0, VAR_active, FALSE);
-  if(!hub)
-    listen_start();
-  else
-    hub_global_nfochange();
+  listen_refresh();
+  hub_global_nfochange();
   return TRUE;
 }
 
@@ -264,8 +262,8 @@ static void flags_sug(struct flag_option *o, const char *val, char **sug) {
 // active
 
 static gboolean s_active(guint64 hub, const char *key, const char *val, GError **err) {
-  if(bool_raw(val) && !var_get(0, VAR_active_ip)) {
-    g_set_error_literal(err, 1, 0, "No IP address set. Please use `/set active_ip <your_ip>' first.");
+  if(bool_raw(val) && !var_get(hub, VAR_active_ip)) {
+    g_set_error(err, 1, 0, "No IP address set. Please use `/%sset active_ip <your_ip>' first.", hub ? "h" : "");
     return FALSE;
   }
   return s_active_conf(hub, key, val, err);
@@ -812,10 +810,10 @@ struct var {
 
 // name               g h  format          parse            suggest        getraw        setraw           default/init
 #define VARS\
-  V(active,           1,0, f_bool,         p_bool,          su_bool,       NULL,         s_active,        "false")\
-  V(active_bind,      1,0, f_id,           p_ip,            su_old,        NULL,         s_active_conf,   NULL)\
+  V(active,           1,1, f_bool,         p_bool,          su_bool,       NULL,         s_active,        "false")\
+  V(active_bind,      1,1, f_id,           p_ip,            su_old,        NULL,         s_active_conf,   NULL)\
   V(active_ip,        1,1, f_id,           p_ip,            su_old,        NULL,         s_active_conf,   NULL)\
-  V(active_port,      1,0, f_int,          p_active_port,   NULL,          NULL,         s_active_conf,   NULL)\
+  V(active_port,      1,1, f_int,          p_active_port,   NULL,          NULL,         s_active_conf,   NULL)\
   V(autoconnect,      0,1, f_bool,         p_bool,          su_bool,       NULL,         NULL,            "false")\
   V(autorefresh,      1,0, f_autorefresh,  p_autorefresh,   NULL,          NULL,         NULL,            "3600")\
   V(backlog,          1,1, f_backlog,      p_backlog,       NULL,          NULL,         NULL,            "0")\

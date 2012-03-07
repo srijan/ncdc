@@ -51,6 +51,16 @@ struct listen_hub_bind {
 static GList      *binds     = NULL; // List of currently used binds
 static GHashTable *binds_hub = NULL; // Map of &hubid to listen_hub_bind
 
+// The port to use when active_port hasn't been set. Initialized to a random
+// value on startup. Note that the same port is still used for all hubs that
+// have the port set to "random". This obviously isn't very "random", but
+// avoids a change to the port every time that listen_refresh() is called.
+// Also note that this isn't necessarily a "random *free* port" such as what
+// the OS would give if you actually specify port=0, so if a port happens to be
+// chosen that is already in use, you'll get an error. (This isn't very nice...
+// Especially if the port is being used for e.g. an outgoing connection, which
+// isn't very uncommon for high ports).
+static guint16 random_tcp_port, random_udp_port, random_tls_port;
 
 
 // Public interface to fetch current listen configuration
@@ -85,6 +95,11 @@ guint16 listen_hub_udp(guint64 hub) {
 
 void listen_global_init() {
   binds_hub = g_hash_table_new_full(g_int64_hash, g_int64_equal, NULL, g_free);
+  random_tcp_port = g_random_int_range(1025, 65535);
+  do
+    random_tls_port = g_random_int_range(1025, 65535);
+  while(random_tls_port == random_tcp_port);
+  random_udp_port = g_random_int_range(1025, 65535);
 }
 
 
@@ -234,9 +249,9 @@ static gboolean listen_udp_handle(GSocket *sock, GIOCondition cond, gpointer dat
   } while(0)
 
 
-// TODO: handle port == 0 (i.e. a randomly assigned one)
-//  A single port for every "random port"? Or use a port based on the hub id?
 static void bind_add(struct listen_hub_bind *b, int type, guint32 ip, guint16 port) {
+  if(!port)
+    port = type == LBT_TCP ? random_tcp_port : type == LBT_UDP ? random_udp_port : random_tls_port;
   g_debug("Listen: Adding %s %s:%d", type == LBT_TCP ? "TCP" : type == LBT_UDP ? "UDP" : "TLS", ip4_unpack(ip), port);
   // First: look if we can re-use an existing bind and look for any unresolvable conflicts.
   GList *c;

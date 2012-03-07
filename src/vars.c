@@ -273,6 +273,8 @@ static gboolean s_active(guint64 hub, const char *key, const char *val, GError *
 // active_port
 
 static char *p_active_port(const char *val, GError **err) {
+  if(strcmp(val, "0") == 0)
+    return g_strdup(val);
   return p_int_range(val, 1024, 65535, "Port number must be between 1024 and 65535.", err);
 }
 

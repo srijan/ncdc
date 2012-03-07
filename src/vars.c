@@ -758,6 +758,7 @@ static gboolean s_tls_policy(guint64 hub, const char *key, const char *val, GErr
   char *r = flags_fmt(var_tls_policy_ops, int_raw(val));
   db_vars_set(hub, key, r[0] ? r : NULL);
   g_free(r);
+  listen_refresh();
   hub_global_nfochange();
   return TRUE;
 }

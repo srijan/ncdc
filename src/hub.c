@@ -507,10 +507,10 @@ void hub_opencc(struct hub *hub, struct hub_user *u) {
   guint16 tcpport = listen_hub_tcp(hub->id);
   gboolean usetls = tlsport && u->hastls;
   char *adcproto = !usetls ? "ADC/1.0" : u->hasadc0 ? "ADCS/0.10" : "ADCS/1.0";
+  int port = usetls ? tlsport : tcpport;
 
   // we're active, send CTM
   if(tcpport) {
-    int port = usetls ? tlsport : tcpport;
     if(hub->adc) {
       GString *c = adc_generate('D', ADCC_CTM, hub->sid, u->sid);
       g_string_append_printf(c, " %s %d %s", adcproto, port, token);
@@ -530,7 +530,7 @@ void hub_opencc(struct hub *hub, struct hub_user *u) {
       net_sendf(hub->net, "$RevConnectToMe %s %s", hub->nick_hub, u->name_hub);
   }
 
-  cc_expect_add(hub, u, hub->adc ? token : NULL, TRUE);
+  cc_expect_add(hub, u, port, hub->adc ? token : NULL, TRUE);
 }
 
 
@@ -1069,13 +1069,14 @@ static void adc_handle(struct hub *hub, char *msg) {
       if(!u)
         g_warning("RCM from user who is not on the hub (%s): %s", net_remoteaddr(hub->net), msg);
       else {
+        int port = is_adcs_proto(cmd.argv[0]) ? listen_hub_tls(hub->id) : listen_hub_tcp(hub->id);
         GString *r = adc_generate('D', ADCC_CTM, hub->sid, cmd.source);
         adc_append(r, NULL, cmd.argv[0]);
-        g_string_append_printf(r, " %d", is_adcs_proto(cmd.argv[0]) ? listen_hub_tls(hub->id) : listen_hub_tcp(hub->id));
+        g_string_append_printf(r, " %d", port);
         adc_append(r, NULL, cmd.argv[1]);
         net_send(hub->net, r->str);
         g_string_free(r, TRUE);
-        cc_expect_add(hub, u, cmd.argv[1], FALSE);
+        cc_expect_add(hub, u, port, cmd.argv[1], FALSE);
       }
     }
     break;
@@ -1474,9 +1475,10 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
       // tls_policy to be PREFER here.
       guint16 tlsport = listen_hub_tls(hub->id);
       int usetls = u->hastls && tlsport && var_get_int(hub->id, VAR_tls_policy) == VAR_TLSP_PREFER;
+      int port = usetls ? tlsport : listen_hub_tcp(hub->id);
       net_sendf(hub->net, "$ConnectToMe %s %s:%d%s", other, ip4_unpack(listen_hub_ip(hub->id)),
-        usetls ? tlsport : listen_hub_tcp(hub->id), usetls ? "S" : "");
-      cc_expect_add(hub, u, NULL, FALSE);
+        port, usetls ? "S" : "");
+      cc_expect_add(hub, u, port, NULL, FALSE);
     } else
       g_message("Received a $RevConnectToMe, but we're not active.");
     g_free(me);

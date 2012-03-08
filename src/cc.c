@@ -74,6 +74,7 @@ struct cc_expect {
   struct hub *hub;
   char *nick;   // NMDC, hub encoding. Also set on ADC, but only for debugging purposes
   guint64 uid;
+  guint16 port;
   char cid[8];  // ADC
   char *token;  // ADC
 #if TLS_SUPPORT
@@ -116,12 +117,13 @@ static gboolean cc_expect_timeout(gpointer data) {
 }
 
 
-void cc_expect_add(struct hub *hub, struct hub_user *u, char *t, gboolean dl) {
+void cc_expect_add(struct hub *hub, struct hub_user *u, guint16 port, char *t, gboolean dl) {
   struct cc_expect *e = g_slice_new0(struct cc_expect);
   e->adc = hub->adc;
   e->hub = hub;
   e->dl = dl;
   e->uid = u->uid;
+  e->port = port;
   if(e->adc) {
     e->nick = g_strdup(u->name);
     memcpy(e->cid, u->cid, 8);
@@ -148,7 +150,7 @@ static gboolean cc_expect_adc_rm(struct cc *cc) {
   GList *n;
   for(n=cc_expected->head; n; n=n->next) {
     struct cc_expect *e = n->data;
-    if(e->adc && memcmp(cc->cid, e->cid, 8) == 0 && strcmp(cc->token, e->token) == 0) {
+    if(e->adc && e->port == cc->port && memcmp(cc->cid, e->cid, 8) == 0 && strcmp(cc->token, e->token) == 0) {
       cc->uid = e->uid;
       cc->hub = e->hub;
 #if TLS_SUPPORT
@@ -171,7 +173,7 @@ static gboolean cc_expect_nmdc_rm(struct cc *cc) {
     struct cc_expect *e = n->data;
     if(cc->hub && cc->hub != e->hub)
       continue;
-    if(!e->adc && strcmp(e->nick, cc->nick_raw) == 0) {
+    if(!e->adc && e->port == cc->port && strcmp(e->nick, cc->nick_raw) == 0) {
       cc->hub = e->hub;
       cc->uid = e->uid;
       cc_expect_rm(n, cc);
@@ -287,6 +289,7 @@ struct cc {
   gboolean slot_mini : 1;
   gboolean slot_granted : 1;
   gboolean dl : 1;
+  guint16 port;
   int dir;        // (NMDC) our direction. -1 = Upload, otherwise: Download $dir
   int state;
   char cid[24];   // (ADC) only the first 8 bytes are used for checking,
@@ -1471,8 +1474,9 @@ static void handle_detectprotocol(struct net *net, char *dat, int len) {
 }
 
 
-void cc_incoming(struct cc *cc, GSocketConnection *conn, gboolean tls) {
+void cc_incoming(struct cc *cc, guint16 port, GSocketConnection *conn, gboolean tls) {
   net_setconn(cc->net, conn, tls, TRUE);
+  cc->port = port;
   cc->active = TRUE;
   cc->net->recv_datain = handle_detectprotocol;
   cc->state = CCS_HANDSHAKE;

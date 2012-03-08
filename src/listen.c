@@ -146,7 +146,7 @@ static gboolean listen_tcp_handle(GSocket *sock, GIOCondition cond, gpointer dat
   }
 
   // Create connection
-  cc_incoming(cc_create(NULL), g_socket_connection_factory_create_connection(c), b->type == LBT_TLS);
+  cc_incoming(cc_create(NULL), b->port, g_socket_connection_factory_create_connection(c), b->type == LBT_TLS);
   g_object_unref(c);
   return TRUE;
 }

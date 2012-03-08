@@ -371,15 +371,14 @@ void listen_refresh() {
     // And add the required binds for this hub (Due to the conflict resolution in binds_add(), this is O(n^2))
     // Note: bind_add() can call listen_stop() on error, detect this on whether binds_hub is empty or not.
     guint32 localip = ip4_pack(var_get(b->hubid, VAR_active_bind));
-    guint16 port = var_get_int(b->hubid, VAR_active_port);
-    bind_add(b, LBT_TCP, localip, port);
+    bind_add(b, LBT_TCP, localip, var_get_int(b->hubid, VAR_active_port));
     if(!g_hash_table_size(binds_hub))
       break;
-    bind_add(b, LBT_UDP, localip, port);
+    bind_add(b, LBT_UDP, localip, var_get_int(b->hubid, VAR_active_udp_port));
     if(!g_hash_table_size(binds_hub))
       break;
     if(var_get_int(b->hubid, VAR_tls_policy) > VAR_TLSP_DISABLE) {
-      bind_add(b, LBT_TLS, localip, port ? port+1 : 0);
+      bind_add(b, LBT_TLS, localip, var_get_int(b->hubid, VAR_active_tls_port));
       if(!g_hash_table_size(binds_hub))
         break;
     }

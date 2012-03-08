@@ -253,11 +253,11 @@ static const struct doc_set {
   char const *type, *desc;
 } doc_sets[] = {
 
-{ "active", 0, "<boolean>",
+{ "active", 1, "<boolean>",
   "Enables or disables active mode. Make sure to set `active_ip' before"
   " enabling active mode."
 },
-{ "active_bind", 0, "<string>",
+{ "active_bind", 1, "<string>",
   "IP address to bind to in active mode. When unset, ncdc will bind to all"
   " interfaces."
 },
@@ -267,12 +267,24 @@ static const struct doc_set {
   " internet, this should be your internet (WAN) IP. Likewise, if you connect"
   " to a hub on your LAN, this should be your LAN IP."
 },
-{ "active_port", 0, "<integer>",
+{ "active_port", 1, "<integer>",
   "The listen port for incoming connections in active mode. Set to `0' to"
-  " automatically assign a random port. If TLS support is available, another"
-  " TCP port will be opened on the configured port + 1. If you are behind a"
-  " router or firewall, make sure that you have configured it to forward and"
-  " allow these ports."
+  " automatically assign a random port. If TLS support is enabled, another"
+  " TCP port will be opened on the configured port + 1. See the"
+  " `active_tls_port' setting to change this. This setting is by default also"
+  " used for the UDP port, see the `active_udp_port' setting for that. If you"
+  " are behind a router or firewall, make sure that you have configured it to"
+  " forward and allow these ports."
+},
+{ "active_tls_port", 1, "<integer>",
+  "The listen port for incoming TLS connections in active mode. Defaults to the"
+  " `active_port' setting plus one, or to a random number of `active_port' is"
+  " not set. This setting has no effect when the `tls_policy' setting has been"
+  " disabled."
+},
+{ "active_udp_port", 1, "<integer>",
+  "The listen port for incoming UDP connections in active mode. Defaults to the"
+  " `active_port' setting, or to a random number of `active_port' is not set."
 },
 { "autoconnect", 1, "<boolean>",
   "Set to true to automatically connect to the current hub when ncdc starts up."

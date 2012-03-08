@@ -452,6 +452,17 @@ static void user_adc_nfo(struct hub *hub, struct hub_user *u, struct adc_cmd *cm
 
 // hub stuff
 
+// Linear search at the moment, not too efficient.
+struct hub *hub_global_byid(guint64 id) {
+  GList *l;
+  for(l=ui_tabs; l; l=l->next) {
+    struct ui_tab *t = l->data;
+    if(t->type == UIT_HUB && t->hub->id == id)
+      return t->hub;
+  }
+  return NULL;
+}
+
 
 // should be called when something changes that may affect our INF or $MyINFO
 void hub_global_nfochange() {

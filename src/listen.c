@@ -26,9 +26,13 @@
 #include "ncdc.h"
 
 
+#if INTERFACE
+
 #define LBT_TLS 0
 #define LBT_UDP 1
 #define LBT_TCP 2
+
+#define LBT_STR(x) ((x) == LBT_TLS ? "TLS" : (x) == LBT_UDP ? "UDP" : "TCP")
 
 // port + ip4 are "cached" for convenience.
 struct listen_bind {
@@ -47,9 +51,11 @@ struct listen_hub_bind {
   guint32 ip4; // public IP (stored here to allow it to be different from the active_ip setting)
 };
 
+#endif
 
-static GList      *binds     = NULL; // List of currently used binds
-static GHashTable *binds_hub = NULL; // Map of &hubid to listen_hub_bind
+
+GList      *listen_binds     = NULL; // List of currently used binds
+GHashTable *listen_hub_binds = NULL; // Map of &hubid to listen_hub_bind
 
 // The port to use when active_port hasn't been set. Initialized to a random
 // value on startup. Note that the same port is still used for all hubs that
@@ -66,35 +72,35 @@ static guint16 random_tcp_port, random_udp_port, random_tls_port;
 // Public interface to fetch current listen configuration
 
 gboolean listen_hub_active(guint64 hub) {
-  struct listen_hub_bind *b = g_hash_table_lookup(binds_hub, &hub);
+  struct listen_hub_bind *b = g_hash_table_lookup(listen_hub_binds, &hub);
   return b && b->tcp;
 }
 
 // These all returns 0 if passive or disabled
 guint32 listen_hub_ip(guint64 hub) {
-  struct listen_hub_bind *b = g_hash_table_lookup(binds_hub, &hub);
+  struct listen_hub_bind *b = g_hash_table_lookup(listen_hub_binds, &hub);
   return b && b->tcp ? b->ip4 : 0;
 }
 
 guint16 listen_hub_tcp(guint64 hub) {
-  struct listen_hub_bind *b = g_hash_table_lookup(binds_hub, &hub);
+  struct listen_hub_bind *b = g_hash_table_lookup(listen_hub_binds, &hub);
   return b && b->tcp ? b->tcp->port : 0;
 }
 
 guint16 listen_hub_tls(guint64 hub) {
-  struct listen_hub_bind *b = g_hash_table_lookup(binds_hub, &hub);
+  struct listen_hub_bind *b = g_hash_table_lookup(listen_hub_binds, &hub);
   return b && b->tls ? b->tls->port : 0;
 }
 
 guint16 listen_hub_udp(guint64 hub) {
-  struct listen_hub_bind *b = g_hash_table_lookup(binds_hub, &hub);
+  struct listen_hub_bind *b = g_hash_table_lookup(listen_hub_binds, &hub);
   return b && b->udp ? b->udp->port : 0;
 }
 
 
 
 void listen_global_init() {
-  binds_hub = g_hash_table_new_full(g_int64_hash, g_int64_equal, NULL, g_free);
+  listen_hub_binds = g_hash_table_new_full(g_int64_hash, g_int64_equal, NULL, g_free);
   random_tcp_port = g_random_int_range(1025, 65535);
   do
     random_tls_port = g_random_int_range(1025, 65535);
@@ -103,11 +109,11 @@ void listen_global_init() {
 }
 
 
-// Closes all listen sockets and clears *binds and *binds_hub.
+// Closes all listen sockets and clears *listen_binds and *listen_hub_binds.
 static void listen_stop() {
   g_debug("listen: Stopping.");
-  g_hash_table_remove_all(binds_hub);
-  GList *n, *b = binds;
+  g_hash_table_remove_all(listen_hub_binds);
+  GList *n, *b = listen_binds;
   while(b) {
     n = b->next;
     struct listen_bind *lb = b->data;
@@ -122,7 +128,7 @@ static void listen_stop() {
     g_list_free_1(b);
     b = n;
   }
-  binds = NULL;
+  listen_binds = NULL;
 }
 
 
@@ -252,10 +258,10 @@ static gboolean listen_udp_handle(GSocket *sock, GIOCondition cond, gpointer dat
 static void bind_add(struct listen_hub_bind *b, int type, guint32 ip, guint16 port) {
   if(!port)
     port = type == LBT_TCP ? random_tcp_port : type == LBT_UDP ? random_udp_port : random_tls_port;
-  g_debug("Listen: Adding %s %s:%d", type == LBT_TCP ? "TCP" : type == LBT_UDP ? "UDP" : "TLS", ip4_unpack(ip), port);
+  g_debug("Listen: Adding %s %s:%d", LBT_STR(type), ip4_unpack(ip), port);
   // First: look if we can re-use an existing bind and look for any unresolvable conflicts.
   GList *c;
-  for(c=binds; c; c=c->next) {
+  for(c=listen_binds; c; c=c->next) {
     struct listen_bind *i = c->data;
     // Same? Just re-use.
     if(i->type == type && (i->ip4 == ip || !i->ip4) && i->port == port) {
@@ -269,8 +275,7 @@ static void bind_add(struct listen_hub_bind *b, int type, guint32 ip, guint16 po
       char tmp[20];
       strcpy(tmp, ip4_unpack(ip));
       ui_mf(ui_main, UIP_MED, "Active configuration error: %s %s:%d conflicts with %s %s:%d. Switching to passive mode.",
-        (type==LBT_TCP?"TCP":type==LBT_UDP?"UDP":"TLS"), tmp, port,
-        (i->type==LBT_TCP?"TCP":i->type==LBT_UDP?"UDP":"TLS"), ip4_unpack(i->ip4), i->port);
+        LBT_STR(type), tmp, port, LBT_STR(i->type), ip4_unpack(i->ip4), i->port);
       listen_stop();
       return;
     }
@@ -285,7 +290,7 @@ static void bind_add(struct listen_hub_bind *b, int type, guint32 ip, guint16 po
 
   // Look for existing binds that should be merged.
   GList *n;
-  for(c=binds; !lb->ip4&&c; c=n) {
+  for(c=listen_binds; !lb->ip4&&c; c=n) {
     n = c->next;
     struct listen_bind *i = c->data;
     if(i->port != lb->port || i->type != lb->type)
@@ -298,15 +303,15 @@ static void bind_add(struct listen_hub_bind *b, int type, guint32 ip, guint16 po
     g_slist_free(i->hubs);
     // And remove this bind
     g_free(i);
-    binds = g_list_delete_link(binds, c);
+    listen_binds = g_list_delete_link(listen_binds, c);
   }
 
-  binds = g_list_prepend(binds, lb);
+  listen_binds = g_list_prepend(listen_binds, lb);
 }
 
 
 static void bind_create(struct listen_bind *b) {
-  g_debug("Listen: binding %s %s:%d", b->type == LBT_TCP ? "TCP" : b->type == LBT_UDP ? "UDP" : "TLS", ip4_unpack(b->ip4), b->port);
+  g_debug("Listen: binding %s %s:%d", LBT_STR(b->type), ip4_unpack(b->ip4), b->port);
   GError *err = NULL;
 
   // Get local address object
@@ -363,29 +368,29 @@ void listen_refresh() {
     // We only look at hubs on which we are active
     if(t->type != UIT_HUB || !var_get_bool(t->hub->id, VAR_active))
       continue;
-    // Add to binds_hub
+    // Add to listen_hub_binds
     struct listen_hub_bind *b = g_new0(struct listen_hub_bind, 1);
     b->hubid = t->hub->id;
     b->ip4 = ip4_pack(var_get(b->hubid, VAR_active_ip));
-    g_hash_table_insert(binds_hub, &b->hubid, b);
+    g_hash_table_insert(listen_hub_binds, &b->hubid, b);
     // And add the required binds for this hub (Due to the conflict resolution in binds_add(), this is O(n^2))
-    // Note: bind_add() can call listen_stop() on error, detect this on whether binds_hub is empty or not.
+    // Note: bind_add() can call listen_stop() on error, detect this on whether listen_hub_binds is empty or not.
     guint32 localip = ip4_pack(var_get(b->hubid, VAR_active_bind));
     bind_add(b, LBT_TCP, localip, var_get_int(b->hubid, VAR_active_port));
-    if(!g_hash_table_size(binds_hub))
+    if(!g_hash_table_size(listen_hub_binds))
       break;
     bind_add(b, LBT_UDP, localip, var_get_int(b->hubid, VAR_active_udp_port));
-    if(!g_hash_table_size(binds_hub))
+    if(!g_hash_table_size(listen_hub_binds))
       break;
     if(var_get_int(b->hubid, VAR_tls_policy) > VAR_TLSP_DISABLE) {
       bind_add(b, LBT_TLS, localip, var_get_int(b->hubid, VAR_active_tls_port));
-      if(!g_hash_table_size(binds_hub))
+      if(!g_hash_table_size(listen_hub_binds))
         break;
     }
   }
 
-  // Now walk through *binds and actually create the listen sockets
-  for(l=binds; l; binds ? (l=l->next) : (l=NULL))
+  // Now walk through *listen_binds and actually create the listen sockets
+  for(l=listen_binds; l; listen_binds ? (l=l->next) : (l=NULL))
     bind_create((struct listen_bind *)l->data);
 }
 

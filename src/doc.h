@@ -114,6 +114,9 @@ static const struct doc_cmd {
   "Kick a user from the hub. This command only works on NMDC hubs, and you need"
   " to be an OP to be able to use it."
 },
+{ "listen", NULL, "List currently opened ports.",
+  NULL,
+},
 { "me", "<message>", "Chat in third person.",
   "This allows you to talk in third person. Most clients will display your message as something like:\n\n"
   "  ** Nick is doing something\n\n"

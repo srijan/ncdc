@@ -1178,6 +1178,39 @@ static void c_unset_sug(char *args, char **sug)  { setunset_sug(FALSE, FALSE, ar
 static void c_hunset_sug(char *args, char **sug) { setunset_sug(FALSE, TRUE,  args, sug); }
 
 
+static void c_listen(char *args) {
+  if(args[0]) {
+    ui_m(NULL, 0, "This command does not accept any arguments.");
+    return;
+  }
+  // TODO: If we're currently passive because of an error, might want to give
+  // an overview of the configuration rather than this unhelpful "not active"
+  // message.
+  if(!listen_binds) {
+    ui_m(NULL, 0, "Not active on any hub - no listening sockets enabled.");
+    return;
+  }
+  ui_m(NULL, 0, "");
+  ui_m(NULL, 0, "Currently opened ports:");
+  // TODO: sort the listen_binds and ->hubs lists
+  GList *l;
+  for(l=listen_binds; l; l=l->next) {
+    struct listen_bind *b = l->data;
+    GString *h = g_string_new("");
+    GSList *n;
+    for(n=b->hubs; n; n=n->next) {
+      struct hub *hub = hub_global_byid(((struct listen_hub_bind *)n->data)->hubid);
+      if(hub) {
+        if(h->len > 0)
+          g_string_append(h, ", ");
+        g_string_append(h, hub->tab->name);
+      }
+    }
+    ui_mf(NULL, 0, " %s:%d (%s): %s", ip4_unpack(b->ip4), b->port, LBT_STR(b->type), h->str);
+    g_string_free(h, TRUE);
+  }
+  ui_m(NULL, 0, "");
+}
 
 
 
@@ -1197,6 +1230,7 @@ static struct cmd cmds[] = {
   { "hset",        c_hset,        c_hset_sug       },
   { "hunset",      c_hunset,      c_hunset_sug     },
   { "kick",        c_kick,        c_msg_sug        },
+  { "listen",      c_listen,      NULL             },
   { "me",          c_me,          c_say_sug        },
   { "msg",         c_msg,         c_msg_sug        },
   { "nick",        c_nick,        NULL             },

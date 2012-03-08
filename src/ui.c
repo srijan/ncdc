@@ -357,8 +357,11 @@ static void ui_hub_draw(struct ui_tab *tab) {
     mvaddstr(winrows-4, wincols-15, "Logging in...");
   else {
     char *addr = var_get(tab->hub->id, VAR_hubaddr);
-    char *tmp = g_strdup_printf("%s @ %s%s", tab->hub->nick, addr,
-      tab->hub->isop ? " (operator)" : tab->hub->isreg ? " (registered)" : "");
+    char *conn = !listen_hub_active(tab->hub->id) ? g_strdup("[passive]")
+      : g_strdup_printf("[active: %s]", ip4_unpack(listen_hub_ip(tab->hub->id)));
+    char *tmp = g_strdup_printf("%s @ %s%s %s", tab->hub->nick, addr,
+      tab->hub->isop ? " (operator)" : tab->hub->isreg ? " (registered)" : "", conn);
+    g_free(conn);
     mvaddstr(winrows-4, 0, tmp);
     g_free(tmp);
     int count = g_hash_table_size(tab->hub->users);

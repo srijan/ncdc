@@ -175,8 +175,6 @@ static gboolean s_hubinfo(guint64 hub, const char *key, const char *val, GError 
 
 static gboolean s_active_conf(guint64 hub, const char *key, const char *val, GError **err) {
   db_vars_set(hub, key, val);
-  if(!val && !hub && strcmp(key, "active_ip") == 0)
-    var_set_bool(0, VAR_active, FALSE);
   listen_refresh();
   hub_global_nfochange();
   return TRUE;
@@ -257,17 +255,6 @@ static void flags_sug(struct flag_option *o, const char *val, char **sug) {
 // "default" does not need to be a run-time constant, it will be evaluated at
 // initialization instead (after the database has been initialized). Setting
 // this to a function allows it to initialize other stuff as well.
-
-
-// active
-
-static gboolean s_active(guint64 hub, const char *key, const char *val, GError **err) {
-  if(bool_raw(val) && !var_get(hub, VAR_active_ip)) {
-    g_set_error(err, 1, 0, "No IP address set. Please use `/%sset active_ip <your_ip>' first.", hub ? "h" : "");
-    return FALSE;
-  }
-  return s_active_conf(hub, key, val, err);
-}
 
 
 // active_*port
@@ -832,7 +819,7 @@ struct var {
 
 // name               g h  format          parse            suggest        getraw        setraw           default/init
 #define VARS\
-  V(active,           1,1, f_bool,         p_bool,          su_bool,       NULL,         s_active,        "false")\
+  V(active,           1,1, f_bool,         p_bool,          su_bool,       NULL,         s_active_conf,   "false")\
   V(active_ip,        1,1, f_id,           p_ip,            su_old,        NULL,         s_active_conf,   NULL)\
   V(active_port,      1,1, f_int,          p_active_port,   NULL,          NULL,         s_active_conf,   NULL)\
   V(active_tls_port,  1,1, f_int,          p_active_port,   NULL,          g_active_tls, s_active_conf,   NULL)\

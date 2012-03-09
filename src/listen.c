@@ -48,7 +48,6 @@ struct listen_bind {
 struct listen_hub_bind {
   guint64 hubid;
   struct listen_bind *tcp, *udp, *tls;
-  guint32 ip4; // public IP (stored here to allow it to be different from the active_ip setting)
 };
 
 #endif
@@ -77,11 +76,6 @@ gboolean listen_hub_active(guint64 hub) {
 }
 
 // These all returns 0 if passive or disabled
-guint32 listen_hub_ip(guint64 hub) {
-  struct listen_hub_bind *b = g_hash_table_lookup(listen_hub_binds, &hub);
-  return b && b->tcp ? b->ip4 : 0;
-}
-
 guint16 listen_hub_tcp(guint64 hub) {
   struct listen_hub_bind *b = g_hash_table_lookup(listen_hub_binds, &hub);
   return b && b->tcp ? b->tcp->port : 0;
@@ -368,12 +362,11 @@ void listen_refresh() {
   for(l=ui_tabs; l; l=l->next) {
     struct ui_tab *t = l->data;
     // We only look at hubs on which we are active
-    if(t->type != UIT_HUB || !var_get_bool(t->hub->id, VAR_active))
+    if(t->type != UIT_HUB || !hub_ip4(t->hub) || !var_get_bool(t->hub->id, VAR_active))
       continue;
     // Add to listen_hub_binds
     struct listen_hub_bind *b = g_new0(struct listen_hub_bind, 1);
     b->hubid = t->hub->id;
-    b->ip4 = ip4_pack(var_get(b->hubid, VAR_active_ip));
     g_hash_table_insert(listen_hub_binds, &b->hubid, b);
     // And add the required binds for this hub (Due to the conflict resolution in binds_add(), this is O(n^2))
     // Note: bind_add() can call listen_stop() on error, detect this on whether listen_hub_binds is empty or not.

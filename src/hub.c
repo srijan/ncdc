@@ -78,6 +78,7 @@ struct hub {
   char *nick_hub;          // (NMDC) in hub encoding
   char *nick;              // UTF-8
   int sid;                 // (ADC) session ID
+  guint32 ip4;             // Our IP, as received from the hub
   gboolean nick_valid : 1; // TRUE is the above nick has also been validated (and we're properly logged in)
   gboolean isreg : 1;      // whether we used a password to login
   gboolean isop : 1;       // whether we're an OP or not
@@ -464,7 +465,7 @@ struct hub *hub_global_byid(guint64 id) {
 }
 
 
-// should be called when something changes that may affect our INF or $MyINFO
+// Should be called when something changes that may affect our INF or $MyINFO.
 void hub_global_nfochange() {
   GList *n;
   for(n=ui_tabs; n; n=n->next) {
@@ -472,6 +473,13 @@ void hub_global_nfochange() {
     if(t->type == UIT_HUB && t->hub->nick_valid)
       hub_send_nfo(t->hub);
   }
+}
+
+
+// Get the current active IP used for this hub. (If we're active)
+guint32 hub_ip4(struct hub *hub) {
+  guint32 conf = ip4_pack(var_get((hub)->id, VAR_active_ip));
+  return conf ? conf : hub->ip4;
 }
 
 
@@ -528,7 +536,7 @@ void hub_opencc(struct hub *hub, struct hub_user *u) {
       net_send(hub->net, c->str);
       g_string_free(c, TRUE);
     } else
-      net_sendf(hub->net, "$ConnectToMe %s %s:%d%s", u->name_hub, ip4_unpack(listen_hub_ip(hub->id)), port, usetls ? "S" : "");
+      net_sendf(hub->net, "$ConnectToMe %s %s:%d%s", u->name_hub, ip4_unpack(hub_ip4(hub)), port, usetls ? "S" : "");
 
   // we're passive, send RCM
   } else {
@@ -579,7 +587,7 @@ void hub_search(struct hub *hub, struct search_q *q) {
   } else {
     guint16 udpport = listen_hub_udp(hub->id);
     char *dest = udpport
-      ? g_strdup_printf("%s:%d", ip4_unpack(listen_hub_ip(hub->id)), udpport)
+      ? g_strdup_printf("%s:%d", ip4_unpack(hub_ip4(hub)), udpport)
       : g_strdup_printf("Hub:%s", hub->nick_hub);
     if(q->type == 9) {
       char tth[40] = {};
@@ -641,7 +649,7 @@ void hub_send_nfo(struct hub *hub) {
       h_norm++;
   }
   slots = var_get_int(0, VAR_slots);
-  ip4 = listen_hub_ip(hub->id);
+  ip4 = listen_hub_active(hub->id) ? hub_ip4(hub) : 0;
   udp_port = listen_hub_udp(hub->id);
   share = fl_local_list_size;
   sup_tls = !!listen_hub_tcp(hub->id);
@@ -773,6 +781,20 @@ void hub_msg(struct hub *hub, struct hub_user *user, const char *str, gboolean m
     msg = g_strdup_printf(me ? "<%s> /me %s" : "<%s> %s", hub->nick, str);
     ui_hub_msg(hub->tab, user, msg, dest);
     g_free(msg);
+  }
+}
+
+
+// Call this when the hub tells us our IP.
+static void setownip(struct hub *hub, guint32 ip) {
+  if(ip != hub->ip4) {
+    guint32 old = hub_ip4(hub);
+    hub->ip4 = ip;
+    // If we're supposed to be active, but weren't because of a missing IP.
+    if(!old && var_get_bool(hub->id, VAR_active)) {
+      listen_refresh();
+      hub_send_nfo(hub);
+    }
   }
 }
 
@@ -953,6 +975,7 @@ static void adc_handle(struct hub *hub, char *msg) {
         g_free(hub->hubname);
         hub->hubname = g_strdup(hname);
       }
+    // inf from user
     } else if(cmd.type == 'B') {
       struct hub_user *u = g_hash_table_lookup(hub->sessions, GINT_TO_POINTER(cmd.source));
       if(!u) {
@@ -981,6 +1004,8 @@ static void adc_handle(struct hub *hub, char *msg) {
             dl_user_join(0);
           hub->nick_valid = TRUE;
           hub->joincomplete = TRUE;
+          // This means we also have an IP, probably
+          setownip(hub, u->ip4);
         }
       }
     }
@@ -1391,6 +1416,9 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
         u->ip4 = new;
         ui_hub_userchange(hub->tab, UIHUB_UC_NFO, u);
       }
+      // Our own IP, configure active mode
+      if(strcmp(*cur, hub->nick_hub) == 0)
+        setownip(hub, new);
     }
     g_strfreev(list);
   }
@@ -1487,7 +1515,7 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
       guint16 tlsport = listen_hub_tls(hub->id);
       int usetls = u->hastls && tlsport && var_get_int(hub->id, VAR_tls_policy) == VAR_TLSP_PREFER;
       int port = usetls ? tlsport : listen_hub_tcp(hub->id);
-      net_sendf(hub->net, "$ConnectToMe %s %s:%d%s", other, ip4_unpack(listen_hub_ip(hub->id)),
+      net_sendf(hub->net, "$ConnectToMe %s %s:%d%s", other, ip4_unpack(hub_ip4(hub)),
         port, usetls ? "S" : "");
       cc_expect_add(hub, u, port, NULL, FALSE);
     } else
@@ -1507,7 +1535,7 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
     char *query = g_match_info_fetch(nfo, 6);
     char test[40] = {};
     if(listen_hub_active(hub->id))
-      g_snprintf(test, 40, "%s:%d", ip4_unpack(listen_hub_ip(hub->id)), listen_hub_udp(hub->id));
+      g_snprintf(test, 40, "%s:%d", ip4_unpack(hub_ip4(hub)), listen_hub_udp(hub->id));
     if(strncmp(from, "Hub:", 4) == 0 ? strcmp(from+4, hub->nick_hub) != 0 : strcmp(from, test) != 0)
       nmdc_search(hub, from, sizerestrict[0] == 'F' ? -2 : ismax[0] == 'T' ? -1 : 1, g_ascii_strtoull(size, NULL, 10), type[0]-'0', query);
     g_free(from);
@@ -1789,7 +1817,7 @@ void hub_disconnect(struct hub *hub, gboolean recon) {
   g_free(hub->hubname_hub);  hub->hubname_hub = NULL;
   hub->nick_valid = hub->isreg = hub->isop = hub->received_first =
     hub->joincomplete =  hub->sharecount = hub->sharesize =
-    hub->supports_nogetinfo = hub->state =
+    hub->supports_nogetinfo = hub->state = hub->ip4 =
     hub->nfo_h_norm = hub->nfo_h_reg = hub->nfo_h_op = 0;
   if(!recon)
     ui_m(hub->tab, 0, "Disconnected.");

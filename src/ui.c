@@ -358,7 +358,7 @@ static void ui_hub_draw(struct ui_tab *tab) {
   else {
     char *addr = var_get(tab->hub->id, VAR_hubaddr);
     char *conn = !listen_hub_active(tab->hub->id) ? g_strdup("[passive]")
-      : g_strdup_printf("[active: %s]", ip4_unpack(listen_hub_ip(tab->hub->id)));
+      : g_strdup_printf("[active: %s]", ip4_unpack(hub_ip4(tab->hub)));
     char *tmp = g_strdup_printf("%s @ %s%s %s", tab->hub->nick, addr,
       tab->hub->isop ? " (operator)" : tab->hub->isreg ? " (registered)" : "", conn);
     g_free(conn);

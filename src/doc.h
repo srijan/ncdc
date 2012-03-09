@@ -257,14 +257,17 @@ static const struct doc_set {
 } doc_sets[] = {
 
 { "active", 1, "<boolean>",
-  "Enables or disables active mode. Make sure to set `active_ip' before"
-  " enabling active mode."
+  "Enables or disables active mode. You may have to configure your router"
+  " and/or firewall for this to work, see the `active_ip' and `active_port'"
+  " settings for more information."
 },
 { "active_ip", 1, "<string>",
-  "Your public IP address for use in active mode. It is important that other"
-  " clients can reach you using this IP address. If you connect to a hub on the"
-  " internet, this should be your internet (WAN) IP. Likewise, if you connect"
-  " to a hub on your LAN, this should be your LAN IP."
+  "Your public IP address for use in active mode. If this is not set, ncdc will"
+  " try to automatically get your IP address from the hub. If you do set this"
+  " manually, it is important that other clients can reach you using this IP"
+  " address. If you connect to a hub on the internet, this should be your"
+  " internet (WAN) IP. Likewise, if you connect to a hub on your LAN, this"
+  " should be your LAN IP."
 },
 { "active_port", 1, "<integer>",
   "The listen port for incoming connections in active mode. Set to `0' to"

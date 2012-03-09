@@ -530,7 +530,13 @@ static void c_share(char *args) {
     ui_m(NULL, 0, "You have already shared a directory with that name.");
   else {
     char *path = path_expand(second);
-    if(!path)
+    char *tmp;
+    for(tmp = first; *tmp; tmp++)
+      if(*tmp == '/' || *tmp == '\\')
+        break;
+    if(*tmp)
+      ui_m(NULL, 0, "Invalid character in share name.");
+    else if(!path)
       ui_mf(NULL, 0, "Error obtaining absolute path: %s", g_strerror(errno));
     else if(!g_file_test(path, G_FILE_TEST_IS_DIR))
       ui_m(NULL, 0, "Not a directory.");

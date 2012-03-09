@@ -430,8 +430,11 @@ static const struct doc_set {
   " setting."
 },
 { "local_address", 1, "<string>",
-  "IP address to bind to in active mode. When unset, ncdc will bind to all"
-  " interfaces."
+  "Specifies the address of the local network interface to use for connecting"
+  " to the outside and for accepting incoming connections in active mode. When"
+  " unset, ncdc will use the default gateway interface to connect to the outside"
+  " world, and will bind to all interfaces (address 0.0.0.0) for incoming"
+  " connections in active mode."
 },
 { "log_debug", 0, "<boolean>",
   "Log debug messages to stderr.log in the session directory. It is highly"

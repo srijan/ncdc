@@ -1417,16 +1417,16 @@ static void handle_connect(struct net *n) {
 }
 
 
-void cc_nmdc_connect(struct cc *cc, const char *addr, gboolean tls) {
+void cc_nmdc_connect(struct cc *cc, const char *addr, const char *laddr, gboolean tls) {
   g_return_if_fail(cc->state == CCS_CONN);
   g_return_if_fail(!tls || have_tls_support);
   strncpy(cc->remoteaddr, addr, 23);
-  net_connect(cc->net, addr, 0, tls, handle_connect);
+  net_connect(cc->net, addr, laddr, 0, tls, handle_connect);
   g_clear_error(&(cc->err));
 }
 
 
-void cc_adc_connect(struct cc *cc, struct hub_user *u, unsigned short port, gboolean tls, char *token) {
+void cc_adc_connect(struct cc *cc, struct hub_user *u, const char *laddr, unsigned short port, gboolean tls, char *token) {
   g_return_if_fail(cc->state == CCS_CONN);
   g_return_if_fail(cc->hub);
   g_return_if_fail(u && u->active && u->ip4);
@@ -1457,7 +1457,7 @@ void cc_adc_connect(struct cc *cc, struct hub_user *u, unsigned short port, gboo
   if(!cc->token)
     return;
   // connect
-  net_connect(cc->net, cc->remoteaddr, 0, tls, handle_connect);
+  net_connect(cc->net, cc->remoteaddr, laddr, 0, tls, handle_connect);
   g_clear_error(&(cc->err));
 }
 

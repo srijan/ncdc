@@ -67,6 +67,7 @@ struct net {
   time_t conn_wait;
   unsigned short conn_defport;
   char *conn_addr;
+  char *conn_laddr;
 
   // Message termination character. ([0] = character, [1] = 0)
   char eom[2];
@@ -574,22 +575,34 @@ static gboolean real_connect(gpointer dat) {
   struct net *n = dat;
   if(n->connecting) {
     GSocketClient *sc = g_socket_client_new();
+
+    // Set local address
+    GInetAddress *laddr = n->conn_laddr ? g_inet_address_new_from_string(n->conn_laddr) : NULL;
+    GSocketAddress *lsaddr = laddr ? g_inet_socket_address_new(laddr, 0) : NULL;
+    g_socket_client_set_local_address(sc, lsaddr);
+    if(laddr)
+      g_object_unref(laddr);
+    if(lsaddr)
+      g_object_unref(lsaddr);
+
     // set a timeout on the connect, regardless of the value of keepalive
 #if TIMEOUT_SUPPORT
     g_socket_client_set_timeout(sc, 30);
 #endif
+
     g_socket_client_connect_to_host_async(sc, n->conn_addr, n->conn_defport, n->conn_can, handle_connect, n);
     net_ref(n);
     time(&n->timeout_last);
   }
   g_free(n->conn_addr);
-  n->conn_addr = NULL;
+  g_free(n->conn_laddr);
+  n->conn_addr = n->conn_laddr = NULL;
   net_unref(n);
   return FALSE;
 }
 
 
-void net_connect(struct net *n, const char *addr, unsigned short defport, gboolean tls, void (*cb)(struct net *)) {
+void net_connect(struct net *n, const char *addr, const char *laddr, unsigned short defport, gboolean tls, void (*cb)(struct net *)) {
   g_return_if_fail(!n->conn && !n->connecting);
   n->cb_con = cb;
   n->tls = tls;
@@ -607,6 +620,7 @@ void net_connect(struct net *n, const char *addr, unsigned short defport, gboole
 
   time(&n->timeout_last);
   n->conn_addr = g_strdup(addr);
+  n->conn_laddr = g_strdup(laddr);
   n->conn_defport = defport;
   n->connecting = TRUE;
   net_ref(n);

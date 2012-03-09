@@ -1054,7 +1054,7 @@ static void adc_handle(struct hub *hub, char *msg) {
         net_send(hub->net, r->str);
         g_string_free(r, TRUE);
       } else
-        cc_adc_connect(cc_create(hub), u, port, is_adcs_proto(cmd.argv[0]), cmd.argv[2]);
+        cc_adc_connect(cc_create(hub), u, var_get(hub->id, VAR_local_address), port, is_adcs_proto(cmd.argv[0]), cmd.argv[2]);
     }
     break;
 
@@ -1464,7 +1464,7 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
     if(strcmp(me, hub->nick_hub) != 0)
       g_warning("Received a $ConnectToMe for someone else (to %s from %s)", me, addr);
     else
-      cc_nmdc_connect(cc_create(hub), addr, *tls ? TRUE : FALSE);
+      cc_nmdc_connect(cc_create(hub), addr, var_get(hub->id, VAR_local_address), *tls ? TRUE : FALSE);
     g_free(me);
     g_free(addr);
     g_free(tls);
@@ -1758,7 +1758,7 @@ void hub_connect(struct hub *hub) {
 #if TLS_SUPPORT
     hub->net->conn_accept_cert = handle_accept_cert;
 #endif
-    net_connect(hub->net, addr, 411, tls, handle_connect);
+    net_connect(hub->net, addr, var_get(hub->id, VAR_local_address), 411, tls, handle_connect);
   }
 
 #if TLS_SUPPORT

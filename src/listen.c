@@ -343,7 +343,9 @@ static void bind_create(struct listen_bind *b) {
     ui_mf(ui_main, UIP_MED, "Error binding to %s %s:%d, %s. Switching to passive mode.",
       b->type == LBT_UDP ? "UDP" : "TCP", ip4_unpack(b->ip4), b->port, err->message);
     g_error_free(err);
+    g_object_unref(s);
     listen_stop();
+    return;
   }
   b->sock = s;
 

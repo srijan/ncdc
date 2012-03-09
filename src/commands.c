@@ -1263,8 +1263,9 @@ static struct cmd cmds[] = {
 
 void cmd_handle(char *ostr) {
   // special case: ignore empty commands
+  if(strspn(ostr, " \t") == strlen(ostr))
+    return;
   char *str = g_strdup(ostr);
-  g_strstrip(str);
   if(!str || !str[0]) {
     g_free(str);
     return;
@@ -1284,6 +1285,10 @@ void cmd_handle(char *ostr) {
     cmd = str+1;
     args = sep ? sep+1 : "";
   }
+
+  // Strip whitespace around the argument, unless this is the /say command
+  if(strcmp(cmd, "say") != 0)
+    g_strstrip(args);
 
   // execute command when found, generate an error otherwise
   struct cmd *c = getcmd(cmd);

@@ -833,7 +833,6 @@ struct var {
 // name               g h  format          parse            suggest        getraw        setraw           default/init
 #define VARS\
   V(active,           1,1, f_bool,         p_bool,          su_bool,       NULL,         s_active,        "false")\
-  V(active_bind,      1,1, f_id,           p_ip,            su_old,        NULL,         s_active_conf,   NULL)\
   V(active_ip,        1,1, f_id,           p_ip,            su_old,        NULL,         s_active_conf,   NULL)\
   V(active_port,      1,1, f_int,          p_active_port,   NULL,          NULL,         s_active_conf,   NULL)\
   V(active_tls_port,  1,1, f_int,          p_active_port,   NULL,          g_active_tls, s_active_conf,   NULL)\
@@ -861,6 +860,7 @@ struct var {
   V(hubkp,            0,0, NULL,           NULL,            NULL,          NULL,         NULL,            NULL)\
   V(hubname,          0,1, f_id,           p_hubname,       su_old,        NULL,         s_hubname,       NULL)\
   V(incoming_dir,     1,0, f_id,           p_id,            su_path,       NULL,         s_dl_inc_dir,    i_dl_inc_dir(FALSE))\
+  V(local_address,    1,1, f_id,           p_ip,            su_old,        NULL,         s_active_conf,   db_vars_get(0, "active_bind"))\
   V(log_debug,        1,0, f_bool,         p_bool,          su_bool,       NULL,         s_log_debug,     i_log_debug())\
   V(log_downloads,    1,0, f_bool,         p_bool,          su_bool,       NULL,         NULL,            "true")\
   V(log_uploads,      1,0, f_bool,         p_bool,          su_bool,       NULL,         NULL,            "true")\

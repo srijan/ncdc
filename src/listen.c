@@ -375,7 +375,7 @@ void listen_refresh() {
     g_hash_table_insert(listen_hub_binds, &b->hubid, b);
     // And add the required binds for this hub (Due to the conflict resolution in binds_add(), this is O(n^2))
     // Note: bind_add() can call listen_stop() on error, detect this on whether listen_hub_binds is empty or not.
-    guint32 localip = ip4_pack(var_get(b->hubid, VAR_active_bind));
+    guint32 localip = ip4_pack(var_get(b->hubid, VAR_local_address));
     bind_add(b, LBT_TCP, localip, var_get_int(b->hubid, VAR_active_port));
     if(!g_hash_table_size(listen_hub_binds))
       break;

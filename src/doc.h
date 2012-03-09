@@ -260,10 +260,6 @@ static const struct doc_set {
   "Enables or disables active mode. Make sure to set `active_ip' before"
   " enabling active mode."
 },
-{ "active_bind", 1, "<string>",
-  "IP address to bind to in active mode. When unset, ncdc will bind to all"
-  " interfaces."
-},
 { "active_ip", 1, "<string>",
   "Your public IP address for use in active mode. It is important that other"
   " clients can reach you using this IP address. If you connect to a hub on the"
@@ -432,6 +428,10 @@ static const struct doc_set {
   "The directory where incomplete downloads are stored. This setting can only"
   " be changed when the download queue is empty. Also see the download_dir"
   " setting."
+},
+{ "local_address", 1, "<string>",
+  "IP address to bind to in active mode. When unset, ncdc will bind to all"
+  " interfaces."
 },
 { "log_debug", 0, "<boolean>",
   "Log debug messages to stderr.log in the session directory. It is highly"

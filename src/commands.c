@@ -1283,7 +1283,7 @@ void cmd_handle(char *ostr) {
     if(sep)
       *sep = 0;
     cmd = str+1;
-    args = sep ? sep+1 : "";
+    args = sep ? sep+1 : str+strlen(str);
   }
 
   // Strip whitespace around the argument, unless this is the /say command

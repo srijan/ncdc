@@ -104,7 +104,8 @@ static const struct doc_cmd {
 },
 { "hset", "[<key> [<value>]]", "Get or set per-hub configuration variables.",
   "Get or set per-hub configuration variables. Works equivalent to the `/set'"
-  " command, but can only be used on hub tabs."
+  " command, but can only be used on hub tabs. Use `/hunset' to reset a"
+  " variable back to its global value."
 },
 { "hunset", "[<key>]", "Unset a per-hub configuration variable.",
   "This command can be used to reset a per-hub configuration variable back to"
@@ -200,9 +201,10 @@ static const struct doc_cmd {
   " list of all global settings and their current value. Glob-style pattern"
   " matching on the settings is also possible. Use, for example, `/set color*'"
   " to list all color-related settings.\n\n"
-  "See the `/hset' command to manage configuration on a per-hub basis. Changes"
-  " to the settings are automatically saved to the database, and will not be lost"
-  " after restarting ncdc.\n\n"
+  "See the `/unset' command to change a setting back to its default, and the"
+  " `/hset' command to manage configuration on a per-hub basis. Changes to the"
+  " settings are automatically saved to the database, and will not be lost after"
+  " restarting ncdc.\n\n"
   "To get information on a particular setting, use `/help set <key>'."
 },
 { "share", "[<name> <path>]", "Add a directory to your share.",

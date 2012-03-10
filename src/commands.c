@@ -1011,12 +1011,13 @@ c_search_clean:
 
 
 #define print_var(hub, hubname, var) do {\
+    gboolean glob = hub && vars[var].global && !(vars[var].getraw ? vars[var].getraw(hub, vars[var].name) : db_vars_get(hub, vars[var].name));\
     char *raw = var_get(hub, var);\
     if(!raw)\
       ui_mf(NULL, 0, "%s.%s is not set.", hubname, vars[var].name);\
     else {\
       char *fmt = vars[var].format(raw);\
-      ui_mf(NULL, 0, "%s.%s = %s", hubname, vars[var].name, fmt);\
+      ui_mf(NULL, 0, "%s.%s = %s%s", hubname, vars[var].name, fmt, glob?" (global)":"");\
       g_free(fmt);\
     }\
   } while(0)

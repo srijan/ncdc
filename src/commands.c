@@ -1085,6 +1085,10 @@ static void sethset(gboolean h, char *args) {
       val = NULL;
   }
 
+  // Remove hubname. from the key
+  if(strncmp(key, hubname, strlen(hubname)) == 0 && key[strlen(hubname)] == '.')
+    key += strlen(hubname)+1;
+
   // Get var, optionally list, and check whether it can be used in this context
   int var = *key ? vars_byname(key) : -1;
   if(var < 0 && !val && listsettings(hub, hubname, key))

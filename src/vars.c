@@ -276,7 +276,7 @@ static char *g_active_tls(guint64 hub, const char *key) {
     g_snprintf(buf, 20, "%d", (int)int_raw(r)+1);
     return buf;
   } else
-    return "0";
+    return NULL;
 }
 
 static char *g_active_udp(guint64 hub, const char *key) {

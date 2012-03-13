@@ -652,7 +652,7 @@ void hub_send_nfo(struct hub *hub) {
   ip4 = listen_hub_active(hub->id) ? hub_ip4(hub) : 0;
   udp_port = listen_hub_udp(hub->id);
   share = fl_local_list_size;
-  sup_tls = !!listen_hub_tls(hub->id);
+  sup_tls = var_get_int(hub->id, VAR_tls_policy) > VAR_TLSP_DISABLE ? TRUE : FALSE;
 
   // check whether we need to make any further effort
   if(hub->nick_valid && streq(desc) && streq(conn) && streq(mail) && eq(slots)

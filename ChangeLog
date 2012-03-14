@@ -1,3 +1,19 @@
+1.9 - 2012-03-14
+	- Allow all 'active_' settings to be changed on a per-hub basis
+	- Allow 'active_ip' to be unset and automatically get IP from hub
+	- Added 'active_udp_port' and 'active_tcp_port' settings
+	- Renamed 'active_bind' to 'local_address' and use it for outgoing
+	  connections as well
+	- Display connection settings in hub info bar
+	- Added '/listen' command to display currently used ports
+	- Don't listen on TLS port when tls_policy is disabled
+	- Added 'disconnect_offline' setting
+	- Display '(global)' indicator when showing /hset variables
+	- Don't strip whitespace from /say
+	- Don't allow directory separator as /share name
+	- Allow 'global.' and '#hubname.' prefix for /set keys
+	- Fix display of long IP addresses on user list
+
 1.8 - 2012-02-13
 	- Added bandwidth limiting (upload_rate and download_rate settings)
 	- Added hash speed limiting (hash_rate setting)

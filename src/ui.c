@@ -27,6 +27,8 @@
 #include "ncdc.h"
 #include <math.h>
 #include <unistd.h>
+#include <libnotify/notify.h>
+#include <string.h>
 
 
 #if INTERFACE
@@ -444,6 +446,17 @@ void ui_hub_msg(struct ui_tab *tab, struct hub_user *user, const char *msg, int 
     ui_tab_open(t, FALSE, tab);
   }
   ui_msg_msg(t, msg, replyto);
+
+  // Show notification for PMs.
+  if(t->type == UIT_MSG) {
+    show_system_notification(user->name,&msg[strlen(user->name)+2]);
+  }
+}
+
+void show_system_notification(const char * from, const char * msg) {
+  notify_init("ncdc");
+  NotifyNotification * nMsg = notify_notification_new (from, msg, "mail-message-new");
+  notify_notification_show (nMsg, NULL);
 }
 
 

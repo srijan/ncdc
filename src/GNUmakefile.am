@@ -20,7 +20,7 @@ ncdc_SOURCES =\
 
 auto_headers = $(ncdc_SOURCES:.c=.h)
 noinst_HEADERS = doc.h ncdc.h ${auto_headers}
-ncdc_CFLAGS = $(GLIB_CFLAGS) $(GIO_CFLAGS) $(LIBXML_CFLAGS) $(SQLITE_CFLAGS)
+ncdc_CFLAGS = $(GLIB_CFLAGS) $(GIO_CFLAGS) $(LIBXML_CFLAGS) $(SQLITE_CFLAGS) `pkg-config --cflags --libs libnotify`
 ncdc_LDADD = -lm $(NCURSES_LIBS) $(BZ2_LIBS) $(GLIB_LIBS) $(GIO_LIBS) $(LIBXML_LIBS) $(SQLITE_LIBS)
 
 # only clean header files when makeheaders is installed

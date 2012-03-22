@@ -26,6 +26,7 @@
 
 #include "ncdc.h"
 #include <stdlib.h>
+#include <string.h>
 
 
 #if INTERFACE
@@ -1130,9 +1131,14 @@ static void adc_handle(struct hub *hub, char *msg) {
         g_warning("Message from someone not on this hub. (%s: %s)", net_remoteaddr(hub->net), msg);
       else {
         char *m = g_strdup_printf(me ? "** %s %s" : "<%s> %s", cmd.type == 'I' ? "hub" : u->name, cmd.argv[0]);
-        if(cmd.type == 'E' || cmd.type == 'D' || cmd.type == 'F')
+        if(cmd.type == 'E' || cmd.type == 'D' || cmd.type == 'F') {
           ui_hub_msg(hub->tab, cmd.source == hub->sid ? d : u, m,
             pm && strlen(pm) == 4 && ADC_DFCC(pm) != cmd.source ? ADC_DFCC(pm) : 0);
+          // untested code
+          if(cmd.source == hub->sid) {
+            show_system_notification(u->name,&m[strlen(u->name)+2]);
+          }
+        }
         else
           ui_m(hub->tab, UIM_CHAT|UIP_MED, m);
         g_free(m);
@@ -1465,6 +1471,7 @@ static void nmdc_handle(struct hub *hub, char *cmd) {
     else {
       char *msge = nmdc_unescape_and_decode(hub, msg);
       ui_hub_msg(hub->tab, u, msge, 0);
+      show_system_notification(u->name,&msge[strlen(u->name)+2]);
       g_free(msge);
     }
     g_free(from);
